@@ -41,6 +41,7 @@ import argparse
 import datetime as dtm
 import math
 import os
+import queue
 import random
 import re
 import select
@@ -61,12 +62,16 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import zlib
 
+# plik ustawień; w add-onie Home Assistant WLED_CONFIG=/data/wled_clocks.json (przetrwa restart i aktualizację)
+CONFIG = os.environ.get("WLED_CONFIG") or os.path.join(os.path.expanduser("~"), ".config", "wled_clocks.json")
+
+
 def _start_width():
     """Szerokość panelu: zmienna WLED_W albo zapisana konfiguracja (np. 60, gdy działa połowa panelu)."""
     if os.environ.get("WLED_W"):
         return int(os.environ["WLED_W"])
     try:
-        with open(os.path.join(os.path.expanduser("~"), ".config", "wled_clocks.json"), encoding="utf-8") as fh:
+        with open(CONFIG, encoding="utf-8") as fh:
             return int(json.load(fh).get("width", 120))
     except (OSError, ValueError, TypeError):
         return 120
@@ -85,7 +90,6 @@ PANEL = {"bri": 255, "host": "", "levels": None, "levels_bri": None, "pe": 1 / 2
          "mirror": False}  # mirror – obraz odbity w poziomie (np. gdy panel ogląda się przez kamerkę)
 # Prąd: WS2812 ok. 55 mA na diodę przy pełnej bieli (ok. 18 mA na kanał) + ok. 0,6 mA spoczynkowo, nawet zgaszona.
 POWER = {"psu": 2000, "ma": 55.0, "idle": 0.6}  # psu = budżet w mA (0 = bez limitu)
-CONFIG = os.path.join(os.path.expanduser("~"), ".config", "wled_clocks.json")
 
 # ---------------------------------------------------------------- czcionki
 BIG = {  # 6x10, kreska 2 px
@@ -5017,9 +5021,12 @@ def send_ddp(sock, host, data, seq):
         sock.sendto(hdr + chunk, (host, 4048))
 
 
-# ================================================================ TUI
-class Tui:
-    """Interaktywny panel w terminalu: podgląd na żywo (1 dioda = 1 kropka), lista efektów i ustawienia."""
+# ================================================================ silnik (wspólny dla TUI i panelu WWW)
+class Engine:
+    """Stan i logika sterowania: wybrany efekt, cykl, ustawienia, czas, wysyłanie klatek.
+    Bez terminala – TUI (klasa Tui) i serwer WWW to tylko „fronty” do tego samego stanu.
+    Inne wątki (serwer WWW) nie ruszają stanu bezpośrednio, tylko wrzucają polecenia do self.cmds;
+    tick() wykonuje je na początku klatki."""
 
     NAMES = list(CLOCKS) + ["cykl"]
     SPEEDS = [1, 10, 60, 600, 3600]
@@ -5052,12 +5059,14 @@ class Tui:
             self.offset = real.replace(hour=hh, minute=mm, second=ss[0] if ss else 0, microsecond=0) - real
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.seq, self.pkts, self.err = 1, 0, ""
-        self.edit = None          # tekst wpisywanego hosta albo None
-        self.search = None        # tekst wyszukiwania (/) albo None
-        self.focus, self.scur, self.acur, self.afilt = "list", 0, 0, ""
         self.note, self.note_until = "", 0.0
         self.fps_ema, self.cost_ema = float(self.fps), 0.0
-        self.resized = True
+        self.resized = True       # TUI: przerysuj cały ekran
+        self.t, self.frame, self.last = 0.0, None, time.monotonic()
+        self.cmds = queue.Queue()  # polecenia z innych wątków: funkcje bez argumentów
+        self.dirty_at = None       # kiedy coś zmieniono poleceniem (autozapis w trybie bez terminala)
+        self.view, self.snap = None, None  # podgląd i stan dla panelu WWW (liczone w tick(), gdy ktoś patrzy)
+        self.view_until, self.view_next, self.snap_next = 0.0, 0.0, 0.0
         self.limiter = PowerLimiter()
         self.new_width = None
         self._last_st = None
@@ -5108,13 +5117,10 @@ class Tui:
             self.resized = True
 
         def s_send(d):
-            if self.host:
-                self.sending = not self.sending
-            else:
-                self.edit = ""
+            self.toggle_send()
 
         def s_host(d):
-            self.edit = self.host
+            self.ask_host()
 
         def s_levels(d):
             opts = [None, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 48, 64]
@@ -5140,7 +5146,7 @@ class Tui:
             PANEL["mirror"] = not PANEL["mirror"]
 
         def s_lacts(d):
-            self.focus, self.acur, self.afilt = "acts", 0, ""
+            self.open_acts()
 
         def s_lfreq(d):
             LUDZIK["freq"] = max(0, min(len(LUDZIK_FREQ) - 1, LUDZIK["freq"] + d))
@@ -5251,6 +5257,182 @@ class Tui:
     def say(self, msg):
         self.note, self.note_until = msg, time.monotonic() + 3
 
+    @staticmethod
+    def doc(name):
+        return ((CLOCKS[name] if name in CLOCKS else Cycle).__doc__ or "").strip()
+
+    # ---------------------------------------------------------- akcje (klawisze TUI i polecenia z WWW)
+    def ask_host(self):
+        """Ustawienie „host”: TUI otwiera pole edycji, panel WWW ma własne pole."""
+
+    def open_acts(self):
+        """Ustawienie „ludzik zajęcia”: TUI otwiera podlistę, panel WWW ma własną."""
+
+    def toggle_send(self):
+        if self.host:
+            self.sending = not self.sending
+        else:
+            self.say("najpierw podaj host WLED")
+            self.ask_host()
+
+    def set_host(self, host):
+        self.host = host.strip()
+        self.sending = bool(self.host)
+        self.err = ""
+        self.say(f"host: {self.host or '(brak)'}")
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+
+    def toggle_shuffle(self):
+        self.cycle.shuffle = not self.cycle.shuffle
+        self.say("cykl: " + ("losowa kolejność" if self.cycle.shuffle else "po kolei"))
+
+    def toggle_mirror(self):
+        PANEL["mirror"] = not PANEL["mirror"]
+        self.say("odbicie lustrzane włączone – obraz odwrócony w poziomie (do kamerki)" if PANEL["mirror"]
+                 else "odbicie lustrzane wyłączone")
+
+    def override_off(self):
+        self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")
+        self.lor = 0
+        self.say("WLED znów pokazuje obraz ze skryptu")
+
+    def every_step(self, d):
+        self.cycle.every = max(10, self.cycle.every + 10 * d)
+
+    def speed_step(self, d):
+        self.speed_i = max(0, min(len(self.SPEEDS) - 1, self.speed_i + d))
+
+    def real_time(self):
+        self.offset, self.speed_i = dtm.timedelta(), self.SPEEDS.index(1)
+        self.say("czas = prawdziwa godzina")
+
+    def setting(self, name, d):
+        for n, _, change, _ in self.settings:
+            if n == name:
+                change(d)
+                return
+        raise KeyError(name)
+
+    # ---------------------------------------------------------- pętla
+    def send(self, data):
+        if not (self.sending and self.host):
+            return
+        try:
+            send_ddp(self.sock, self.host, data, self.seq)
+            self.seq = self.seq % 15 + 1
+            self.pkts += 1
+            self.err = ""
+        except OSError as e:
+            self.err = e.strerror or str(e)
+
+    def run_cmds(self):
+        while True:
+            try:
+                fn = self.cmds.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                fn()
+            except Exception as e:  # noqa: BLE001
+                self.say(f"błąd polecenia: {e}")
+            self.dirty_at = self.dirty_at or time.monotonic()
+
+    def tick(self):
+        """Jedna klatka: polecenia, czas, stan WLED, render, ogranicznik prądu, wysłanie. -> (klatka po ograniczniku, czas)"""
+        self.run_cmds()
+        m = time.monotonic()
+        rdt, self.last = m - self.last, m
+        self.fps_ema += ((1 / rdt if rdt > 0 else self.fps) - self.fps_ema) * 0.1
+        if self.paused:
+            self.offset -= dtm.timedelta(seconds=rdt)          # zegar stoi
+        else:
+            self.offset += dtm.timedelta(seconds=rdt * (self.speed - 1))
+        now = dtm.datetime.now().astimezone() + self.offset
+        ANIM.update(fps=self.fps, tempo=self.tempo, text=self.text)
+        if self.host:
+            PANEL["host"] = self.host
+            st = NET.get("wled")
+            if st and "bri" in st and st is not self._last_st:
+                self._last_st = st
+                PANEL["bri"] = st["bri"]
+                self.lor = st.get("lor", 0)
+        c0 = time.monotonic()
+        if self.frame is None or not self.paused:
+            # stały krok animacji = równe ruchy w każdej klatce (bez szarpania przy wahaniach zegara)
+            dt = self.tempo / self.fps
+            self.t += dt
+            self.frame = self.render(now, self.t, dt)
+        out, data = self.limiter.apply(self.frame, 1 / self.fps)
+        name = self.cycle.current if self.mode == "cykl" else self.mode
+        pk = self.peak.get(name)
+        if not pk or pk[1] != PANEL["bri"] or self.limiter.raw > pk[0]:
+            self.peak[name] = [round(self.limiter.raw), PANEL["bri"]]
+        self.send(data)
+        self.cost_ema += (time.monotonic() - c0 - self.cost_ema) * 0.1
+        if m < self.view_until:      # ktoś ogląda panel WWW
+            if m >= self.view_next:
+                self.view_next = m + 0.1
+                self.view = bytes(v for row in panel_view(out.rgb_rows()) for c in row for v in c)
+            if m >= self.snap_next:
+                self.snap_next = m + 0.5
+                self.snap = self.snapshot(now)
+        return out, now
+
+    def snapshot(self, now):
+        """Stan do panelu WWW (tylko typy JSON)."""
+        return {
+            "w": W, "h": H, "mode": self.mode, "current": self.cycle.current, "paused": self.paused,
+            "sending": self.sending, "host": self.host, "lor": self.lor, "mirror": PANEL["mirror"],
+            "time": now.strftime("%H:%M:%S"), "fake_time": bool(self.offset) or self.speed != 1,
+            "settings": [{"name": n, "value": val(), "hint": self.text_step() if n == "tempo tekstu" else hint}
+                         for n, val, _, hint in self.settings],
+            "heavy": [n for n in CLOCKS if self.heavy(n)],
+            "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS},
+            "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
+                      "psu": POWER["psu"]},
+            "bri": PANEL["bri"], "levels": panel_levels(),
+            "fps": round(self.fps_ema, 1), "fps_set": self.fps, "render_ms": round(self.cost_ema * 1000, 1),
+            "pkts": self.pkts, "err": self.err, "net": NET.status(),
+            "note": self.note if time.monotonic() < self.note_until else "",
+        }
+
+    def run_headless(self):
+        """Pętla bez terminala (panel WWW, add-on HA): klatki w rytmie fps, autozapis ustawień."""
+        nxt = self.last = time.monotonic()
+        try:
+            while self.running:
+                self.tick()
+                if self.dirty_at and time.monotonic() - self.dirty_at > 5:
+                    self.dirty_at = None
+                    self.save()
+                nxt += 1 / self.fps
+                if nxt < time.monotonic():      # spóźnienie: nie nadrabiamy serią klatek
+                    nxt = time.monotonic()
+                time.sleep(max(0.0, nxt - time.monotonic()))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.save()
+
+
+# ================================================================ TUI
+class Tui(Engine):
+    """Interaktywny panel w terminalu: podgląd na żywo (1 dioda = 1 kropka), lista efektów i ustawienia."""
+
+    def __init__(self, a, cfg):
+        super().__init__(a, cfg)
+        self.edit = None          # tekst wpisywanego hosta albo None
+        self.search = None        # tekst wyszukiwania (/) albo None
+        self.focus, self.scur, self.acur, self.afilt = "list", 0, 0, ""
+
+    def ask_host(self):
+        self.edit = self.host
+
+    def open_acts(self):
+        self.focus, self.acur, self.afilt = "acts", 0, ""
+
     # ---------------------------------------------------------- klawisze
     @staticmethod
     def parse_keys(data):
@@ -5284,10 +5466,6 @@ class Tui:
         q = self.fold(self.afilt)
         return [i for i, a in enumerate(LUDZIK_ACTS) if q in self.fold(a)]
 
-    @staticmethod
-    def doc(name):
-        return ((CLOCKS[name] if name in CLOCKS else Cycle).__doc__ or "").strip()
-
     def on_key(self, k):
         if self.search is not None:
             if k in ("\r", "\n"):
@@ -5311,10 +5489,8 @@ class Tui:
             return
         if self.edit is not None:
             if k in ("\r", "\n"):
-                self.host, self.edit = self.edit.strip(), None
-                self.sending = bool(self.host)
-                self.err = ""
-                self.say(f"host: {self.host or '(brak)'}")
+                self.set_host(self.edit)
+                self.edit = None
             elif k == "esc":
                 self.edit = None
             elif k in ("\x7f", "\b"):
@@ -5382,8 +5558,7 @@ class Tui:
         elif k == "/":
             self.search, self.focus = "", "list"
         elif k == "l":
-            self.cycle.shuffle = not self.cycle.shuffle
-            self.say("cykl: " + ("losowa kolejność" if self.cycle.shuffle else "po kolei"))
+            self.toggle_shuffle()
         elif k in ("\r", "\n"):
             self.select(self.NAMES[self.cursor])
         elif k in ("right", "n"):
@@ -5393,36 +5568,28 @@ class Tui:
         elif k == "c":
             self.select("cykl")
         elif k == "]":
-            self.cycle.every += 10
+            self.every_step(1)
         elif k == "[":
-            self.cycle.every = max(10, self.cycle.every - 10)
+            self.every_step(-1)
         elif k in (">", "."):
-            self.speed_i = min(self.speed_i + 1, len(self.SPEEDS) - 1)
+            self.speed_step(1)
         elif k in ("<", ","):
-            self.speed_i = max(self.speed_i - 1, 0)
+            self.speed_step(-1)
         elif k == "r":
-            self.offset, self.speed_i = dtm.timedelta(), self.SPEEDS.index(1)
-            self.say("czas = prawdziwa godzina")
+            self.real_time()
         elif k == " ":
-            self.paused = not self.paused
+            self.toggle_pause()
         elif k == "s":
-            if self.host:
-                self.sending = not self.sending
-            else:
-                self.edit = ""
+            self.toggle_send()
         elif k == "h":
-            self.edit = self.host
+            self.ask_host()
         elif k == "o":
-            self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")
-            self.lor = 0
-            self.say("WLED znów pokazuje obraz ze skryptu")
+            self.override_off()
         elif k == "v":
             self.preview = self.PREVIEWS[(self.PREVIEWS.index(self.preview) + 1) % len(self.PREVIEWS)]
             self.resized = True
         elif k == "m":
-            PANEL["mirror"] = not PANEL["mirror"]
-            self.say("odbicie lustrzane włączone – obraz odwrócony w poziomie (do kamerki)" if PANEL["mirror"]
-                     else "odbicie lustrzane wyłączone")
+            self.toggle_mirror()
         elif k in ("q", "Q", "\x03"):
             self.running = False
 
@@ -5561,17 +5728,6 @@ class Tui:
         sys.stdout.flush()
 
     # ---------------------------------------------------------- pętla
-    def send(self, data):
-        if not (self.sending and self.host):
-            return
-        try:
-            send_ddp(self.sock, self.host, data, self.seq)
-            self.seq = self.seq % 15 + 1
-            self.pkts += 1
-            self.err = ""
-        except OSError as e:
-            self.err = e.strerror or str(e)
-
     def run(self):
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
@@ -5579,38 +5735,9 @@ class Tui:
         try:
             tty.setcbreak(fd)
             sys.stdout.write("\x1b[?1049h\x1b[?25l")
-            t, frame = 0.0, None
-            last = nxt = time.monotonic()
+            nxt = self.last = time.monotonic()
             while self.running:
-                m = time.monotonic()
-                rdt, last = m - last, m
-                self.fps_ema += ((1 / rdt if rdt > 0 else self.fps) - self.fps_ema) * 0.1
-                if self.paused:
-                    self.offset -= dtm.timedelta(seconds=rdt)          # zegar stoi
-                else:
-                    self.offset += dtm.timedelta(seconds=rdt * (self.speed - 1))
-                now = dtm.datetime.now().astimezone() + self.offset
-                ANIM.update(fps=self.fps, tempo=self.tempo, text=self.text)
-                if self.host:
-                    PANEL["host"] = self.host
-                    st = NET.get("wled")
-                    if st and "bri" in st and st is not self._last_st:
-                        self._last_st = st
-                        PANEL["bri"] = st["bri"]
-                        self.lor = st.get("lor", 0)
-                c0 = time.monotonic()
-                if frame is None or not self.paused:
-                    # stały krok animacji = równe ruchy w każdej klatce (bez szarpania przy wahaniach zegara)
-                    dt = self.tempo / self.fps
-                    t += dt
-                    frame = self.render(now, t, dt)
-                out, data = self.limiter.apply(frame, 1 / self.fps)
-                name = self.cycle.current if self.mode == "cykl" else self.mode
-                pk = self.peak.get(name)
-                if not pk or pk[1] != PANEL["bri"] or self.limiter.raw > pk[0]:
-                    self.peak[name] = [round(self.limiter.raw), PANEL["bri"]]
-                self.send(data)
-                self.cost_ema += (time.monotonic() - c0 - self.cost_ema) * 0.1
+                out, now = self.tick()
                 self.screen(out, now)
                 nxt += 1 / self.fps
                 if nxt < time.monotonic():      # spóźnienie: nie nadrabiamy serią klatek (panel by ich nie pokazał)
