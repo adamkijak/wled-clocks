@@ -1,0 +1,5902 @@
+#!/usr/bin/env python3
+"""
+101 kreatywnych zegarów i efektów dla panelu WLED 120x12 (wysyłanie klatek protokołem DDP).
+Tylko biblioteka standardowa Pythona 3.8+ – bez żadnych dodatkowych pakietów (podgląd GIF/PNG też).
+
+  python3 wled_clocks.py --list     – pełna lista ze opisami
+
+Kategorie:
+  * klasyka (1-12): licznik, roj, ogien, matrix, niebo, doba, skaner, tecza, hiperskok, zycie, akwarium, pong
+  * dane z internetu (13-34), bez kluczy API, pobierane w tle tylko dla widocznego efektu:
+      pogoda, prognoza, opady, wiatr, termometr, smog (Open-Meteo), kursy, zloto (NBP), krypto (Binance),
+      iss, kosmonauci, trzesienia (USGS), zorza (NOAA Kp), bloki (mempool.space), hackernews,
+      wiadomosci (TVN24 RSS), imieniny, rakieta (The Space Devs), zart, slonce, uv, barometr
+  * style zegarów (35-66): binarny, analogowy, slownie, rzymski, morse, klepsydra, postep, kalendarz,
+      odliczanie, nixie, segmenty, klapki, lustro, cien, tetris, hex, kolor, dziesietny, beaty, unix,
+      strefy, obwod, wahadlo, fala, glitch, neon, pismo, kreskowy, maszyna, radar, domino, ksiezyc
+  * sceny, symulacje i gry (67-101): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
+      dym, kalejdoskop, labirynt, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, pociag, miasto,
+      las, gory, dna, oscyloskop, equalizer, ekg, mrowka, piasek, kule, kregi, wir, synthwave, pory, planety, ludzik
+  * cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
+
+Pogoda i słońce liczone dla Warszawy; inne miejsce: --lat 50.06 --lon 19.94
+
+Interaktywny TUI (domyślnie, gdy uruchomione w terminalu):
+  podgląd panelu na żywo, ↑↓ + Enter wybór zegara, ←→ następny/poprzedni, c cykl,
+  Tab ustawienia (tempo animacji, tempo tekstu, fps, cykl…), [ ] czas w cyklu, < > przyspieszenie czasu, r prawdziwa godzina,
+  spacja pauza, s wysyłanie on/off, h zmiana IP, v podgląd on/off, m odbicie lustrzane (do kamerki), q wyjście,
+  / szukaj (po nazwie i opisie), PgUp/PgDn przewijanie listy, l losowa kolejność w cyklu.
+  --no-tui = stare zachowanie (tylko wysyłanie, np. w tle).
+
+Przykłady:
+  python3 wled_clocks.py --host 192.168.68.81
+  python3 wled_clocks.py --host 192.168.68.81 --mode cykl --every 60
+  python3 wled_clocks.py --host 192.168.68.81 --mode ogien --tempo 0.5
+  python3 wled_clocks.py --preview demo.gif --mode roj --seconds 8 --start 20:59:55
+  python3 wled_clocks.py --preview niebo.gif --mode niebo --speed 3600   # 1 s = 1 h
+
+WLED: Config > Sync Interfaces > "Receive UDP realtime" włączone (DDP, port 4048).
+"""
+import argparse
+import datetime as dtm
+import math
+import os
+import random
+import re
+import select
+import shutil
+import signal
+import socket
+import sys
+import termios
+import textwrap
+import time
+import tty
+import html
+import json
+import threading
+import unicodedata
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+import zlib
+
+def _start_width():
+    """Szerokość panelu: zmienna WLED_W albo zapisana konfiguracja (np. 60, gdy działa połowa panelu)."""
+    if os.environ.get("WLED_W"):
+        return int(os.environ["WLED_W"])
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".config", "wled_clocks.json"), encoding="utf-8") as fh:
+            return int(json.load(fh).get("width", 120))
+    except (OSError, ValueError, TypeError):
+        return 120
+
+
+W, H = _start_width(), 12
+SERPENTINE = False  # True tylko, gdy co drugi wiersz jest odwrócony
+LAT, LON = 52.23, 21.01  # Warszawa – do pozycji słońca
+ANIM = {"fps": 20.0, "tempo": 0.75, "text": 2.0}
+# Jasność WLED (0-255) skaluje dane DDP „po wideo”: kanał != 0 daje co najmniej 1, więc przy małej jasności
+# każdy kanał ma tylko kilka poziomów, a nawet najciemniejszy kolor świeci wyraźnie.
+#   bri    – jasność odczytana z WLED
+#   levels – ile poziomów jasności na kanał naprawdę widać (None = tyle, ile wynika z bri); zmierzone --kalibracja
+#   pe     – jak jasno wygląda poziom l z L: (l/L)**pe  (1/2.2 = teoria; mniejsze = poziomy wyglądają podobnie)
+PANEL = {"bri": 255, "host": "", "levels": None, "levels_bri": None, "pe": 1 / 2.2,
+         "mirror": False}  # mirror – obraz odbity w poziomie (np. gdy panel ogląda się przez kamerkę)
+# Prąd: WS2812 ok. 55 mA na diodę przy pełnej bieli (ok. 18 mA na kanał) + ok. 0,6 mA spoczynkowo, nawet zgaszona.
+POWER = {"psu": 2000, "ma": 55.0, "idle": 0.6}  # psu = budżet w mA (0 = bez limitu)
+CONFIG = os.path.join(os.path.expanduser("~"), ".config", "wled_clocks.json")
+
+# ---------------------------------------------------------------- czcionki
+BIG = {  # 6x10, kreska 2 px
+    "0": [".####.", "##..##", "##..##", "##..##", "##..##", "##..##", "##..##", "##..##", "##..##", ".####."],
+    "1": ["..##..", ".###..", "####..", "..##..", "..##..", "..##..", "..##..", "..##..", "..##..", "######"],
+    "2": [".####.", "##..##", "....##", "....##", "...##.", "..##..", ".##...", "##....", "##....", "######"],
+    "3": [".####.", "##..##", "....##", "....##", "..###.", "....##", "....##", "....##", "##..##", ".####."],
+    "4": ["...##.", "..###.", ".####.", "##.##.", "##.##.", "######", "...##.", "...##.", "...##.", "...##."],
+    "5": ["######", "##....", "##....", "#####.", "....##", "....##", "....##", "....##", "##..##", ".####."],
+    "6": [".####.", "##..##", "##....", "##....", "#####.", "##..##", "##..##", "##..##", "##..##", ".####."],
+    "7": ["######", "....##", "....##", "...##.", "...##.", "..##..", "..##..", ".##...", ".##...", ".##..."],
+    "8": [".####.", "##..##", "##..##", "##..##", ".####.", "##..##", "##..##", "##..##", "##..##", ".####."],
+    "9": [".####.", "##..##", "##..##", "##..##", "##..##", ".#####", "....##", "....##", "##..##", ".####."],
+    ":": ["....", "....", ".##.", ".##.", "....", "....", ".##.", ".##.", "....", "...."],
+    " ": ["....", "....", "....", "....", "....", "....", "....", "....", "....", "...."],
+}
+SMALL = {k: v.split("|") for k, v in {  # 5 wierszy, kreska pionowa 2 px (jak w BIG) – cyfry, litery i znaki
+    "0": "#####|##.##|##.##|##.##|#####", "1": "..##.|.###.|..##.|..##.|.####", "2": "#####|...##|#####|##...|#####",
+    "3": "#####|...##|.####|...##|#####", "4": "##.##|##.##|#####|...##|...##", "5": "#####|##...|#####|...##|#####",
+    "6": "#####|##...|#####|##.##|#####", "7": "#####|...##|...##|...##|...##", "8": "#####|##.##|#####|##.##|#####",
+    "9": "#####|##.##|#####|...##|#####", ":": "..|##|..|##|..", " ": "..|..|..|..|..",
+    "A": ".###.|##.##|#####|##.##|##.##", "B": "####.|##.##|####.|##.##|####.", "C": ".####|##...|##...|##...|.####",
+    "D": "####.|##.##|##.##|##.##|####.", "E": "#####|##...|####.|##...|#####", "F": "#####|##...|####.|##...|##...",
+    "G": ".####|##...|##.##|##.##|.####", "H": "##.##|##.##|#####|##.##|##.##", "I": "####|.##.|.##.|.##.|####",
+    "J": "...##|...##|...##|##.##|.###.", "K": "##.##|####.|###..|####.|##.##", "L": "##...|##...|##...|##...|#####",
+    "M": "##...##|###.###|#######|##...##|##...##", "N": "##..##|###.##|######|##.###|##..##", "O": ".###.|##.##|##.##|##.##|.###.",
+    "P": "####.|##.##|####.|##...|##...", "Q": ".###.|##.##|##.##|##.##|.####", "R": "####.|##.##|####.|##.##|##.##",
+    "S": ".####|##...|.###.|...##|####.", "T": "######|..##..|..##..|..##..|..##..", "U": "##.##|##.##|##.##|##.##|.###.",
+    "V": "##..##|##..##|##..##|.####.|..##..", "W": "##...##|##...##|#######|###.###|##...##",
+    "X": "##..##|.####.|..##..|.####.|##..##", "Y": "##..##|##..##|.####.|..##..|..##..", "Z": "#####|...##|.###.|##...|#####",
+    "Ł": "##...|##...|####.|##...|#####",
+    ".": "..|..|..|..|##", ",": "...|...|...|.##|##.", "-": "....|....|####|....|....", "+": "......|..##..|######|..##..|......",
+    "%": "##..##|...##.|..##..|.##...|##..##", "/": "....##|...##.|..##..|.##...|##....", "°": "##|##|..|..|..",
+    "!": "##|##|##|..|##", "?": "####.|...##|..##.|.....|..##.", "=": ".....|#####|.....|#####|.....",
+    "↑": "..##..|.####.|######|..##..|..##..", "↓": "..##..|..##..|######|.####.|..##..",
+    "→": "..##..|...##.|######|...##.|..##..", "$": ".####|###..|.###.|..###|####.", "#": "##.##|#####|##.##|#####|##.##",
+    "(": ".##|##.|##.|##.|.##", ")": "##.|.##|.##|.##|##.", "'": "##|##|..|..|..", "_": ".....|.....|.....|.....|#####",
+    "@": "#####|##.##|##.##|##...|#####",
+}.items()}
+
+BIG.update({
+    "-": ["....", "....", "....", "....", "####", "####", "....", "....", "....", "...."],
+    ".": ["..", "..", "..", "..", "..", "..", "..", "..", "##", "##"],
+    "°": [".###.", "##.##", "##.##", ".###.", ".....", ".....", ".....", ".....", ".....", "....."],
+})
+
+# 5x7 z polskimi znakami (11 wierszy: 2 na akcenty, 7 ciało, 2 pod linią) – do tekstów
+_F = {
+    "A": ".###.|#...#|#...#|#####|#...#|#...#|#...#", "B": "####.|#...#|#...#|####.|#...#|#...#|####.",
+    "C": ".###.|#...#|#....|#....|#....|#...#|.###.", "D": "####.|#...#|#...#|#...#|#...#|#...#|####.",
+    "E": "#####|#....|#....|####.|#....|#....|#####", "F": "#####|#....|#....|####.|#....|#....|#....",
+    "G": ".###.|#...#|#....|#.###|#...#|#...#|.###.", "H": "#...#|#...#|#...#|#####|#...#|#...#|#...#",
+    "I": "###|.#.|.#.|.#.|.#.|.#.|###", "J": "..###|...#.|...#.|...#.|...#.|#..#.|.##..",
+    "K": "#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#", "L": "#....|#....|#....|#....|#....|#....|#####",
+    "Ł": ".#...|.#...|.#.#.|.##..|##...|.#...|.####", "M": "#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#",
+    "N": "#...#|#...#|##..#|#.#.#|#..##|#...#|#...#", "O": ".###.|#...#|#...#|#...#|#...#|#...#|.###.",
+    "P": "####.|#...#|#...#|####.|#....|#....|#....", "Q": ".###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#",
+    "R": "####.|#...#|#...#|####.|#.#..|#..#.|#...#", "S": ".####|#....|#....|.###.|....#|....#|####.",
+    "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..", "U": "#...#|#...#|#...#|#...#|#...#|#...#|.###.",
+    "V": "#...#|#...#|#...#|#...#|#...#|.#.#.|..#..", "W": "#...#|#...#|#...#|#.#.#|#.#.#|#.#.#|.#.#.",
+    "X": "#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#", "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..",
+    "Z": "#####|....#|...#.|..#..|.#...|#....|#####",
+    "a": ".....|.....|.###.|....#|.####|#...#|.####", "b": "#....|#....|#.##.|##..#|#...#|#...#|####.",
+    "c": ".....|.....|.###.|#....|#....|#...#|.###.", "d": "....#|....#|.##.#|#..##|#...#|#...#|.####",
+    "e": ".....|.....|.###.|#...#|#####|#....|.###.", "f": "..##.|.#..#|.#...|###..|.#...|.#...|.#...",
+    "g": ".....|.....|.####|#...#|#...#|#...#|.####|....#|.###.", "h": "#....|#....|#.##.|##..#|#...#|#...#|#...#",
+    "i": ".#.|...|##.|.#.|.#.|.#.|###", "j": "...#|....|..##|...#|...#|...#|...#|#..#|.##.",
+    "k": "#...|#...|#..#|#.#.|##..|#.#.|#..#", "l": "##.|.#.|.#.|.#.|.#.|.#.|###",
+    "ł": ".##..|..#..|..#.#|..##.|.##..|..#..|.###.", "m": ".....|.....|##.#.|#.#.#|#.#.#|#.#.#|#.#.#",
+    "n": ".....|.....|#.##.|##..#|#...#|#...#|#...#", "o": ".....|.....|.###.|#...#|#...#|#...#|.###.",
+    "p": ".....|.....|####.|#...#|#...#|#...#|####.|#....|#....",
+    "q": ".....|.....|.####|#...#|#...#|#...#|.####|....#|....#", "r": ".....|.....|#.##.|##..#|#....|#....|#....",
+    "s": ".....|.....|.####|#....|.###.|....#|####.", "t": ".#...|.#...|####.|.#...|.#...|.#..#|..##.",
+    "u": ".....|.....|#...#|#...#|#...#|#..##|.##.#", "v": ".....|.....|#...#|#...#|#...#|.#.#.|..#..",
+    "w": ".....|.....|#...#|#...#|#.#.#|#.#.#|.#.#.", "x": ".....|.....|#...#|.#.#.|..#..|.#.#.|#...#",
+    "y": ".....|.....|#...#|#...#|#...#|#...#|.####|....#|.###.", "z": ".....|.....|#####|...#.|..#..|.#...|#####",
+    "0": ".###.|#...#|#..##|#.#.#|##..#|#...#|.###.", "1": "..#..|.##..|..#..|..#..|..#..|..#..|.###.",
+    "2": ".###.|#...#|....#|...#.|..#..|.#...|#####", "3": "#####|...#.|..#..|...#.|....#|#...#|.###.",
+    "4": "...#.|..##.|.#.#.|#..#.|#####|...#.|...#.", "5": "#####|#....|####.|....#|....#|#...#|.###.",
+    "6": "..##.|.#...|#....|####.|#...#|#...#|.###.", "7": "#####|....#|...#.|..#..|.#...|.#...|.#...",
+    "8": ".###.|#...#|#...#|.###.|#...#|#...#|.###.", "9": ".###.|#...#|#...#|.####|....#|...#.|.##..",
+    "!": "#|#|#|#|#|.|#", '"': "#.#|#.#|...|...|...|...|...", "#": ".#.#.|.#.#.|#####|.#.#.|#####|.#.#.|.#.#.",
+    "$": "..#..|.####|#.#..|.###.|..#.#|####.|..#..", "%": "##...|##..#|...#.|..#..|.#...|#..##|...##",
+    "&": ".##..|#..#.|#.#..|.#...|#.#.#|#..#.|.##.#", "'": "#|#|.|.|.|.|.", "(": "..#|.#.|#..|#..|#..|.#.|..#",
+    ")": "#..|.#.|..#|..#|..#|.#.|#..", "*": ".....|..#..|#.#.#|.###.|#.#.#|..#..|.....",
+    "+": ".....|..#..|..#..|#####|..#..|..#..|.....", ",": "..|..|..|..|..|##|.#|#.|..", "-": "....|....|....|####|....|....|....",
+    ".": "..|..|..|..|..|##|##", "/": "....#|...#.|...#.|..#..|.#...|.#...|#....", ":": "..|##|##|..|##|##|..",
+    ";": "..|##|##|..|##|##|.#|#.|..", "<": "...#|..#.|.#..|#...|.#..|..#.|...#", "=": ".....|.....|#####|.....|#####|.....|.....",
+    ">": "#...|.#..|..#.|...#|..#.|.#..|#...", "?": ".###.|#...#|....#|...#.|..#..|.....|..#..",
+    "@": ".###.|#...#|#.###|#.#.#|#.###|#....|.###.", "[": "###|#..|#..|#..|#..|#..|###",
+    "]": "###|..#|..#|..#|..#|..#|###", "_": ".....|.....|.....|.....|.....|.....|.....|#####|.....",
+    "|": "#|#|#|#|#|#|#|#|.", "°": ".##.|#..#|.##.|....|....|....|....", "▲": ".....|..#..|.###.|#####|.....|.....|.....",
+    "▼": ".....|.....|.....|#####|.###.|..#..|.....", "•": "..|..|..|##|##|..|..", "…": ".....|.....|.....|.....|.....|.....|#.#.#",
+}
+# znaki pogrubione ręcznie – automatyczne pogrubienie (_bold) zlałoby w nich kreski stojące 1 px od siebie
+_FB = {
+    "G": ".####.|##..##|##....|##.###|##..##|##..##|.####.", "Q": ".####.|##..##|##..##|##..##|##..##|##..##|.####.|....##",
+    "M": "##....##|###..###|########|##.##.##|##....##|##....##|##....##",
+    "W": "##....##|##....##|##....##|##.##.##|##.##.##|##.##.##|.##..##.",
+    "m": "........|........|#######.|##.##.##|##.##.##|##.##.##|##.##.##",
+    "w": "........|........|##....##|##....##|##.##.##|##.##.##|.##..##.",
+    "k": "##....|##....|##..##|##.##.|####..|##.##.|##..##", "0": ".####.|##..##|##..##|##..##|##..##|##..##|.####.",
+    '"': "##.##|##.##|.....|.....|.....|.....|.....", "#": ".##.##.|.##.##.|#######|.##.##.|#######|.##.##.|.##.##.",
+    "$": "..##..|.#####|##....|.####.|....##|#####.|..##..", "*": "......|##..##|.####.|######|.####.|##..##|......",
+    "&": ".####...|##..##..|.####...|.###....|##.##.##|##..###.|.####.##",
+    "@": ".######.|##....##|##.#####|##.##.##|##.#####|##......|.######.",
+    "…": "........|........|........|........|........|........|##.##.##",
+}
+_ACC = {"Ą": "A,", "Ć": "C'", "Ę": "E,", "Ń": "N'", "Ó": "O'", "Ś": "S'", "Ź": "Z'", "Ż": "Z.",
+        "ą": "a,", "ć": "c'", "ę": "e,", "ń": "n'", "ó": "o'", "ś": "s'", "ź": "z'", "ż": "z."}
+
+
+def _build_txt():
+    font = {}
+    for ch, spec in {**_F, **_FB}.items():
+        rows = spec.split("|")
+        rows = ["", ""] + rows + [""] * (9 - len(rows))
+        w = max(len(r) for r in rows)
+        font[ch] = [list(r.ljust(w, ".")) for r in rows]
+    for ch, (base, acc) in _ACC.items():
+        g = [row[:] for row in font[base]]
+        w = len(g[0])
+        top = 0 if base.isupper() else 2
+        if acc == "'":
+            g[top][min(w - 1, w // 2 + 1)] = "#"
+            g[top + 1][w // 2] = "#"
+        elif acc == ".":
+            g[top][w // 2] = "#"
+        else:
+            g[9][w - 2] = g[10][w - 1] = "#"
+        font[ch] = g
+    font = {k: ["".join(r) for r in g] for k, g in font.items()}
+    font[" "] = ["..."] * 11
+    return font
+
+
+TXT = _build_txt()
+
+
+def _thin(g):
+    """Czy w znaku jest kreska szeroka na 1 diodę (pojedynczy piksel w wierszu) – na panelu nieczytelna."""
+    return any(re.search(r"(?<!#)#(?!#)", r) for r in g)
+
+
+def _bold(g):
+    """Pogrubienie: każdy piksel zapala też sąsiada z prawej (znak robi się o 1 kolumnę szerszy)."""
+    return ["".join("#" if "#" in (r[i - 1:i + 1] if i else r[:1]) else "." for i in range(len(r) + 1)) for r in g]
+
+
+for _font in (BIG, SMALL, TXT):  # zasada: każda kreska ma co najmniej 2 diody szerokości
+    _font.update({k: _bold(g) for k, g in _font.items() if _thin(g)})
+TALL = {k: [r for r in g for _ in (0, 1)] for k, g in SMALL.items()}  # 5x10: SMALL rozciągnięty w pionie
+
+
+def glyph(font, c):
+    g = font.get(c)
+    if g is None:
+        b = unicodedata.normalize("NFD", c)[0]
+        g = font.get(c.upper()) or font.get(b) or font.get(b.upper()) or font.get("?") or font[" "]
+    return g
+
+
+_PTS = {}
+
+
+def text_rel(s, font=BIG, sp=1):
+    key = (s, id(font), sp)
+    r = _PTS.get(key)
+    if r is None:
+        pts, x = [], 0
+        for c in s:
+            g = glyph(font, c)
+            for ry, row in enumerate(g):
+                for k, b in enumerate(row):
+                    if b == "#":
+                        pts.append((x + k, ry))
+            x += len(g[0]) + sp
+        r = (pts, max(0, x - sp))
+        if len(_PTS) > 1000:
+            _PTS.clear()
+        _PTS[key] = r
+    return r
+
+
+def text_w(s, font=BIG, sp=1):
+    return text_rel(s, font, sp)[1]
+
+
+def text_px(s, x0, y0, font=BIG, sp=1):
+    x0, y0 = int(x0), int(y0)
+    return [(x0 + x, y0 + y) for x, y in text_rel(s, font, sp)[0]]
+
+
+def centered(s, font=BIG, y0=1):
+    return text_px(s, (W - text_w(s, font)) // 2, y0, font)
+
+
+# ---------------------------------------------------------------- kolory
+def clamp(v, lo=0.0, hi=1.0):
+    return lo if v < lo else hi if v > hi else v
+
+
+def hsv(h, s, v):
+    h = (h % 1.0) * 6
+    i, f = int(h), h - int(h)
+    p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+    r, g, b = [(v, t, p), (q, v, p), (p, v, t), (p, q, v), (t, p, v), (v, p, q)][i % 6]
+    return (r * 255, g * 255, b * 255)
+
+
+def lerp(a, b, t):
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
+
+
+def mul(c, k):
+    return (c[0] * k, c[1] * k, c[2] * k)
+
+
+class Frame:
+    def __init__(self, fill=(0, 0, 0)):
+        self.px = [[fill] * W for _ in range(H)]
+
+    def set(self, x, y, c):
+        x, y = int(math.floor(x)), int(math.floor(y))
+        if 0 <= x < W and 0 <= y < H:
+            self.px[y][x] = c
+
+    def add(self, x, y, c):
+        x, y = int(math.floor(x)), int(math.floor(y))
+        if 0 <= x < W and 0 <= y < H:
+            o = self.px[y][x]
+            self.px[y][x] = (o[0] + c[0], o[1] + c[1], o[2] + c[2])
+
+    def outline(self, pts, c=(0, 0, 0)):
+        for x, y in pts:
+            for ox in (-1, 0, 1):
+                for oy in (-1, 0, 1):
+                    self.set(x + ox, y + oy, c)
+
+    def draw(self, pts, c):
+        for x, y in pts:
+            self.set(x, y, c)
+
+    def get(self, x, y):
+        x, y = int(math.floor(x)), int(math.floor(y))
+        return self.px[y][x] if 0 <= x < W and 0 <= y < H else (0, 0, 0)
+
+    def fill(self, c):
+        self.px = [[c] * W for _ in range(H)]
+
+    def rect(self, x0, y0, x1, y1, c):
+        for y in range(max(0, int(y0)), min(H, int(y1) + 1)):
+            row = self.px[y]
+            for x in range(max(0, int(x0)), min(W, int(x1) + 1)):
+                row[x] = c
+
+    def line(self, x0, y0, x1, y1, c, add=False):
+        n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+        put = self.add if add else self.set
+        for i in range(n + 1):
+            a = i / n
+            put(x0 + (x1 - x0) * a + 0.5, y0 + (y1 - y0) * a + 0.5, c)
+
+    def text(self, s, x, y, c, font=None, outline=None):
+        pts = text_px(s, x, y, font or TXT)
+        if outline is not None:
+            self.outline(pts, outline)
+        self.draw(pts, c)
+        return pts
+
+    def rgb_rows(self):
+        c8 = lambda v: 255 if v >= 255 else 0 if v <= 0 else int(v)
+        rows = [[(c8(r), c8(g), c8(b)) for r, g, b in row] for row in self.px]
+        return [row[::-1] for row in rows] if PANEL["mirror"] else rows
+
+    def to_bytes(self):
+        q = panel_q()
+        out = bytearray()
+        for y, row in enumerate(self.rgb_rows()):
+            if SERPENTINE and y % 2:
+                row = row[::-1]
+            for c in row:
+                out += bytes((q[c[0]], q[c[1]], q[c[2]]))
+            pad = PANEL.get("ddp_w", W) - W
+            if pad > 0:
+                out += bytes(3 * pad)
+        return bytes(out)
+
+
+_QCACHE = {}
+
+
+def panel_manual():
+    """Ręcznie zmierzone poziomy obowiązują tylko przy tej jasności WLED, przy której je zmierzono."""
+    return bool(PANEL["levels"]) and PANEL.get("levels_bri") == PANEL["bri"]
+
+
+def panel_levels():
+    return PANEL["levels"] if panel_manual() else PANEL["bri"]
+
+
+def panel_pe():
+    return PANEL["pe"] if panel_manual() else 1 / 2.2
+
+
+def panel_level(v, lv):
+    """Poziom (0..lv), na jakim panel zapali kanał o wartości v."""
+    return 0 if v == 0 or lv == 0 else min(lv, (v * lv >> 8) + 1)
+
+
+def panel_model(lv=None):
+    """(tablica 0..255 -> wartość do wysłania, tablica poziom -> jak jasno go widać 0..1)."""
+    lv = panel_levels() if lv is None else lv
+    pe = panel_pe()
+    key = (lv, round(pe, 3))
+    m = _QCACHE.get(key)
+    if m is None:
+        if lv >= 255:
+            m = (list(range(256)), [(v / 255) ** (pe * 2.2) for v in range(256)])
+        else:
+            seen = [(l / lv) ** pe for l in range(lv + 1)]
+            send = [0] + [max(1, -(-(l - 1) * 256 // lv)) for l in range(1, lv + 1)]
+            q = [send[min(range(lv + 1), key=lambda l: abs(seen[l] - v / 255))] for v in range(256)]
+            m = (q, seen)
+        _QCACHE[key] = m
+    return m
+
+
+def panel_q(lv=None):
+    """Tablica 0..255 -> wartość do wysłania, dopasowana do tego, co panel naprawdę potrafi.
+    Wybieramy poziom najbliższy PERCEPCYJNIE zamierzonej wartości: słabe składowe koloru gasimy
+    (inaczej kolory płowieją do bieli, a ciemne tła świecą), a resztę wysyłamy tak, by panel trafił
+    dokładnie w wybrany poziom."""
+    return panel_model(lv)[0]
+
+
+def panel_view(rows, lv=None):
+    """Co naprawdę zobaczy oko na panelu (do podglądu)."""
+    lv = panel_levels() if lv is None else lv
+    q, seen = panel_model(lv)
+    if lv >= 255:
+        lut = [round(255 * seen[v]) for v in range(256)]
+    else:
+        lut = [round(255 * seen[panel_level(q[v], lv)]) for v in range(256)]
+    return [[(lut[r], lut[g], lut[b]) for r, g, b in row] for row in rows]
+
+
+def visible(c, level=6):
+    """Ciemny kolor, który nie znika przy małej jasności WLED: najjaśniejsza składowa dostaje co najmniej
+    `level` stopni panelu (najsłabsze stopnie na diodach i w kamerce prawie nie świecą, choć podgląd je pokazuje)."""
+    lv = panel_levels()
+    need = 255 * (min(level, max(1, lv // 5)) / lv) ** panel_pe()  # ale nie jaśniej niż 1/5 skali
+    m = max(c)
+    return c if m == 0 or m >= need else mul(c, need / m)
+
+
+_ILUT = {}
+
+
+def frame_current(data, bri=None):
+    """Szacowany prąd panelu (mA) dla wysyłanych bajtów przy jasności WLED bri."""
+    bri = PANEL["bri"] if bri is None else bri
+    key = (bri, POWER["ma"])
+    lut = _ILUT.get(key)
+    if lut is None:
+        per_ch = POWER["ma"] / 3
+        lut = [0.0] + [min(255, (v * bri >> 8) + 1) / 255 * per_ch for v in range(1, 256)]
+        _ILUT[key] = lut
+    return W * H * POWER["idle"] + sum(map(lut.__getitem__, data))
+
+
+class PowerLimiter:
+    """Pilnuje budżetu zasilacza: gdy klatka pobrałaby za dużo, od razu ją przyciemnia (żeby nie przeciążyć
+    zasilacza), a potem bardzo powoli wraca do pełnej jasności – bez pulsowania jak w ograniczniku WLED."""
+
+    def __init__(self):
+        self.k, self.est, self.raw = 1.0, 0.0, 0.0
+
+    @staticmethod
+    def scaled(frame, k):
+        if k >= 0.999:
+            return frame
+        f = Frame()
+        f.px = [[(r * k, g * k, b * k) for r, g, b in row] for row in frame.px]
+        return f
+
+    def apply(self, frame, dt):
+        """-> (klatka do wysłania i podglądu, bajty)"""
+        data = frame.to_bytes()
+        self.raw = frame_current(data)
+        budget = POWER["psu"]
+        if not budget:
+            self.k, self.est = 1.0, self.raw
+            return frame, data
+        self.k = min(1.0, self.k + dt * 0.25)          # powolny powrót
+        idle = W * H * POWER["idle"]
+        if self.raw > budget:
+            self.k = min(self.k, max(0.05, (budget - idle) / max(1.0, self.raw - idle)))
+        out = self.scaled(frame, self.k)
+        data = out.to_bytes()
+        self.est = frame_current(data)
+        while self.est > budget and self.k > 0.05:  # zaokrąglenia do poziomów panelu potrafią dołożyć prądu
+            self.k *= 0.85
+            out = self.scaled(frame, self.k)
+            data = out.to_bytes()
+            self.est = frame_current(data)
+        return out, data
+
+
+def blend(a, b, t):
+    f = Frame()
+    for y in range(H):
+        ra, rb = a.px[y], b.px[y]
+        f.px[y] = [lerp(ra[x], rb[x], t) for x in range(W)]
+    return f
+
+
+# ---------------------------------------------------------------- słońce
+def sun_position(now):
+    """Zwraca (wysokość słońca w stopniach, prawdziwy czas słoneczny w godzinach). Wzory NOAA."""
+    u = now.astimezone(dtm.timezone.utc)
+    g = 2 * math.pi / 365 * (u.timetuple().tm_yday - 1 + (u.hour - 12) / 24)
+    eot = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                    - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g)
+            + 0.000907 * math.sin(2 * g) - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    tst = u.hour * 60 + u.minute + u.second / 60 + eot + 4 * LON
+    ha = math.radians(tst / 4 - 180)
+    lat = math.radians(LAT)
+    s = math.sin(lat) * math.sin(decl) + math.cos(lat) * math.cos(decl) * math.cos(ha)
+    return math.degrees(math.asin(clamp(s, -1, 1))), (tst / 60) % 24
+
+
+SKY = [  # wysokość słońca -> (kolor góry nieba, kolor przy horyzoncie)
+    (-18, (1, 1, 6), (2, 3, 12)),
+    (-10, (3, 4, 22), (18, 10, 40)),
+    (-4, (12, 16, 60), (110, 35, 55)),
+    (0, (35, 50, 120), (255, 100, 25)),
+    (6, (35, 95, 185), (255, 180, 110)),
+    (20, (20, 85, 205), (120, 175, 240)),
+    (90, (10, 75, 215), (100, 165, 240)),
+]
+
+
+def sky_colors(elev):
+    if elev <= SKY[0][0]:
+        return SKY[0][1], SKY[0][2]
+    for (e0, t0, h0), (e1, t1, h1) in zip(SKY, SKY[1:]):
+        if elev <= e1:
+            k = (elev - e0) / (e1 - e0)
+            return lerp(t0, t1, k), lerp(h0, h1, k)
+    return SKY[-1][1], SKY[-1][2]
+
+
+# ================================================================ ZEGARY
+class Clock:
+    def draw(self, f, now, t, dt):
+        raise NotImplementedError
+
+
+class Odometer(Clock):
+    """Bębny licznika: cyfra toczy się w górę przy zmianie, cieniowanie walca daje efekt 3D."""
+
+    def __init__(self):
+        self.slots = {}
+
+    @staticmethod
+    def cyl(y):
+        return 0.3 + 0.7 * math.cos((y - 5.5) / 6.8 * math.pi / 2)
+
+    def draw(self, f, now, t, dt):
+        txt = now.strftime("%H:%M:%S")
+        x = (W - text_w(txt)) // 2
+        for i, ch in enumerate(txt):
+            gw = len(BIG[ch][0])
+            cur, prev, tc = self.slots.get(i, (ch, ch, -9))
+            if ch != cur:
+                prev, cur, tc = cur, ch, t
+            self.slots[i] = (cur, prev, tc)
+            if ch == ":":
+                f.draw(text_px(":", x, 1), (255, 120, 20) if now.second % 2 == 0 else (90, 40, 5))
+            else:
+                for yy in range(H):  # bęben
+                    k = self.cyl(yy)
+                    for xx in range(x - 1, x + gw + 1):
+                        f.set(xx, yy, (30 * k, 16 * k, 4 * k))
+                    f.set(x - 2, yy, (0, 0, 0))
+                    f.set(x + gw + 1, yy, (0, 0, 0))
+                p = clamp((t - tc) / 0.45)
+                p = 1 - (1 - p) ** 3
+                for glyph, off in ((prev, -p * 11), (cur, (1 - p) * 11)):
+                    for (px, py) in text_px(glyph, x, 1):
+                        yy = py + off
+                        if 0 <= yy < H:
+                            f.set(px, yy, mul((255, 175, 50), self.cyl(yy)))
+            x += gw + 1
+        for xx in range(W):  # połysk szybki
+            f.add(xx, 3, (6, 6, 6))
+
+
+class Swarm(Clock):
+    """Cyfry z cząsteczek. Zmiana czasu = piksele odlatują i lecą w nowe miejsca."""
+
+    def __init__(self):
+        self.parts, self.txt = [], None
+
+    def retarget(self, txt):
+        targets = centered(txt)
+        remaining = set(targets)
+        loose = []
+        for p in self.parts:
+            if p["tgt"] is not None and p["tgt"] in remaining:
+                remaining.discard(p["tgt"])
+            elif p["tgt"] is not None:
+                loose.append(p)
+        rem = list(remaining)
+        random.shuffle(rem)
+        for p in loose:
+            if rem:
+                p["tgt"] = rem.pop()
+                p["vx"] += random.uniform(-60, 60)
+                p["vy"] += random.uniform(-40, 40)
+            else:
+                p["tgt"] = None
+                p["life"] = 1.0
+                p["vx"], p["vy"] = random.uniform(-50, 50), random.uniform(-40, 0)
+        for tg in rem:
+            side = random.choice((-3, W + 3))
+            self.parts.append({"x": side, "y": random.uniform(0, H), "vx": 0, "vy": 0,
+                               "tgt": tg, "life": 1.0, "hue": random.random()})
+
+    def draw(self, f, now, t, dt):
+        txt = now.strftime("%H:%M:%S")
+        if txt != self.txt:
+            self.txt = txt
+            self.retarget(txt)
+        alive = []
+        for p in self.parts:
+            if p["tgt"] is not None:
+                tx, ty = p["tgt"]
+                p["vx"] += (tx - p["x"]) * 60 * dt
+                p["vy"] += (ty - p["y"]) * 60 * dt
+                d = math.exp(-7 * dt)
+                p["vx"] *= d
+                p["vy"] *= d
+            else:
+                p["vy"] += 60 * dt
+                p["life"] -= dt * 1.2
+            p["x"] += p["vx"] * dt
+            p["y"] += p["vy"] * dt
+            if p["life"] > 0:
+                alive.append(p)
+                sp = math.hypot(p["vx"], p["vy"])
+                base = hsv(p["tgt"][0] / W * 0.8 + t * 0.05 if p["tgt"] else p["hue"], 0.85, 1)
+                c = mul(lerp(base, (255, 255, 255), clamp(sp / 45)), p["life"])
+                f.add(round(p["x"]), round(p["y"]), c)
+        self.parts = alive
+
+
+class Fire(Clock):
+    """Ściana ognia; cyfry to ciemna sylwetka z żarzącą się krawędzią."""
+
+    PAL = [(0, 0, 0), (60, 0, 0), (170, 20, 0), (255, 80, 0), (255, 170, 20), (255, 240, 120), (255, 255, 230)]
+
+    def __init__(self):
+        self.heat = [[0.0] * W for _ in range(H + 2)]
+        self.acc = 0
+
+    def color(self, h):
+        h = clamp(h) * (len(self.PAL) - 1)
+        i = min(int(h), len(self.PAL) - 2)
+        return lerp(self.PAL[i], self.PAL[i + 1], h - i)
+
+    def draw(self, f, now, t, dt):
+        digits = centered(now.strftime("%H:%M"))
+        self.acc += dt
+        while self.acc > 1 / 40:
+            self.acc -= 1 / 40
+            hb = self.heat
+            for x in range(W):  # żar na dole
+                hb[H + 1][x] = 0.55 + random.random() * 0.45
+                hb[H][x] = 0.45 + random.random() * 0.5
+            new = [[0.0] * W for _ in range(H + 2)]
+            new[H], new[H + 1] = hb[H], hb[H + 1]
+            for y in range(H):
+                for x in range(W):
+                    xl, xr = max(0, x - 1), min(W - 1, x + 1)
+                    v = (hb[y + 1][xl] + hb[y + 1][x] * 2 + hb[y + 1][xr] + hb[y + 2][x]) / 5.35
+                    new[y][x] = max(0.0, v - random.random() * 0.12 - 0.015)
+            self.heat = new
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = self.color(self.heat[y][x])
+        # cyfry jako ciemna sylwetka wycięta w ogniu, z żarzącą się krawędzią
+        dset = set(digits)
+        for (x, y) in digits:
+            edge = any((x + ox, y + oy) not in dset for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+            h = self.heat[y][x]
+            f.set(x, y, mul((255, 170, 60), 0.75 + 0.25 * h) if edge else (15 + 40 * h, 2, 0))
+
+
+class Matrix(Clock):
+    """Deszcz kodu; kropla przechodząca przez cyfrę rozbłyskuje na biało."""
+
+    def __init__(self):
+        self.glow = [[0.0] * W for _ in range(H)]
+        self.drops = []
+
+    def draw(self, f, now, t, dt):
+        digits = centered(now.strftime("%H:%M"))
+        dset = set(digits)
+        if random.random() < 22 * dt:
+            self.drops.append([random.randrange(W), -1.0, random.uniform(8, 20)])
+        decay = math.exp(-dt * 4.5)
+        g = self.glow
+        for row in g:
+            for x in range(W):
+                row[x] *= decay
+        keep = []
+        heads = set()
+        for d in self.drops:
+            d[1] += d[2] * dt
+            y = int(d[1])
+            if 0 <= y < H:
+                g[y][d[0]] = 1.0
+                heads.add((d[0], y))
+            if d[1] < H + 1:
+                keep.append(d)
+        self.drops = keep
+        for y in range(H):
+            for x in range(W):
+                v = g[y][x]
+                f.px[y][x] = (10 * v, 200 * v, 60 * v)
+        f.outline(digits, (0, 12, 3))
+        for (x, y) in digits:
+            v = g[y][x]
+            f.set(x, y, lerp((40, 200, 70), (230, 255, 230), v))
+        for (x, y) in heads:
+            if (x, y) not in dset:
+                f.set(x, y, (180, 255, 190))
+
+
+class Sky(Clock):
+    """Prawdziwe położenie słońca i księżyca: świt i zmierzch z pomarańczowym pasem, dzień z chmurami, noc z gwiazdami, wieczorem światła w domach."""
+
+    def __init__(self):
+        rnd = random.Random(7)
+        self.stars = [(rnd.randrange(W), rnd.randrange(7), rnd.random() * 6) for _ in range(40)]
+        self.hills = [int(9.6 - 1.2 * math.sin(x * 0.07) - 0.8 * math.sin(x * 0.19 + 1)) for x in range(W)]
+        self.houses = [(8, 5), (27, 4), (45, 6), (70, 4), (100, 5), (112, 4)]
+        self.windows = [(hx + k, 9, rnd.random()) for hx, hw in self.houses for k in range(1, hw - 1, 2)]
+        self.clouds = [[rnd.uniform(0, W), rnd.uniform(0.5, 3), rnd.uniform(0.6, 1.4), rnd.randint(5, 9)] for _ in range(4)]
+
+    def draw(self, f, now, t, dt):
+        elev, solar = sun_position(now)
+        night = clamp((-elev - 3) / 6)
+        day = clamp((elev + 1) / 6)
+        dusk = clamp(1 - abs(elev + 1.5) / 6)
+        if night > 0.3:
+            for sx, sy, ph in self.stars:
+                if math.sin(t * 1.7 + ph) > -0.3:
+                    f.set(sx, sy, (170, 170, 220))
+        if dusk > 0.2:
+            for x in range(W):
+                h = self.hills[x]
+                f.set(x, h - 1, mul((255, 110, 20), dusk))
+                f.set(x, h - 2, mul((230, 40, 110), dusk * 0.8))
+        if day > 0.3:
+            for c in self.clouds:
+                c[0] = (c[0] + c[2] * dt) % (W + 12)
+                for k in range(c[3]):
+                    top = 1 if 1 < k < c[3] - 2 else 0
+                    for yy in range(int(c[1]) + 1 - top, int(c[1]) + 2):
+                        f.set(c[0] - 6 + k, yy, (200, 200, 215))
+        sx = solar / 24 * W
+        if elev > -4:
+            sy = 9 - clamp((elev + 4) / 45) * 8
+            disc(f, sx, sy, 2.2, (255, 230, 60))
+            for k in range(8):
+                a = k * math.pi / 4 + t * 0.4
+                f.set(sx + math.cos(a) * 3.3, sy + math.sin(a) * 3.3, (255, 120, 0))
+        if night > 0.1:
+            mx = ((solar + 12) % 24) / 24 * W
+            my = 9 - clamp((-elev + 4) / 45) * 8
+            for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1), (0, -1), (-1, 0), (-1, 1)):
+                f.set(mx + ox, my + oy, (230, 230, 190))
+        edge = lerp((40, 210, 40), (0, 40, 140), night)
+        fill = lerp((0, 110, 20), (0, 0, 0), night)
+        for x in range(W):
+            h = self.hills[x]
+            f.set(x, h, edge)
+            for y in range(h + 1, H):
+                f.set(x, y, fill)
+        wall, roof = lerp((210, 120, 50), (120, 50, 10), night), (220, 30, 20)
+        for hx, hw in self.houses:
+            for y in range(8, H):
+                for x in range(hx, hx + hw):
+                    f.set(x, y, wall)
+            for k in range(hw):
+                f.set(hx + k, 7 - min(k, hw - 1 - k) + (hw // 2) - 1, roof)
+        for wx, wy, ph in self.windows:
+            lit = night > 0.3 and ph > 0.25 or (0.1 < night <= 0.3 and ph > 0.6)
+            f.set(wx, wy, (255, 210, 60) if lit else (40, 20, 0))
+        tw = text_w(now.strftime("%H:%M"))
+        clock_big(f, now, (255, 255, 255), x=(W - tw - (13 if not NARROW else 1)) if solar < 12 else (16 if not NARROW else 1))
+
+
+class DayRibbon(Clock):
+    """Taśma doby: 120 px = 24 h, kolory to niebo o danej godzinie, przeszłość jasna, przyszłość przygaszona."""
+
+    def __init__(self):
+        self.cache = (None, None)
+
+    def draw(self, f, now, t, dt):
+        key = now.strftime("%Y%m%d%H")
+        if self.cache[0] != key:
+            day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            cols = []
+            for x in range(W):
+                el, _ = sun_position(day0 + dtm.timedelta(minutes=(x + 0.5) * 1440 / W))
+                top, hor = sky_colors(el)
+                cols.append(lerp(top, hor, 0.55))
+            self.cache = (key, cols)
+        cols = self.cache[1]
+        nowx = (now.hour * 60 + now.minute + now.second / 60) / (1440 / W)
+        for x in range(W):
+            past = x < nowx
+            k = 0.75 if past else 0.16
+            for y in range(7, H):
+                f.set(x, y, mul(cols[x], k))
+            if int(x * 24 / W) != int((x - 1) * 24 / W) or x == 0:
+                hour = int(x * 24 / W)
+                f.set(x, 6, (90, 90, 90) if hour % 6 == 0 else (25, 25, 25))
+                if hour % 6 == 0:
+                    f.set(x, 5, (60, 60, 60))
+        pulse = 0.6 + 0.4 * math.sin(t * 4)
+        cx = int(nowx)
+        for y in range(6, H):
+            f.set(cx, y, (255, 255, 255))
+            for o, k in ((-1, 0.45), (1, 0.45), (-2, 0.18), (2, 0.18)):
+                f.add(cx + o, y, mul((255, 255, 255), k * pulse))
+        label = now.strftime("%H:%M")
+        lw = text_w(label, SMALL)
+        lx = int(clamp(cx - lw // 2, 0, W - lw))
+        f.draw(text_px(label, lx, 0, SMALL), (255, 255, 255))
+        # godziny 0/6/12/18 w wolnym miejscu
+        for hh in (6, 12, 18):
+            hx = hh * W // 24 - text_w(str(hh), SMALL) // 2
+            if abs(hx - lx) > lw + 3:
+                f.draw(text_px(str(hh), hx, 0, SMALL), (55, 55, 70))
+
+
+class Scanner(Clock):
+    """Wiązka jak w KITT; cyfry świecą po przejściu wiązki i powoli gasną."""
+
+    def __init__(self):
+        self.glow = [[0.0] * W for _ in range(H)]
+        self.last = 0
+
+    def draw(self, f, now, t, dt):
+        digits = centered(now.strftime("%H:%M"))
+        dset = set(digits)
+        pos = (math.sin(t * 2.1) * 0.5 + 0.5) * (W + 8) - 4
+        decay = math.exp(-dt * 1.6)
+        g = self.glow
+        lo, hi = sorted((self.last, pos))
+        for y in range(H):
+            row = g[y]
+            for x in range(W):
+                row[x] *= decay
+                if lo - 1 <= x <= hi + 1:
+                    row[x] = 1.0 if (x, y) in dset else max(row[x], 0.22)
+        self.last = pos
+        for y in range(H):
+            for x in range(W):
+                v = g[y][x]
+                if (x, y) in dset:
+                    v = max(v, 0.1)
+                    f.px[y][x] = lerp((120 * v * 2, 0, 0), (255, 200, 170), clamp(v - 0.5) * 2) if v > 0.5 else (255 * v * 2, 10 * v, 0)
+                else:
+                    f.px[y][x] = (90 * v, 0, 0)
+        for o in range(-2, 3):
+            k = 1 - abs(o) / 3
+            for y in range(H):
+                f.add(pos + o, y, (255 * k, 30 * k * k, 10 * k * k))
+
+
+class Rainbow(Clock):
+    """Cyfry wypełnione płynącą tęczą, falujące jak flaga; w tle migoczące gwiazdki."""
+
+    def __init__(self):
+        self.sp = [(random.randrange(W), random.randrange(H), random.random() * 9, random.uniform(1, 3)) for _ in range(40)]
+
+    def draw(self, f, now, t, dt):
+        for x, y, ph, s in self.sp:
+            v = max(0, math.sin(t * s + ph)) ** 8
+            f.set(x, y, (120 * v, 120 * v, 160 * v))
+        txt = now.strftime("%H:%M:%S")
+        x = (W - text_w(txt)) // 2
+        for i, ch in enumerate(txt):
+            dy = round(math.sin(t * 3.2 - i * 0.75))
+            pts = text_px(ch, x, 1 + dy)
+            if ch == ":":
+                k = 0.5 + 0.5 * math.sin(t * 6)
+                f.draw(pts, mul((255, 255, 255), 0.3 + 0.7 * k))
+            else:
+                for (px, py) in pts:
+                    f.set(px, py, hsv(px * 0.011 + py * 0.035 - t * 0.25, 0.9, 1))
+            x += len(BIG[ch][0]) + 1
+
+
+class Warp(Clock):
+    """Lot przez gwiazdy; nowa minuta (i co 15 s mini) = skok w nadprzestrzeń ze smugami."""
+
+    def __init__(self):
+        self.stars = [self.new_star(True) for _ in range(90)]
+        self.warp_t, self.last_min, self.last_q = -9, None, None
+
+    @staticmethod
+    def new_star(anywhere=False):
+        return [random.uniform(-1, 1), random.uniform(-1, 1), random.uniform(0.1, 1) if anywhere else 1.0]
+
+    def draw(self, f, now, t, dt):
+        if self.last_min is not None and now.minute != self.last_min:
+            self.warp_t = t
+        q = now.second // 15
+        if self.last_q is not None and q != self.last_q and now.second != 0:
+            self.warp_t = t - 0.8  # krótszy skok
+        self.last_min, self.last_q = now.minute, q
+        w = clamp(1 - abs((t - self.warp_t) - 0.9) / 0.9)
+        speed = 0.25 + 2.2 * w
+        cx, cy = W / 2, H / 2
+        for s in self.stars:
+            ox, oy = cx + s[0] / s[2] * 70, cy + s[1] / s[2] * 8
+            s[2] -= speed * dt
+            if s[2] <= 0.05:
+                s[:] = self.new_star()
+                continue
+            nx, ny = cx + s[0] / s[2] * 70, cy + s[1] / s[2] * 8
+            if not (-5 < nx < W + 5 and -3 < ny < H + 3):
+                s[:] = self.new_star()
+                continue
+            b = clamp(1.1 - s[2])
+            col = lerp((140, 160, 255), (255, 255, 255), b)
+            steps = max(1, int(math.hypot(nx - ox, ny - oy)))
+            for k in range(steps + 1):
+                a = k / steps
+                f.add(ox + (nx - ox) * a, oy + (ny - oy) * a, mul(col, b * (0.3 + 0.7 * a)))
+        digits = centered(now.strftime("%H:%M"))
+        f.outline(digits, (0, 0, 20))
+        f.draw(digits, lerp((210, 225, 255), (255, 255, 255), w))
+
+
+class Life(Clock):
+    """Gra w życie w tle. Każda mijająca minuta rozpada się na żywe komórki."""
+
+    def __init__(self):
+        self.cells = [[random.random() < 0.18 for _ in range(W)] for _ in range(H)]
+        self.bright = [[0.0] * W for _ in range(H)]
+        self.acc, self.txt = 0.0, None
+
+    def step(self):
+        c = self.cells
+        n = [[False] * W for _ in range(H)]
+        pop = 0
+        for y in range(H):
+            for x in range(W):
+                k = 0
+                for dy in (-1, 0, 1):
+                    row = c[(y + dy) % H]
+                    for dx in (-1, 0, 1):
+                        if (dx or dy) and row[(x + dx) % W]:
+                            k += 1
+                alive = k == 3 or (c[y][x] and k == 2)
+                n[y][x] = alive
+                pop += alive
+        self.cells = n
+        if pop < 40:
+            for _ in range(160):
+                self.cells[random.randrange(H)][random.randrange(W)] = True
+
+    def draw(self, f, now, t, dt):
+        txt = now.strftime("%H:%M")
+        if self.txt is not None and txt != self.txt:
+            for (x, y) in centered(self.txt):  # stara minuta ożywa
+                self.cells[y % H][x % W] = True
+        self.txt = txt
+        self.acc += dt
+        while self.acc > 0.14:
+            self.acc -= 0.14
+            self.step()
+        for y in range(H):
+            for x in range(W):
+                b = self.bright[y][x]
+                b = 1.0 if self.cells[y][x] else b * math.exp(-dt * 5)
+                self.bright[y][x] = b
+                f.px[y][x] = mul(hsv(0.45 + x / W * 0.35 + t * 0.02, 0.8, 1), b * 0.55)
+        digits = centered(txt)
+        f.outline(digits, (0, 0, 0))
+        f.draw(digits, (255, 255, 255))
+
+
+class Aquarium(Clock):
+    """Rybki pływają przed i za cyframi, bąbelki, wodorosty, refleksy światła."""
+
+    FISH = ["#.##.", "###e#", "#.##."]
+
+    def __init__(self):
+        cols = [(255, 120, 0), (255, 220, 0), (255, 60, 150), (80, 220, 255), (255, 90, 40)]
+        self.fish = [{"x": random.uniform(0, W), "y": random.uniform(1, 8), "v": random.choice((-1, 1)) * random.uniform(5, 12),
+                      "c": cols[i % len(cols)], "front": i % 2 == 0, "ph": random.random() * 6} for i in range(7)]
+        self.bubbles = []
+        self.weeds = [(x, random.randint(4, 7), random.random() * 6) for x in (5, 13, 34, 52, 67, 88, 97, 110, 116)]
+
+    def draw_fish(self, f, fi):
+        rows = self.FISH if fi["v"] > 0 else [r[::-1] for r in self.FISH]
+        for r, row in enumerate(rows):
+            for k, ch in enumerate(row):
+                if ch != ".":
+                    f.set(fi["x"] + k, fi["y"] + r, (10, 10, 30) if ch == "e" else fi["c"])
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            base = lerp((0, 45, 95), (0, 12, 35), y / (H - 1))
+            for x in range(W):
+                caust = max(0, math.sin(x * 0.35 + t * 1.3) * math.sin(x * 0.17 - t * 0.9 + y * 0.6)) ** 3
+                f.px[y][x] = lerp(base, (40, 120, 170), caust * (1 - y / H) * 0.7)
+        for x in range(W):
+            f.set(x, H - 1, (70, 55, 20) if x % 3 else (90, 75, 30))
+        for wx, wh, ph in self.weeds:
+            for k in range(wh):
+                y = H - 2 - k
+                sway = math.sin(t * 1.4 + ph + k * 0.6) * k / wh * 1.5
+                f.set(wx + round(sway), y, (20, 150 - k * 10, 40))
+        for fi in self.fish:
+            fi["x"] += fi["v"] * dt
+            fi["y"] += math.sin(t * 1.5 + fi["ph"]) * dt * 1.2
+            fi["y"] = clamp(fi["y"], 0, H - 4)
+            if fi["x"] > W + 6 or fi["x"] < -10:
+                fi["v"] = -fi["v"]
+                fi["y"] = random.uniform(0.5, H - 4.5)
+                fi["front"] = not fi["front"]
+        for fi in self.fish:
+            if not fi["front"]:
+                self.draw_fish(f, fi)
+        digits = centered(now.strftime("%H:%M"))
+        f.draw(digits, (190, 235, 255))
+        for fi in self.fish:
+            if fi["front"]:
+                self.draw_fish(f, fi)
+        if random.random() < 5 * dt:
+            self.bubbles.append([random.choice(self.weeds)[0] + random.uniform(-2, 2), H - 2.0, random.uniform(3, 6), random.random() * 6])
+        keep = []
+        for b in self.bubbles:
+            b[1] -= b[2] * dt
+            if b[1] > -1:
+                keep.append(b)
+                f.add(b[0] + math.sin(t * 4 + b[3]) * 0.8, b[1], (90, 150, 170))
+        self.bubbles = keep
+
+
+class Pong(Clock):
+    """Pong: lewy wynik = godziny, prawy = minuty. Przy zmianie jedna paletka 'przepuszcza' piłkę."""
+
+    PH = 3
+    LX, RX = 1, W - 2
+
+    def __init__(self):
+        self.shown, self.miss = None, None
+        self.ly = self.ry = H / 2
+        self.serve(random.choice((-1, 1)))
+
+    def serve(self, d):
+        self.bx, self.by = W / 2, random.uniform(3, H - 3)
+        self.vx, self.vy = 40 * d, random.choice((-1, 1)) * random.uniform(8, 18)
+
+    def paddle(self, py, side, approaching, dist, dt):
+        half = self.PH / 2
+        if self.miss == side and approaching:
+            goal, speed = (self.by + 6 if self.by < H / 2 else self.by - 6), 25
+        elif approaching:
+            if dist < 10:
+                return clamp(self.by, half, H - 1 - half)
+            goal, speed = self.by, 30
+        else:
+            goal, speed = H / 2, 8
+        goal = clamp(goal, half, H - 1 - half)
+        step = speed * dt
+        return py + clamp(goal - py, -step, step)
+
+    def draw(self, f, now, t, dt):
+        target = (now.hour, now.minute)
+        if self.shown is None:
+            self.shown = target
+        if self.miss is None and target != self.shown:
+            self.miss = "right" if target[0] != self.shown[0] else "left"
+        self.bx += self.vx * dt
+        self.by += self.vy * dt
+        if self.by < 0:
+            self.by, self.vy = -self.by, abs(self.vy)
+        if self.by > H - 1:
+            self.by, self.vy = 2 * (H - 1) - self.by, -abs(self.vy)
+        self.ly = self.paddle(self.ly, "left", self.vx < 0, self.bx - self.LX, dt)
+        self.ry = self.paddle(self.ry, "right", self.vx > 0, self.RX - self.bx, dt)
+        for side, px, py in (("left", self.LX, self.ly), ("right", self.RX, self.ry)):
+            hit = abs(self.by - py) <= self.PH / 2 + 0.6
+            if side == "left" and self.vx < 0 and px < self.bx <= px + 1.5 and hit:
+                self.vx, self.bx = abs(self.vx), px + 1.5
+                self.vy = clamp(self.vy + (self.by - py) * 8, -22, 22)
+            if side == "right" and self.vx > 0 and px - 1.5 <= self.bx < px and hit:
+                self.vx, self.bx = -abs(self.vx), px - 1.5
+                self.vy = clamp(self.vy + (self.by - py) * 8, -22, 22)
+        if self.bx < -3 or self.bx > W + 2:
+            self.shown, self.miss = target, None
+            self.serve(1 if self.bx < 0 else -1)
+        hh, mm = f"{self.shown[0]:02d}", f"{self.shown[1]:02d}"
+        f.draw(text_px(hh, W // 4 - text_w(hh) // 2, 1), (55, 55, 75))
+        f.draw(text_px(mm, 3 * W // 4 - text_w(mm) // 2, 1), (55, 55, 75))
+        for y in range(0, H, 2):
+            f.set(W // 2, y, (40, 40, 40))
+        for px, py in ((self.LX, self.ly), (self.RX, self.ry)):
+            top = int(round(py - self.PH / 2))
+            for y in range(top, top + self.PH):
+                f.set(px, y, (255, 255, 255))
+        f.set(round(self.bx), round(self.by), (255, 210, 0))
+        f.add(round(self.bx - math.copysign(1, self.vx)), round(self.by), (80, 60, 0))
+
+
+# ================================================================ SIEĆ (dane z internetu w tle)
+def http(url, kind="json"):
+    req = urllib.request.Request(url, headers={"User-Agent": "wled-clocks/2.0 (python urllib)",
+                                               "Accept": "application/json" if kind == "json" else "*/*"})
+    with urllib.request.urlopen(req, timeout=12) as r:
+        b = r.read()
+    if kind == "json":
+        return json.loads(b)
+    if kind == "xml":
+        return ET.fromstring(b)
+    return b.decode("utf-8", "replace").strip()
+
+
+def _meteo():
+    return http("https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode({
+        "latitude": LAT, "longitude": LON, "timezone": "auto", "past_days": 1, "forecast_days": 2,
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,"
+                   "wind_direction_10m,pressure_msl,precipitation,is_day",
+        "hourly": "temperature_2m,precipitation_probability,precipitation,pressure_msl,uv_index",
+        "daily": "sunrise,sunset,uv_index_max"}))
+
+
+def _air():
+    return http("https://air-quality-api.open-meteo.com/v1/air-quality?" + urllib.parse.urlencode({
+        "latitude": LAT, "longitude": LON, "current": "pm2_5,pm10,european_aqi"}))
+
+
+def _crypto():
+    return http("https://api.binance.com/api/v3/ticker/24hr?symbols="
+                + urllib.parse.quote('["BTCUSDT","ETHUSDT","SOLUSDT","DOGEUSDT"]'))
+
+
+def _quakes():
+    out = []
+    for q in http("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson")["features"]:
+        p, c = q["properties"], q["geometry"]["coordinates"]
+        out.append((c[0], c[1], p.get("mag") or 0, p.get("place") or "", p.get("time") or 0))
+    return out
+
+
+def _kp():
+    last = http("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json")[-1]
+    return float(last["Kp"] if isinstance(last, dict) else last[1])
+
+
+def _hn():
+    ids = http("https://hacker-news.firebaseio.com/v0/topstories.json")[:10]
+    return [(http(f"https://hacker-news.firebaseio.com/v0/item/{i}.json") or {}).get("title", "") for i in ids]
+
+
+BANNER = {"city": "Wrocławiu", "lat": 51.11, "lon": 17.03}  # transparent ludzika: miasto (w miejscowniku) i współrzędne
+
+
+def _banner_weather():
+    return http("https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode({
+        "latitude": BANNER["lat"], "longitude": BANNER["lon"], "timezone": "auto", "forecast_days": 2,
+        "current": "temperature_2m", "daily": "temperature_2m_max,weather_code"}))
+
+
+def _news():
+    root = http("https://tvn24.pl/najnowsze.xml", "xml")
+    return [html.unescape(i.findtext("title") or "").strip() for i in root.iter("item")][:12]
+
+
+SOURCES = {  # klucz: (funkcja, co ile sekund odświeżać)
+    "meteo": (_meteo, 600),
+    "air": (_air, 900),
+    "nbp": (lambda: http("https://api.nbp.pl/api/exchangerates/tables/A/last/2/?format=json"), 3600),
+    "gold": (lambda: http("https://api.nbp.pl/api/cenyzlota/last/30/?format=json"), 3600),
+    "crypto": (_crypto, 60),
+    "klines": (lambda: [float(k[4]) for k in http("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=120")], 600),
+    "iss": (lambda: http("https://api.wheretheiss.at/v1/satellites/25544"), 5),
+    "astros": (lambda: http("http://api.open-notify.org/astros.json"), 3600),
+    "quakes": (_quakes, 600),
+    "kp": (_kp, 900),
+    "height": (lambda: int(http("https://mempool.space/api/blocks/tip/height", "text")), 60),
+    "hn": (_hn, 900),
+    "news": (_news, 600),
+    "names": (lambda: http("https://nameday.abalin.net/api/V2/today/pl")["data"]["pl"], 3600),
+    "launch": (lambda: [(x["name"], x["net"]) for x in http("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=5&mode=list")["results"]], 3600),
+    "joke": (lambda: http("https://icanhazdadjoke.com/")["joke"], 300),
+    "baner": (lambda: _banner_weather(), 900),
+    "wled": (lambda: http(f"http://{PANEL['host']}/json/state"), 10),
+}
+
+
+class Net:
+    """Pobiera dane w osobnym wątku – tylko te, których używa efekt widoczny w ostatnich 90 s; cache z TTL."""
+
+    def __init__(self):
+        self.data, self.when, self.want, self.err, self.fail = {}, {}, {}, {}, {}
+        self.thread = None
+
+    def get(self, key):
+        self.want[key] = time.monotonic()
+        if self.thread is None:
+            self.thread = threading.Thread(target=self.loop, daemon=True)
+            self.thread.start()
+        return self.data.get(key)
+
+    def fetch(self, key):
+        try:
+            self.data[key] = SOURCES[key][0]()
+            self.when[key] = time.monotonic()
+            self.err.pop(key, None)
+            self.fail.pop(key, None)
+        except Exception as e:  # noqa: BLE001
+            self.err[key] = (str(e) or type(e).__name__)[:60]
+            self.fail[key] = time.monotonic()
+
+    def due(self, key, now):
+        ttl = SOURCES[key][1]
+        if key in self.fail and now - self.fail[key] < min(ttl, 60):
+            return False
+        return key not in self.when or now - self.when[key] >= ttl
+
+    def loop(self):
+        while True:
+            now = time.monotonic()
+            for key, w in list(self.want.items()):
+                if now - w < 90 and self.due(key, now):
+                    self.fetch(key)
+            time.sleep(0.5)
+
+    def prefetch(self):
+        for key in list(self.want):
+            if key not in self.data:
+                self.fetch(key)
+
+    def status(self):
+        now = time.monotonic()
+        keys = [k for k, w in self.want.items() if now - w < 3]
+        if not keys:
+            return ""
+        parts = []
+        for k in keys:
+            if k in self.err:
+                parts.append(f"{k}: błąd ({self.err[k]})")
+            elif k in self.when:
+                parts.append(f"{k}: ok, {int(now - self.when[k])} s temu")
+            else:
+                parts.append(f"{k}: pobieram…")
+        return ", ".join(parts)
+
+
+NET = Net()
+
+
+def meteo_now(m):
+    return dtm.datetime.now(dtm.timezone.utc).replace(tzinfo=None) + dtm.timedelta(seconds=m.get("utc_offset_seconds", 0))
+
+
+def meteo_idx(m):
+    key, times = meteo_now(m).strftime("%Y-%m-%dT%H:00"), m["hourly"]["time"]
+    return times.index(key) if key in times else 0
+
+
+def meteo_day(m):
+    key, days = meteo_now(m).strftime("%Y-%m-%d"), m["daily"]["time"]
+    return days.index(key) if key in days else 0
+
+
+def wmo(code):
+    if code == 0:
+        return "slonce", "POGODNIE"
+    if code in (1, 2):
+        return "czesciowo", "CHMURKI"
+    if code == 3:
+        return "chmury", "POCHMURNO"
+    if code in (45, 48):
+        return "mgla", "MGŁA"
+    if 51 <= code <= 57:
+        return "deszcz", "MŻAWKA"
+    if 61 <= code <= 67:
+        return "deszcz", "DESZCZ"
+    if 80 <= code <= 82:
+        return "ulewa", "ULEWA"
+    if 71 <= code <= 77 or code in (85, 86):
+        return "snieg", "ŚNIEG"
+    if code >= 95:
+        return "burza", "BURZA"
+    return "chmury", "?"
+
+
+# ================================================================ wspólne narzędzia efektów
+REG = {}
+
+
+def reg(name):
+    def deco(cls):
+        REG[name] = cls
+        return cls
+    return deco
+
+
+def grad(stops, v):
+    if v <= stops[0][0]:
+        return stops[0][1]
+    for (a, ca), (b, cb) in zip(stops, stops[1:]):
+        if v <= b:
+            return lerp(ca, cb, (v - a) / (b - a))
+    return stops[-1][1]
+
+
+TEMP_STOPS = [(-20, (200, 200, 255)), (-5, (60, 120, 255)), (5, (0, 220, 220)), (14, (80, 255, 80)),
+              (22, (255, 230, 0)), (30, (255, 120, 0)), (38, (255, 0, 0))]
+
+
+def temp_color(v):
+    return grad(TEMP_STOPS, v)
+
+
+def hash1(n):
+    n = (int(n) * 374761393 + 668265263) & 0xFFFFFFFF
+    n = ((n ^ (n >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((n ^ (n >> 16)) & 0xFFFF) / 65535.0
+
+
+def noise1(x):
+    i = math.floor(x)
+    fr = x - i
+    u = fr * fr * (3 - 2 * fr)
+    return hash1(i) * (1 - u) + hash1(i + 1) * u
+
+
+def noise2(x, y):
+    ix, iy = math.floor(x), math.floor(y)
+    fx, fy = x - ix, y - iy
+    ux, uy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    a0, a1 = hash1(ix * 7919 + iy * 104729), hash1((ix + 1) * 7919 + iy * 104729)
+    b0, b1 = hash1(ix * 7919 + (iy + 1) * 104729), hash1((ix + 1) * 7919 + (iy + 1) * 104729)
+    a, b = a0 + (a1 - a0) * ux, b0 + (b1 - b0) * ux
+    return a + (b - a) * uy
+
+
+NARROW = W < 100   # np. połowa panelu (60 kolumn): gęste układy pokazujemy na zmianę, „stronami”
+
+
+def page(t, n, secs=5):
+    """Która strona (0..n-1) jest teraz widoczna – zmiana co secs sekund."""
+    return int(t / secs) % n
+
+
+def clock_big(f, now, c=(255, 255, 255), fmt="%H:%M", x=None, y=1, outline=(0, 0, 0)):
+    s = now.strftime(fmt)
+    pts = text_px(s, (W - text_w(s)) // 2 if x is None else x, y)
+    if outline is not None:
+        f.outline(pts, outline)
+    f.draw(pts, c)
+    return pts
+
+
+def small_time(f, now, x=None, y=0, c=(255, 255, 255), fmt="%H:%M", outline=(0, 0, 0)):
+    s = now.strftime(fmt)
+    pts = text_px(s, W - text_w(s, SMALL) if x is None else x, y, SMALL)
+    if outline is not None:
+        f.outline(pts, outline)
+    f.draw(pts, c)
+
+
+def loading(f, t, key, what):
+    err = NET.err.get(key)
+    s = f"{what}: brak danych" if err else what + "." * (int(t * 3) % 4)
+    f.draw(text_px(s, max(0, (W - text_w(s, TXT)) // 2), 0, TXT), (200, 60, 40) if err else (80, 80, 110))
+
+
+def scroll_px(t, speed):
+    """Przesunięcie tekstu w pikselach – zawsze równy krok co klatkę (np. 1 px na klatkę albo 1 px co 2 klatki),
+    więc tekst nie szarpie. speed w px/s, mnożone przez ustawienie „tempo tekstu”."""
+    fdt = ANIM["tempo"] / ANIM["fps"]          # czas animacji na klatkę
+    n = int(round(t / fdt))                   # numer klatki
+    ppf = max(0.01, speed * ANIM["text"] * fdt)
+    return n * round(ppf) if ppf >= 1 else n // max(1, round(1 / ppf))
+
+
+def scroll_time(dist, speed):
+    """Ile sekund animacji zajmuje przewinięcie dist pikseli (zgodnie ze scroll_px)."""
+    fdt = ANIM["tempo"] / ANIM["fps"]
+    ppf = max(0.01, speed * ANIM["text"] * fdt)
+    per_frame = round(ppf) if ppf >= 1 else 1 / max(1, round(1 / ppf))
+    return dist / per_frame * fdt
+
+
+def scroll_segs(f, segs, t, speed=28, y=0, x_min=0, font=None, gap=18):
+    """Pasek przewijany w pętli: segs = [(tekst, kolor), ...]."""
+    font = font or TXT
+    widths = [text_w(s, font) + 1 for s, _ in segs]
+    total = sum(widths) + gap
+    k = W - scroll_px(t, speed) % total
+    while k > x_min:
+        k -= total
+    while k < W:
+        x = k
+        for (s, c), w in zip(segs, widths):
+            if x + w >= x_min and x < W:
+                for px, py in text_px(s, x, y, font):
+                    if x_min <= px < W:
+                        f.set(px, py, c)
+            x += w
+        k += total
+    return total
+
+
+def disc(f, cx, cy, r, c, add=False):
+    put = f.add if add else f.set
+    ir = int(r) + 1
+    for oy in range(-ir, ir + 1):
+        for ox in range(-ir, ir + 1):
+            if ox * ox + oy * oy < r * r:
+                put(cx + ox, cy + oy, c)
+
+
+def sprite(f, rows, x, y, pal, flip=False):
+    """rows: lista napisów; znak -> kolor z pal (kropka = przezroczyste)."""
+    for r, row in enumerate(rows):
+        if flip:
+            row = row[::-1]
+        for k, ch in enumerate(row):
+            if ch != ".":
+                f.set(x + k, y + r, pal[ch])
+
+
+class Persist:
+    """Bufor z poświatą (smugi): add() dokłada światło, fade() wygasza, blit() rysuje na klatce."""
+
+    def __init__(self):
+        self.b = [[(0.0, 0.0, 0.0)] * W for _ in range(H)]
+
+    def fade(self, k):
+        self.b = [[(r * k, g * k, b * k) for r, g, b in row] for row in self.b]
+
+    def add(self, x, y, c):
+        x, y = int(math.floor(x)), int(math.floor(y))
+        if 0 <= x < W and 0 <= y < H:
+            o = self.b[y][x]
+            self.b[y][x] = (o[0] + c[0], o[1] + c[1], o[2] + c[2])
+
+    def blit(self, f):
+        for y in range(H):
+            row, src = f.px[y], self.b[y]
+            f.px[y] = [(a[0] + b[0], a[1] + b[1], a[2] + b[2]) for a, b in zip(row, src)]
+
+
+# mapa świata 120x12 (3° x 15° na piksel), zakresy kolumn lądu w każdym wierszu
+_MAP = {0: [(27, 38), (40, 53), (65, 68), (78, 84), (88, 95)], 1: [(5, 40), (42, 55), (62, 119)],
+        2: [(17, 41), (57, 106), (111, 115)], 3: [(18, 36), (57, 63), (64, 68), (69, 100), (103, 107)],
+        4: [(23, 31), (54, 79), (82, 90), (91, 100)], 5: [(30, 43), (54, 76), (85, 86), (92, 96), (100, 102)],
+        6: [(33, 48), (63, 73), (93, 96), (98, 101), (103, 106)], 7: [(36, 46), (64, 71), (74, 76), (98, 111)],
+        8: [(35, 41), (66, 69), (98, 110), (115, 119)], 9: [(35, 38)], 10: [(10, 44), (58, 119)], 11: [(0, 119)]}
+_LAND120 = {(x, y) for y, rs in _MAP.items() for a, b in rs for x in range(a, b + 1)}
+LAND = {(x, y) for x in range(W) for y in range(H) if (int((x + 0.5) * 120 / W), y) in _LAND120}
+
+
+def map_xy(lat, lon):
+    return (lon + 180) / 360 * W, (90 - lat) / 15
+
+
+def subsolar(now):
+    """(deklinacja słońca w radianach, długość geograficzna punktu podsłonecznego w stopniach)"""
+    u = now.astimezone(dtm.timezone.utc)
+    g = 2 * math.pi / 365 * (u.timetuple().tm_yday - 1 + (u.hour - 12) / 24)
+    eot = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                    - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g)
+            + 0.000907 * math.sin(2 * g) - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    return decl, -15 * (u.hour + u.minute / 60 + u.second / 3600 - 12 + eot / 60)
+
+
+def world_map(f, now, k=1.0):
+    dec, slon = subsolar(now)
+    sd, cd = math.sin(dec), math.cos(dec)
+    for y in range(H):
+        lat = math.radians(90 - (y + 0.5) * 15)
+        sl, cl = math.sin(lat), math.cos(lat)
+        row = f.px[y]
+        for x in range(W):
+            cz = sl * sd + cl * cd * math.cos(math.radians(-180 + (x + 0.5) * 360 / W - slon))
+            light = clamp(cz * 4 + 0.5, 0.15, 1.0) * k
+            if (x, y) in LAND:
+                c = (140, 150, 160) if y in (0, 10, 11) else (30, 110, 35)
+            else:
+                c = (0, 30, 80)
+            row[x] = mul(c, light)
+
+
+def draw_icon(f, kind, x0, y0, t, day=1):
+    cx, cy = x0 + 8, y0 + 6
+
+    def sun(x, y):
+        disc(f, x, y, 2.8, (255, 215, 50))
+        for i in range(8):
+            a = i * math.pi / 4 + t * 0.5
+            k = 0.6 + 0.4 * math.sin(t * 3 + i)
+            for r in (4.2, 5.2):
+                f.add(x + math.cos(a) * r, y + math.sin(a) * r, mul((255, 140, 20), k))
+
+    def moon(x, y):
+        for oy in range(-4, 5):
+            for ox in range(-4, 5):
+                if ox * ox + oy * oy < 12.5 and (ox + 2) ** 2 + (oy + 1) ** 2 >= 10:
+                    f.set(x + ox, y + oy, (230, 230, 190))
+
+    def cloud(x, y, col):
+        for bx, by, r in ((-3.5, 1, 2.6), (0, -0.5, 3.3), (3.5, 1, 2.5), (0, 1.5, 2.8)):
+            disc(f, x + bx, y + by, r, col)
+
+    light = sun if day else moon
+    if kind == "slonce":
+        light(cx, cy)
+    elif kind == "czesciowo":
+        light(cx - 3, cy - 2)
+        cloud(cx + 2 + math.sin(t * 0.5), cy + 2, (200, 200, 215))
+    elif kind == "chmury":
+        cloud(cx - 2 + math.sin(t * 0.4), cy - 1, (110, 110, 125))
+        cloud(cx + 2, cy + 1.5, (190, 190, 205))
+    elif kind == "mgla":
+        for y in range(1, 12, 2):
+            for x in range(x0, x0 + 17):
+                f.set(x, y0 + y, mul((150, 150, 165), 0.4 + 0.3 * (1 + math.sin(x * 0.5 + t * (1 + y * 0.15) + y))))
+    elif kind == "snieg":
+        cloud(cx, cy - 2.5, (170, 170, 185))
+        for i in range(5):
+            f.set(x0 + 3 + i * 2.7 + math.sin(t * 2 + i), cy + 1 + (t * 2.5 + i * 1.3) % 6, (255, 255, 255))
+    else:
+        n = 4 if kind == "deszcz" else 7
+        for i in range(n):
+            x, y = x0 + 3 + i * 12 / n, cy + 1 + (t * 9 + i * 1.7) % 6
+            f.set(x, y, (90, 150, 255))
+            f.set(x, y - 1, (40, 70, 160))
+        cloud(cx, cy - 2.5, (150, 150, 165) if kind == "deszcz" else (75, 75, 90))
+        if kind == "burza" and (t % 2.7) < 0.25:
+            f.line(cx, cy, cx - 2, cy + 3, (255, 255, 120))
+            f.line(cx - 2, cy + 3, cx + 1, cy + 3, (255, 255, 120))
+            f.line(cx + 1, cy + 3, cx - 1, cy + 6, (255, 255, 120))
+
+
+PL_DAYS = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]
+PL_MONTHS = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września",
+             "października", "listopada", "grudnia"]
+PL_MON3 = ["STY", "LUT", "MAR", "KWI", "MAJ", "CZE", "LIP", "SIE", "WRZ", "PAŹ", "LIS", "GRU"]
+
+# ================================================================ EFEKTY Z DANYMI Z INTERNETU
+@reg("pogoda")
+class Weather(Clock):
+    """Pogoda teraz (Open-Meteo): animowana ikona, temperatura w jej kolorze, opis, wiatr i godzina."""
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        if not m:
+            return loading(f, t, "meteo", "pogoda")
+        c = m["current"]
+        kind, desc = wmo(c["weather_code"])
+        temp = round(c["temperature_2m"])
+        s = f"{temp}°"
+        if NARROW:
+            pg = page(t, 3)
+            if pg == 0:
+                draw_icon(f, kind, 2, 0, t, c.get("is_day", 1))
+                f.draw(text_px(s, 22, 1), temp_color(temp))
+            elif pg == 1:
+                f.text(desc, (W - text_w(desc, SMALL)) // 2, 0, (210, 210, 230), SMALL)
+                w_ = f"{round(c['wind_speed_10m'])}KM/H"
+                f.text(w_, (W - text_w(w_, SMALL)) // 2, 6, (110, 170, 230), SMALL)
+            else:
+                clock_big(f, now)
+            return
+        draw_icon(f, kind, 0, 0, t, c.get("is_day", 1))
+        f.draw(text_px(s, 19, 1), temp_color(temp))
+        x2 = 19 + text_w(s) + 4
+        wind = f"{round(c['wind_speed_10m'])}KM/H"
+        tx = W - text_w(now.strftime("%H:%M"))
+        fits = x2 + max(text_w(desc, SMALL), text_w(wind, SMALL)) < tx - 2
+        if fits or page(t, 2) == 0:
+            f.draw(text_px(desc, x2, 0, SMALL), (210, 210, 230))
+            f.draw(text_px(wind, x2, 6, SMALL), (110, 170, 230))
+        if fits or page(t, 2) == 1:
+            clock_big(f, now, x=tx)
+
+
+@reg("prognoza")
+class Forecast(Clock):
+    """Najbliższe 24 h (Open-Meteo): krzywa temperatury w jej kolorach, niebieskie słupki = szansa opadów."""
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        if not m:
+            return loading(f, t, "meteo", "prognoza")
+        h, i0 = m["hourly"], meteo_idx(m)
+        temps = [v if v is not None else 0 for v in h["temperature_2m"][i0:i0 + 25]]
+        probs = h["precipitation_probability"][i0:i0 + 25]
+        hours = [int(s[11:13]) for s in h["time"][i0:i0 + 25]]
+        n = len(temps) - 1
+        if n < 2:
+            return loading(f, t, "meteo", "prognoza")
+        lo, hi = min(temps), max(temps)
+        span = max(hi - lo, 3)
+        for x in range(W):
+            p = x / (W - 1) * n
+            i = min(int(p), n - 1)
+            v = temps[i] + (temps[i + 1] - temps[i]) * (p - i)
+            pr = (probs[i] or 0) / 100
+            if pr > 0.05:
+                for yy in range(round(12 - pr * 6), 12):
+                    f.add(x, yy, (0, 50 * pr + 10, 160 * pr + 30))
+            y = 10.5 - (v - lo) / span * 7.5
+            col = temp_color(v)
+            for yy in range(int(y) + 1, 12):
+                f.add(x, yy, mul(col, 0.1))
+            f.set(x, y, col)
+        lab = f"{round(temps[0])}°"
+        for i, hr in enumerate(hours):
+            x = round(i * (W - 1) / n)
+            hx = x - text_w(str(hr), SMALL) // 2
+            if hr % 6 == 0 and hx > text_w(lab, SMALL) + 3 and hx + text_w(str(hr), SMALL) <= W:
+                f.draw(text_px(str(hr), hx, 0, SMALL), (90, 90, 130))
+        f.text(lab, 0, 0, temp_color(temps[0]), SMALL, (0, 0, 0))
+        f.add(0, 10.5 - (temps[0] - lo) / span * 7.5, mul((255, 255, 255), 0.5 + 0.5 * math.sin(t * 5)))
+
+
+@reg("opady")
+class Precip(Clock):
+    """Pada tak, jak pada naprawdę: gęstość kropli = opad i szansa opadów teraz (Open-Meteo); przy mrozie płatki śniegu."""
+
+    def __init__(self):
+        self.drops, self.acc = [], 0.0
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        inten, snow, prob = 0.15, False, None
+        if m:
+            c = m["current"]
+            prob = m["hourly"]["precipitation_probability"][meteo_idx(m)] or 0
+            inten = clamp((c.get("precipitation") or 0) / 3 + prob / 100 * 0.35)
+            snow = wmo(c["weather_code"])[0] == "snieg" or c["temperature_2m"] < 0.5
+        for y in range(H):
+            c = lerp((12, 14, 22), (4, 6, 12), y / H)
+            for x in range(W):
+                f.px[y][x] = c
+        for x in range(W):
+            for y in range(3):
+                v = noise2(x * 0.08 + t * 0.2, y * 0.6) * (0.3 + inten)
+                f.add(x, y, mul((70, 75, 90), v * (1 - y / 3)))
+        self.acc += (3 + inten * 160) * dt
+        while self.acc >= 1:
+            self.acc -= 1
+            self.drops.append([random.uniform(0, W), -1.0, random.uniform(3, 5) if snow else random.uniform(24, 34),
+                               random.random() * 6])
+        keep = []
+        for d in self.drops:
+            d[1] += d[2] * dt
+            if snow:
+                d[0] += math.sin(t * 2 + d[3]) * dt * 3
+                if d[1] < H:
+                    f.add(d[0], d[1], (200, 200, 220))
+                    keep.append(d)
+            elif d[1] < H - 1:
+                f.add(d[0], d[1], (70, 120, 220))
+                f.add(d[0], d[1] - 1, (25, 45, 90))
+                keep.append(d)
+            else:
+                f.add(d[0] - 1, H - 1, (60, 90, 150))
+                f.add(d[0] + 1, H - 1, (60, 90, 150))
+        self.drops = keep
+        lab = f"{prob}%" if prob is not None else ""
+        tw = text_w(now.strftime("%H:%M"))
+        clock_big(f, now, (200, 215, 255), x=max((W - tw) // 2, min(W - tw, text_w(lab, SMALL) + 3)))
+        if lab:
+            f.text(lab, 0, 0, (120, 160, 255), SMALL, (0, 0, 0))
+
+
+@reg("wiatr")
+class Wind(Clock):
+    """Wiatr z Open-Meteo: smugi lecą z prawdziwą prędkością i z prawdziwego kierunku, obok km/h i skąd wieje."""
+
+    DIRS = ["PN", "PN-WS", "WSCH", "PD-WS", "PD", "PD-ZA", "ZACH", "PN-ZA"]
+
+    def __init__(self):
+        self.p = [[random.uniform(0, W), random.uniform(0, H)] for _ in range(70)]
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        spd, deg = (m["current"]["wind_speed_10m"], m["current"]["wind_direction_10m"]) if m else (10, 270)
+        vx = -math.sin(math.radians(deg)) * (4 + spd * 1.6)
+        vy = math.cos(math.radians(deg)) * (1 + spd * 0.08)
+        for q in self.p:
+            q[0] += vx * dt * (0.7 + 0.6 * noise1(q[1] * 3 + t))
+            q[1] += vy * dt + math.sin(t * 2 + q[0] * 0.1) * dt
+            q[0] %= W
+            q[1] %= H
+            n = max(2, int(abs(vx) * 0.12))
+            for k in range(n):
+                f.add(q[0] - vx / abs(vx or 1) * k, q[1], mul((120, 170, 220), (1 - k / n) * 0.8))
+        s1 = f"{round(spd)} KM/H"
+        if NARROW and page(t, 2):
+            clock_big(f, now)
+            return
+        f.text(s1, 1, 0, (230, 230, 255), SMALL, (0, 0, 0))
+        f.text(self.DIRS[round(deg / 45) % 8], 1, 6, (130, 190, 255), SMALL, (0, 0, 0))
+        if not NARROW:
+            clock_big(f, now, x=W - text_w(now.strftime("%H:%M")))
+
+
+@reg("termometr")
+class Thermo(Clock):
+    """Termometr rtęciowy od -20 do +40°C: temperatura teraz, odczuwalna i wilgotność (Open-Meteo)."""
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        if not m:
+            return loading(f, t, "meteo", "termometr")
+        c = m["current"]
+        temp = c["temperature_2m"]
+        info = [f"{round(temp)}° ODCZ {round(c['apparent_temperature'])}°", f"WILG {c['relative_humidity_2m']}%",
+                now.strftime("%H:%M")]
+        if NARROW:
+            f.text(info[page(t, 3, 4)], 0, 0, (220, 220, 230), SMALL)
+        else:
+            both = info[0] + " " + info[1]
+            if text_w(both, SMALL) > W - text_w(info[2], SMALL) - 4:
+                both = info[page(t, 2, 4)]
+            f.text(both, 0, 0, (220, 220, 230), SMALL)
+            small_time(f, now, c=(150, 150, 170))
+        x_of = lambda v: 8 + (v + 20) / 60 * (W - 12)
+        disc(f, 4, 8.5, 3, temp_color(temp))
+        for x in range(7, W - 3):
+            f.set(x, 6, (45, 45, 55))
+            f.set(x, 10, (45, 45, 55))
+            v = (x - 8) / (W - 12) * 60 - 20
+            if x <= x_of(temp):
+                glow = 0.85 + 0.15 * math.sin(x * 0.4 - t * 4)
+                for y in (7, 8, 9):
+                    f.set(x, y, mul(temp_color(v), glow))
+            if abs(v % 10) < 0.3 or abs(v % 10 - 10) < 0.3:
+                f.set(x, 11, (200, 200, 200) if abs(v) < 1 else (80, 80, 90))
+        for y in (7, 8, 9):
+            f.set(W - 3, y, (45, 45, 55))
+
+
+@reg("smog")
+class Smog(Clock):
+    """Jakość powietrza (Open-Meteo): PM2.5 i indeks EAQI; im gorzej, tym gęstszy brunatny smog nad miastem."""
+
+    LEVELS = [(20, "B. DOBRE", (0, 230, 120)), (40, "DOBRE", (130, 230, 0)), (60, "UMIARK.", (255, 220, 0)),
+              (80, "ZŁE", (255, 120, 0)), (100, "B. ZŁE", (255, 30, 30)), (9999, "FATALNE", (190, 0, 190))]
+
+    def __init__(self):
+        rnd = random.Random(3)
+        self.b = []
+        x = 0
+        while x < W:
+            w = rnd.randint(5, 11)
+            self.b.append((x, w, rnd.randint(4, 8), rnd.random()))
+            x += w + rnd.randint(0, 2)
+
+    def draw(self, f, now, t, dt):
+        a = NET.get("air")
+        if not a:
+            return loading(f, t, "air", "powietrze")
+        cur = a["current"]
+        pm, aqi = cur.get("pm2_5") or 0, cur.get("european_aqi") or 0
+        dens = clamp(pm / 60)
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = lerp((5, 10, 30), (40, 30, 15), dens * y / H)
+        for bx, bw, bh, ph in self.b:
+            for x in range(bx, bx + bw):
+                for y in range(H - bh, H):
+                    lit = (x + y) % 2 == 0 and y % 2 == 0 and hash1(x * 31 + y * 7 + int(ph * 99)) > 0.6
+                    f.set(x, y, (120, 100, 40) if lit else (18, 18, 24))
+        for y in range(H):
+            for x in range(W):
+                n = noise2(x * 0.06 - t * 0.3, y * 0.4 + t * 0.1)
+                f.add(x, y, mul((110, 90, 60), dens * n * 0.9))
+        name, col = next((nm, c) for lim, nm, c in self.LEVELS if aqi <= lim)
+        if NARROW:
+            [lambda: f.text(f"PM2.5 {pm:.0f}", 0, 0, (230, 230, 230), SMALL, (0, 0, 0)),
+             lambda: f.text(name, 0, 0, col, SMALL, (0, 0, 0)),
+             lambda: small_time(f, now, x=0)][page(t, 3, 4)]()
+            return
+        pm_s = f"PM2.5 {pm:.0f}"
+        f.text(pm_s, 0, 0, (230, 230, 230), SMALL, (0, 0, 0))
+        f.text(name, text_w(pm_s, SMALL) + 5, 0, col, SMALL, (0, 0, 0))
+        small_time(f, now)
+
+
+@reg("kursy")
+class Rates(Clock):
+    """Kursy walut NBP (tabela A) przewijane jak na giełdzie; ▲ zielony = kurs wyższy niż wczoraj, ▼ czerwony = niższy."""
+
+    CODES = ["EUR", "USD", "CHF", "GBP", "JPY", "CZK", "NOK", "SEK", "DKK", "HUF", "UAH", "CNY", "CAD", "AUD"]
+
+    def draw(self, f, now, t, dt):
+        d = NET.get("nbp")
+        if not d:
+            return loading(f, t, "nbp", "kursy NBP")
+        cur = {r["code"]: r["mid"] for r in d[-1]["rates"]}
+        old = {r["code"]: r["mid"] for r in d[0]["rates"]}
+        segs = []
+        for code in self.CODES:
+            if code in cur:
+                v, o = cur[code], old.get(code, cur[code])
+                arrow, col = ("▲", (0, 230, 90)) if v > o else ("▼", (255, 50, 40)) if v < o else ("=", (150, 150, 150))
+                segs += [(code, (255, 190, 40)), (f"{v:.4f}".replace(".", ","), (240, 240, 240)), (arrow + "   ", col)]
+        hm = now.strftime("%H:%M")
+        bw = text_w("NBP", SMALL) + 2 if NARROW else text_w(hm, SMALL) + 2
+        scroll_segs(f, segs, t, 26, 0, bw + 2)
+        f.rect(0, 0, bw, 11, (0, 25, 70))
+        f.text("NBP", (bw + 1 - text_w("NBP", SMALL)) // 2, 3 if NARROW else 0, (255, 210, 60), SMALL)
+        if not NARROW:
+            f.text(hm, 1, 6, (200, 200, 220), SMALL)
+
+
+@reg("zloto")
+class Gold(Clock):
+    """Cena złota NBP (zł za gram) z połyskiem i wykresem z 30 ostatnich notowań."""
+
+    def draw(self, f, now, t, dt):
+        g = NET.get("gold")
+        if not g:
+            return loading(f, t, "gold", "złoto")
+        prices = [x["cena"] for x in g]
+        s = f"{prices[-1]:.2f} zł".replace(".", ",")
+        chart_only = NARROW and page(t, 2, 6) == 1
+        sweep = (t * 40) % 160 - 20 if not chart_only else -99
+        if not chart_only:
+            for x, y in text_px(s, 0, 0, TXT):
+                f.set(x, y, lerp((200, 140, 20), (255, 255, 200), clamp(1 - abs(x - sweep) / 8)))
+            if NARROW:
+                return
+        lo, hi = min(prices), max(prices)
+        x0, n = (0 if NARROW else 62), len(prices)
+        for x in range(x0, W):
+            p = (x - x0) / (W - 1 - x0) * (n - 1)
+            i = min(int(p), n - 2)
+            v = prices[i] + (prices[i + 1] - prices[i]) * (p - i)
+            y = 10.5 - (v - lo) / max(hi - lo, 0.01) * 9
+            for yy in range(int(y) + 1, 12):
+                f.set(x, yy, (40, 28, 0))
+            f.set(x, y, (255, 200, 50))
+        f.add(W - 1, 10.5 - (prices[-1] - lo) / max(hi - lo, 0.01) * 9, mul((255, 255, 255), 0.5 + 0.5 * math.sin(t * 6)))
+
+
+@reg("krypto")
+class Crypto(Clock):
+    """Kryptowaluty z Binance: BTC, ETH, SOL, DOGE w dolarach i zmiana 24 h; w tle wykres BTC z 5 dni."""
+
+    def draw(self, f, now, t, dt):
+        tick, kl = NET.get("crypto"), NET.get("klines")
+        if kl:
+            lo, hi = min(kl), max(kl)
+            for x in range(W):
+                v = kl[int(x / W * len(kl))]
+                y = 11 - (v - lo) / max(hi - lo, 1) * 10
+                for yy in range(int(y), 12):
+                    f.set(x, yy, (22, 12, 0))
+                f.set(x, y, (70, 40, 0))
+        if not tick:
+            return loading(f, t, "crypto", "krypto")
+        segs = []
+        for s in tick:
+            p, pct = float(s["lastPrice"]), float(s["priceChangePercent"])
+            ps = f"{p:,.0f}".replace(",", " ") if p >= 1000 else f"{p:.2f}" if p >= 1 else f"{p:.4f}"
+            segs += [(s["symbol"].replace("USDT", ""), (255, 160, 20)), (f"${ps}", (240, 240, 240)),
+                     (f"{pct:+.1f}%   ", (0, 230, 90) if pct >= 0 else (255, 50, 40))]
+        scroll_segs(f, segs, t, 26)
+
+
+@reg("iss")
+class ISS(Clock):
+    """Mapa świata z granicą dnia i nocy, a na niej Międzynarodowa Stacja Kosmiczna na żywo i jej ślad (wheretheiss.at)."""
+
+    def __init__(self):
+        self.trail, self.ts = [], None
+
+    def draw(self, f, now, t, dt):
+        world_map(f, dtm.datetime.now().astimezone(), 0.8)
+        hx, hy = map_xy(LAT, LON)
+        f.set(hx, hy, (255, 40, 40) if int(t * 2) % 2 else (120, 0, 0))
+        d = NET.get("iss")
+        if not d:
+            return
+        if d["timestamp"] != self.ts:
+            self.ts = d["timestamp"]
+            self.trail = (self.trail + [(d["latitude"], d["longitude"])])[-80:]
+        for i, (la, lo) in enumerate(self.trail[:-1]):
+            f.add(*map_xy(la, lo), mul((255, 200, 80), 0.15 + 0.5 * i / len(self.trail)))
+        x, y = map_xy(d["latitude"], d["longitude"])
+        for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            f.add(x + ox, y + oy, (90, 90, 90))
+        f.set(x, y, (255, 255, 255))
+        info = ["ISS", f"{d['altitude']:.0f} KM", f"{d['velocity']:.0f} KM/H"][int(t / 3) % 3]
+        f.text(info, 1, 0, (255, 230, 140), SMALL, (0, 0, 0))
+
+
+@reg("kosmonauci")
+class Astronauts(Clock):
+    """Ilu ludzi jest teraz w kosmosie (open-notify): ludziki w nieważkości, a potem przewijają się ich nazwiska."""
+
+    SUIT = [".o.", "www", ".w.", "w.w"]
+
+    def draw(self, f, now, t, dt):
+        for i in range(40):
+            f.set(hash1(i) * W, hash1(i + 99) * H, mul((120, 120, 160), 0.3 + 0.7 * max(0, math.sin(t * 1.5 + i))))
+        d = NET.get("astros")
+        if not d:
+            return loading(f, t, "astros", "kosmos")
+        n = d["number"]
+        for i in range(n):
+            x = (i * 37 + t * (3 + i % 3)) % (W + 6) - 3
+            y = 4 + 3.5 * math.sin(t * 0.6 + i * 1.7)
+            sprite(f, self.SUIT, x, y, {"o": (255, 220, 180), "w": (230, 230, 240)})
+        names = "   ".join(f"{p['name']} ({p['craft']})" for p in d["people"])
+        tw = text_w(names, TXT)
+        scene, speed = 12, 35
+        ph = t % (scene + scroll_time(tw + W, speed))
+        if ph < scene:
+            x = 4 + text_w(str(n))
+            if x + text_w("KOSMOSIE", SMALL) <= W:
+                f.text(str(n), 2, 1, (255, 255, 255), BIG, (0, 0, 20))
+                f.text("OSÓB W", x, 0, (150, 200, 255), SMALL, (0, 0, 20))
+                f.text("KOSMOSIE", x, 6, (150, 200, 255), SMALL, (0, 0, 20))
+            else:  # wąski panel: liczba małą czcionką, żeby zmieścić „W KOSMOSIE”
+                f.text(str(n), 0, 0, (255, 255, 255), SMALL, (0, 0, 20))
+                f.text("OSÓB", text_w(str(n), SMALL) + 4, 0, (150, 200, 255), SMALL, (0, 0, 20))
+                f.text("W KOSMOSIE", 0, 6, (150, 200, 255), SMALL, (0, 0, 20))
+            if not NARROW:
+                small_time(f, now, c=(120, 120, 150))
+        else:
+            f.text(names, W - scroll_px(ph - scene, speed), 0, (255, 240, 200), TXT, (0, 0, 0))
+
+
+@reg("trzesienia")
+class Quakes(Clock):
+    """Trzęsienia ziemi z ostatniej doby (USGS, M2.5+): pulsujące kręgi na mapie świata; największe opisane w rogu."""
+
+    def draw(self, f, now, t, dt):
+        world_map(f, dtm.datetime.now().astimezone(), 0.45)
+        q = NET.get("quakes")
+        if not q:
+            return loading(f, t, "quakes", "trzęsienia")
+        for i, (lon, lat, mag, place, tm) in enumerate(q):
+            x, y = map_xy(lat, lon)
+            col = (255, 230, 0) if mag < 4 else (255, 130, 0) if mag < 5 else (255, 30, 30)
+            ph = (t * 0.8 + hash1(i)) % 1
+            r = ph * mag * 1.2
+            for k in range(16):
+                a = k * math.pi / 8
+                f.add(x + math.cos(a) * r, y + math.sin(a) * r * 0.5, mul(col, (1 - ph) * 0.5))
+            f.set(x, y, col)
+        big = max(q, key=lambda e: e[2])
+        info = f"M{big[2]:.1f}  {len(q)} W 24H"
+        if text_w(info, SMALL) > W - 1:
+            info = [f"M{big[2]:.1f}", f"{len(q)} W 24H"][page(t, 2, 4)]
+        f.text(info, 1, 0, (255, 255, 255), SMALL, (0, 0, 0))
+        bx, by = map_xy(big[1], big[0])
+        f.add(bx, by, mul((255, 255, 255), 0.5 + 0.5 * math.sin(t * 8)))
+
+
+@reg("zorza")
+class Aurora(Clock):
+    """Zorza polarna o sile z prawdziwego indeksu Kp (NOAA SWPC): Kp 0–2 ledwo widać, 5+ = burza geomagnetyczna."""
+
+    def __init__(self):
+        rnd = random.Random(5)
+        self.stars = [(rnd.randrange(W), rnd.randrange(8), rnd.random() * 6) for _ in range(40)]
+        self.trees = [int(9 + 2 * rnd.random() - (1.5 if rnd.random() < 0.3 else 0)) for _ in range(W)]
+
+    def draw(self, f, now, t, dt):
+        kp = NET.get("kp")
+        kpv = kp if kp is not None else 2.0
+        s = clamp(0.5 + kpv / 7)
+        for sx, sy, ph in self.stars:
+            f.set(sx, sy, mul((140, 140, 170), 0.3 + 0.3 * math.sin(t * 2 + ph)))
+        for x in range(W):
+            amp = s * (0.3 + 0.7 * noise1(x * 0.05 + t * 0.15)) * (0.5 + 0.5 * noise1(x * 0.13 - t * 0.23 + 5))
+            base = 8 - noise1(x * 0.04 + t * 0.1) * 2
+            length = 2 + amp * 10
+            ray = 0.6 + 0.4 * noise1(x * 0.9 + t * 2)
+            for y in range(H):
+                d = base - y
+                if 0 <= d <= length:
+                    k = (1 - d / length) ** 0.7 * amp * ray * 2.4
+                    f.add(x, y, mul(lerp((40, 255, 120), (170, 40, 220), clamp(d / length * s * 1.3)), k))
+        for x in range(W):
+            for y in range(self.trees[x], H):
+                f.set(x, y, (0, 4, 2))
+        f.text(f"KP {kpv:.1f}" if kp is not None else "KP ?", 1, 0, (160, 255, 190), SMALL, (0, 0, 0))
+        small_time(f, now, c=(180, 180, 200))
+
+
+@reg("bloki")
+class Blocks(Clock):
+    """Bitcoin na żywo (mempool.space): numer ostatniego bloku; gdy zostanie wykopany nowy, spada kolejny klocek."""
+
+    def __init__(self):
+        self.last, self.drop_t = None, -99
+
+    def cube(self, f, x, y, k=1.0):
+        for yy in range(6):
+            for xx in range(6):
+                c = (247, 147, 26) if yy > 0 and xx < 5 else (255, 200, 110) if yy == 0 else (150, 80, 10)
+                f.set(x + xx, y + yy, mul(c, k))
+
+    def draw(self, f, now, t, dt):
+        h = NET.get("height")
+        if h is None:
+            return loading(f, t, "height", "bitcoin")
+        if self.last is not None and h != self.last:
+            self.drop_t = t
+        self.last = h
+        p = clamp((t - self.drop_t) / 0.9)
+        shift = 8 * (1 - p) if p < 1 else 0
+        for i in range(1, 9):
+            self.cube(f, W - 8 - i * 8 + shift, 6, 0.9 - i * 0.08)
+        y = -6 + 12 * min(1, p ** 2) if p < 1 else 6
+        self.cube(f, W - 8, y, 1.0)
+        f.text(f"#{h}", 1, 0, (255, 170, 40), TXT, (0, 0, 0))
+
+
+@reg("hackernews")
+class HackerNews(Clock):
+    """Najpopularniejsze tytuły z Hacker News przewijane jeden po drugim; z lewej pomarańczowe logo Y."""
+
+    def draw(self, f, now, t, dt):
+        titles = NET.get("hn")
+        f.rect(0, 0, 11, 11, (255, 102, 0))
+        f.text("Y", 3, -1, (255, 255, 255), TXT)
+        if not titles:
+            return
+        segs = []
+        for s in titles:
+            segs += [(s, (240, 240, 240)), ("  |  ", (255, 102, 0))]
+        scroll_segs(f, segs, t, 30, 0, 13)
+
+
+@reg("wiadomosci")
+class News(Clock):
+    """Najnowsze nagłówki TVN24 (RSS) jak pasek w telewizji informacyjnej – z polskimi znakami i zegarem."""
+
+    def draw(self, f, now, t, dt):
+        titles = NET.get("news")
+        hm = now.strftime("%H:%M")
+        bw = 2 if NARROW else max(text_w(hm, SMALL), text_w("NEWS", SMALL)) + 2  # wąski panel: sam czerwony pasek
+        f.rect(0, 0, bw, 11, (170, 0, 0))
+        if not NARROW:
+            f.text(hm, (bw + 1 - text_w(hm, SMALL)) // 2, 0, (255, 255, 255), SMALL)
+            f.text("NEWS", (bw + 1 - text_w("NEWS", SMALL)) // 2, 6, (255, 200, 200), SMALL)
+        if not titles:
+            return
+        segs = []
+        for s in titles:
+            segs += [(s, (240, 240, 240)), ("  |  ", (220, 30, 30))]
+        scroll_segs(f, segs, t, 30, 0, bw + 2)
+
+
+@reg("imieniny")
+class NameDays(Clock):
+    """Dzisiejsze imieniny (nameday.abalin.net): imiona płyną nad kwitnącymi kwiatkami."""
+
+    def draw(self, f, now, t, dt):
+        for i in range(14):
+            x = 4 + i * 8.5
+            hgt = 2 + (i % 3)
+            for y in range(H - hgt, H):
+                f.set(x, y, (20, 120, 30))
+            col = hsv(hash1(i + 3), 0.8, 1)
+            k = 0.6 + 0.4 * math.sin(t * 1.5 + i)
+            cy = H - hgt - 1
+            for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                f.set(x + ox, cy + oy, mul(col, k))
+            f.set(x, cy, (255, 230, 60))
+        names = NET.get("names")
+        if not names:
+            return loading(f, t, "names", "imieniny")
+        scroll_segs(f, [("Imieniny:", (255, 180, 220)), (names, (255, 255, 255)), ("   " + now.strftime("%H:%M"), (130, 130, 160))],
+                    t, 24, -2)
+
+
+@reg("rakieta")
+class Launch(Clock):
+    """Odliczanie T- do najbliższego startu rakiety na świecie (The Space Devs); rakieta dymi na wyrzutni."""
+
+    ROCKET = ["..r..", ".www.", ".wbw.", ".www.", ".www.", ".www.", ".www.", "rwwwr", "r...r"]
+
+    def draw(self, f, now, t, dt):
+        d = NET.get("launch")
+        real = dtm.datetime.now(dtm.timezone.utc)
+        up = -2.0
+        if d:
+            nxt = None
+            for name, net in d:
+                when = dtm.datetime.fromisoformat(net.replace("Z", "+00:00"))
+                if when > real - dtm.timedelta(hours=1):
+                    nxt = (name, when)
+                    break
+        if not d or not nxt:
+            sprite(f, self.ROCKET, 3, 2, {"r": (220, 40, 30), "w": (230, 230, 230), "b": (60, 120, 255)})
+            return loading(f, t, "launch", "start rakiety")
+        name, when = nxt
+        left = (when - real).total_seconds()
+        if left < 0:
+            up = -(-left) * 3
+        for i in range(10):
+            ph = (t * 0.7 + i * 0.1) % 1
+            k = 0.5 if left > 0 else 1.0
+            f.add(5 + (hash1(i) - 0.5) * 8 * ph, H - 1 - ph * 3, mul((160, 160, 170), (1 - ph) * k))
+        if left < 0:
+            for y in range(int(11 + up), H):
+                f.add(5, y, (255, 140, 0))
+        sprite(f, self.ROCKET, 3, 2 + up, {"r": (220, 40, 30), "w": (230, 230, 230), "b": (60, 120, 255)})
+        tw = text_w(name, TXT)
+        ph = t % (14 + scroll_time(tw + W, 35))
+        if ph < 14:
+            if left > 0:
+                dd, rest = divmod(int(left), 86400)
+                hh, mm, ss = rest // 3600, rest % 3600 // 60, rest % 60
+                d_ = f"{dd}d " if dd else ""
+                opts = [f"T-{d_}{hh:02d}:{mm:02d}:{ss:02d}", f"{d_}{hh:02d}:{mm:02d}", f"{dd}d {hh}h" if dd else f"{hh}:{mm:02d}"]
+                s = next((o for o in opts if 14 + text_w(o, TXT) <= W), opts[-1])
+            else:
+                s = "START!"
+            f.text(s, 14, 0, (255, 255, 255))
+        else:
+            f.text(name, W - scroll_px(ph - 14, 35), 0, (255, 220, 150))
+
+
+@reg("zart")
+class Joke(Clock):
+    """Suchar z icanhazdadjoke.com (po angielsku) przewijany obok mrugającej buźki; nowy co 5 minut."""
+
+    def draw(self, f, now, t, dt):
+        disc(f, 5, 5.5, 5.2, (255, 210, 0))
+        blink = (t % 4) < 0.15
+        for ex in (3, 7):
+            f.set(ex, 4 if not blink else 5, (40, 20, 0))
+            if not blink:
+                f.set(ex, 3, (40, 20, 0))
+        for mx, my in ((2, 7), (3, 8), (4, 8), (5, 8), (6, 8), (7, 8), (8, 7)):
+            f.set(mx, my, (120, 40, 0))
+        j = NET.get("joke")
+        if not j:
+            return
+        scroll_segs(f, [(j, (255, 255, 255))], t, 30, 0, 13, gap=40)
+
+
+@reg("slonce")
+class SunArc(Clock):
+    """Dzisiejszy wschód i zachód słońca (Open-Meteo): łuk dnia, słońce w obecnym miejscu, długość dnia."""
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        if not m:
+            return loading(f, t, "meteo", "słońce")
+        i = meteo_day(m)
+        rise, sset = m["daily"]["sunrise"][i], m["daily"]["sunset"][i]
+        mins = lambda s: int(s[11:13]) * 60 + int(s[14:16])
+        r, s_ = mins(rise), mins(sset)
+        ln = meteo_now(m)
+        cur = ln.hour * 60 + ln.minute + ln.second / 60
+        frac = (cur - r) / max(1, s_ - r)
+        x0, x1 = (4, W - 5) if NARROW else (29, W - 30)
+        day = 0 <= frac <= 1
+        sky = (0, 15, 45) if day else (0, 0, 8)
+        for y in range(H - 1):
+            for x in range(W):
+                f.px[y][x] = mul(sky, 1 - y / H * 0.5)
+        for x in range(W):
+            f.set(x, 11, (10, 60, 10) if day else (2, 12, 2))
+        for k in range(60):
+            a = k / 59
+            f.set(x0 + (x1 - x0) * a, 10 - math.sin(math.pi * a) * 8, (70, 60, 20))
+        if day:
+            disc(f, x0 + (x1 - x0) * frac, 10 - math.sin(math.pi * frac) * 8, 1.8, (255, 220, 60))
+        left = (r - cur) % 1440
+        dl = s_ - r
+        if NARROW:
+            lab = [("WSCH. " + rise[11:16], (255, 190, 80)), ("ZACH. " + sset[11:16], (255, 120, 60)),
+                   (now.strftime("%H:%M"), (230, 230, 230))][page(t, 3, 4)]
+            f.text(lab[0], (W - text_w(lab[0], SMALL)) // 2, 0, lab[1], SMALL, (0, 0, 0))
+            return
+        f.text(rise[11:16], 1, 6, (255, 190, 80), SMALL)
+        f.text(sset[11:16], W - text_w(sset[11:16], SMALL), 6, (255, 120, 60), SMALL)
+        if day:
+            f.text(f"{dl // 60}:{dl % 60:02d}", 1, 0, (200, 200, 150), SMALL)
+        else:  # nocą zamiast długości dnia: ile do wschodu
+            f.text(f"WSCHÓD ZA {int(left // 60)}:{int(left % 60):02d}", 1, 0, (150, 150, 200), SMALL, (0, 0, 0))
+        small_time(f, now, c=(230, 230, 230))
+
+
+@reg("uv")
+class UV(Clock):
+    """Indeks UV teraz i maksymalny dziś (Open-Meteo) na kolorowej skali 0–11+; słońce ma tyle promieni, ile UV."""
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        if not m:
+            return loading(f, t, "meteo", "UV")
+        uv = m["hourly"]["uv_index"][meteo_idx(m)] or 0
+        uvmax = m["daily"]["uv_index_max"][meteo_day(m)] or 0
+        col = lambda v: (0, 200, 60) if v < 3 else (255, 220, 0) if v < 6 else (255, 130, 0) if v < 8 else (240, 20, 20) if v < 11 else (170, 40, 220)
+        lvl = "NISKI" if uv < 3 else "UMIARK." if uv < 6 else "WYSOKI" if uv < 8 else "B.WYSOKI" if uv < 11 else "EKSTREM."
+        disc(f, 8, 6, 2.6, (255, 215, 50))
+        for i in range(max(1, round(uv * 1.5))):
+            a = i / max(1, round(uv * 1.5)) * 2 * math.pi + t * 0.4
+            f.add(8 + math.cos(a) * 4.8, 6 + math.sin(a) * 4.8, (255, 150, 20))
+        a, b = f"UV {uv:.1f} {lvl}", f"MAX {uvmax:.1f}"
+        if NARROW:
+            txt = [(f"UV {uv:.1f}", col(uv)), (lvl, col(uv)), (b, col(uvmax))][page(t, 3, 4)]
+            f.text(txt[0], min(18, W - text_w(txt[0], SMALL)), 0, txt[1], SMALL)
+        elif 18 + text_w(a, SMALL) + 5 + text_w(b, SMALL) <= W:
+            f.text(a, 18, 0, col(uv), SMALL)
+            f.text(b, W - text_w(b, SMALL), 0, col(uvmax), SMALL)
+        else:
+            txt, c_ = [(a, col(uv)), (b, col(uvmax))][page(t, 2, 4)]
+            f.text(txt, 18, 0, c_, SMALL)
+        for x in range(18, W):
+            v = (x - 18) / (W - 18) * 12
+            for y in (8, 9, 10):
+                f.set(x, y, mul(col(v), 0.55))
+        xu = 18 + clamp(uv / 12) * (W - 19)
+        xm = 18 + clamp(uvmax / 12) * (W - 19)
+        for y in range(6, 12):
+            f.set(xu, y, (255, 255, 255) if int(t * 3) % 2 or y > 7 else (0, 0, 0))
+        f.set(xm, 11, (255, 255, 255))
+        f.set(xm, 7, (255, 255, 255))
+
+
+@reg("barometr")
+class Barometer(Clock):
+    """Ciśnienie z Open-Meteo i trend z 3 h: wskazówka na skali starego barometru (burza – deszcz – zmiennie – ładnie – sucho)."""
+
+    ZONES = [(990, "BURZA", (150, 0, 200)), (1005, "DESZCZ", (0, 110, 255)), (1020, "ZMIENNIE", (140, 140, 140)),
+             (1035, "ŁADNIE", (255, 200, 0)), (9999, "SUCHO", (255, 110, 0))]
+
+    def draw(self, f, now, t, dt):
+        m = NET.get("meteo")
+        if not m:
+            return loading(f, t, "meteo", "barometr")
+        p = m["current"]["pressure_msl"]
+        hp = m["hourly"]["pressure_msl"]
+        i0 = meteo_idx(m)
+        tr = p - (hp[max(0, i0 - 3)] or p)
+        x_of = lambda v: clamp((v - 970) / 80) * (W - 1)
+        for x in range(W):
+            v = 970 + x / (W - 1) * 80
+            c = next(c for lim, _, c in self.ZONES if v <= lim)
+            for y in (9, 10, 11):
+                f.set(x, y, mul(c, 0.45))
+            if int(v) % 10 == 0 and abs(v - int(v)) < 0.7:
+                f.set(x, 8, (90, 90, 90))
+        name, col = next((n, c) for lim, n, c in self.ZONES if p <= lim)
+        arrow = "↑" if tr > 0.7 else "↓" if tr < -0.7 else "→"
+        if NARROW:
+            txt = [(f"{p:.0f} HPA {arrow}", (230, 230, 230)), (name, col), (now.strftime("%H:%M"), (150, 150, 170))][page(t, 3, 4)]
+            f.text(txt[0], 0, 0, txt[1], SMALL)
+        else:
+            ptxt = f"{p:.0f} HPA {arrow}"
+            f.text(ptxt, 0, 0, (230, 230, 230), SMALL)
+            nx = text_w(ptxt, SMALL) + 5
+            fits = nx + text_w(name, SMALL) + 4 <= W - text_w(now.strftime("%H:%M"), SMALL)
+            if fits or page(t, 2, 4) == 0:
+                f.text(name, nx, 0, col, SMALL)
+            if fits or page(t, 2, 4) == 1:
+                small_time(f, now, c=(150, 150, 170))
+        wig = math.sin(t * 25) * 0.8 if (t % 10) < 0.8 else 0
+        x = x_of(p) + wig
+        for y in range(6, 12):
+            f.set(x, y, (255, 255, 255))
+
+# ================================================================ STYLE ZEGARÓW
+@reg("binarny")
+class Binary(Clock):
+    """Zegar binarny BCD: kolumny to cyfry HH MM SS, zapalony kwadrat = bit (8-4-2-1); obok zwykły czas do sprawdzenia."""
+
+    def draw(self, f, now, t, dt):
+        digs = now.strftime("%H%M%S")
+        cols = [(255, 60, 60), (60, 255, 90), (70, 140, 255)]
+        tw = text_w(now.strftime("%H:%M:%S"), TXT)
+        x = (W - (6 * 5 + 2 * 4 + (0 if NARROW else 6 + tw))) // 2
+        for i, d in enumerate(digs):
+            v = int(d)
+            for b in range(4):
+                on = v >> (3 - b) & 1
+                c = cols[i // 2] if on else (18, 18, 24)
+                f.rect(x, b * 3, x + 3, b * 3 + 1, c)
+            x += 5 + (4 if i in (1, 3) else 0)
+        if not NARROW:
+            f.text(now.strftime("%H:%M:%S"), x + 6, 0, (200, 200, 210))
+
+
+@reg("analogowy")
+class Analog(Clock):
+    """Klasyczne tarcze ze wskazówkami: z lewej godzina, z prawej sekundnik; pośrodku cyfrowy czas i data."""
+
+    def dial(self, f, cx, cy, hands):
+        for k in range(12):
+            a = k * math.pi / 6
+            f.set(cx + math.sin(a) * 5.3, cy - math.cos(a) * 5.3, (120, 120, 140) if k % 3 else (230, 230, 255))
+        for ang, ln, c in hands:
+            f.line(cx - 0.5, cy - 0.5, cx - 0.5 + math.sin(ang) * ln, cy - 0.5 - math.cos(ang) * ln, c)
+        f.set(cx - 0.5, cy - 0.5, (255, 255, 255))
+
+    def draw(self, f, now, t, dt):
+        s = now.second + now.microsecond / 1e6
+        m = now.minute + s / 60
+        h = now.hour % 12 + m / 60
+        self.dial(f, 6.5, 6.5, [(h / 12 * 2 * math.pi, 3, (255, 200, 80)), (m / 60 * 2 * math.pi, 4.6, (200, 220, 255)),
+                                (s / 60 * 2 * math.pi, 5, (255, 40, 40))])
+        self.dial(f, W - 6.5, 6.5, [(s / 60 * 2 * math.pi, 5, (255, 40, 40))])
+        if NARROW:
+            clock_big(f, now, x=(W - text_w(now.strftime("%H:%M"))) // 2)
+            return
+        clock_big(f, now, x=14)
+        f.text(f"{PL_DAYS[now.weekday()][:3]} {now.day:02d}.{now.month:02d}", 18 + text_w(now.strftime("%H:%M")), 0,
+               (170, 190, 255))
+
+
+def pl_time_words(now):
+    H_NOM = ["dwunasta", "pierwsza", "druga", "trzecia", "czwarta", "piąta", "szósta", "siódma", "ósma", "dziewiąta",
+             "dziesiąta", "jedenasta"]
+    H_LOC = ["dwunastej", "pierwszej", "drugiej", "trzeciej", "czwartej", "piątej", "szóstej", "siódmej", "ósmej",
+             "dziewiątej", "dziesiątej", "jedenastej"]
+    N = ["", "minuta", "dwie", "trzy", "cztery", "pięć", "sześć", "siedem", "osiem", "dziewięć", "dziesięć", "jedenaście",
+         "dwanaście", "trzynaście", "czternaście", "kwadrans", "szesnaście", "siedemnaście", "osiemnaście",
+         "dziewiętnaście", "dwadzieścia"]
+    num = lambda n: N[n] if n <= 20 else "dwadzieścia " + N[n - 20].replace("minuta", "jeden")
+    h, m = now.hour % 12, now.minute
+    if m == 0:
+        return f"punkt {H_NOM[h]}"
+    if m == 30:
+        return f"wpół do {H_LOC[(h + 1) % 12]}"
+    if m < 30:
+        return f"{num(m)} po {H_LOC[h]}"
+    r = 60 - m
+    return f"za {'minutę' if r == 1 else num(r)} {H_NOM[(h + 1) % 12]}"
+
+
+@reg("slownie")
+class Words(Clock):
+    """Godzina słownie, tak jak się mówi: „za kwadrans dziewiąta”, „dwadzieścia po ósmej”, „wpół do trzeciej”."""
+
+    def draw(self, f, now, t, dt):
+        s = pl_time_words(now)
+        tw = text_w(s, TXT)
+        x0 = (W - tw) // 2 if tw <= W else W - scroll_px(t, 25) % (tw + W)
+        for x, y in text_px(s, x0, 0, TXT):
+            f.set(x, y, hsv(x / 240 + t * 0.05, 0.6, 1))
+        sec = now.second + now.microsecond / 1e6
+        for x in range(int(sec / 60 * W)):
+            f.set(x, 11, (40, 40, 70))
+
+
+def roman(n):
+    out = ""
+    for v, s in ((50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        while n >= v:
+            out += s
+            n -= v
+    return out or "N"
+
+
+@reg("rzymski")
+class Roman(Clock):
+    """Godzina cyframi rzymskimi, złotem na marmurze między kolumnami (N = nulla, czyli zero)."""
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                v = noise2(x * 0.15, y * 0.5 + x * 0.05)
+                vein = 1 - min(1, abs(v - 0.5) * 12)
+                f.px[y][x] = lerp((22, 20, 24), (70, 65, 75), vein * 0.8)
+        for cx in (1, W - 6):
+            f.rect(cx, 0, cx + 4, 0, (150, 140, 120))
+            f.rect(cx, 11, cx + 4, 11, (150, 140, 120))
+            for x in range(cx, cx + 5):
+                for y in range(1, 11):
+                    f.set(x, y, (110, 105, 95) if (x - cx) % 2 == 0 else (70, 66, 60))
+        s = f"{roman(now.hour)}:{roman(now.minute)}"
+        if text_w(s, TXT) <= W - 14:
+            pts = text_px(s, (W - text_w(s, TXT)) // 2, 0, TXT)
+        else:  # nie mieści się między kolumnami: godziny nad minutami, mniejszą czcionką
+            hh, mm = roman(now.hour), roman(now.minute)
+            pts = text_px(hh, (W - text_w(hh, SMALL)) // 2, 0, SMALL) + text_px(mm, (W - text_w(mm, SMALL)) // 2, 6, SMALL)
+        for x, y in pts:
+            f.set(x, y, lerp((200, 140, 30), (255, 240, 170), 0.5 + 0.5 * math.sin(x * 0.3 - t * 2)))
+
+
+@reg("morse")
+class Morse(Clock):
+    """Czas nadawany alfabetem Morse'a: kropki i kreski pod cyframi, a lampka po prawej naprawdę go nadaje."""
+
+    CODE = {"0": "-----", "1": ".----", "2": "..---", "3": "...--", "4": "....-", "5": ".....", "6": "-....",
+            "7": "--...", "8": "---..", "9": "----."}
+
+    def draw(self, f, now, t, dt):
+        s = now.strftime("%H%M")
+        u = 0.09
+        seq = []
+        for di, d in enumerate(s):
+            for si, sym in enumerate(self.CODE[d]):
+                seq.append((di, si, True, u if sym == "." else 3 * u))
+                seq.append((di, si, False, u))
+            seq[-1] = (di, 4, False, 3 * u)
+        seq[-1] = (3, 4, False, 10 * u)
+        total = sum(q[3] for q in seq)
+        p, cur = t % total, None
+        for q in seq:
+            if p < q[3]:
+                cur = q
+                break
+            p -= q[3]
+        if NARROW:
+            lw = W - 10
+            hm = now.strftime("%H:%M")
+            x = (lw - text_w(hm, TXT)) // 2
+            for i, ch in enumerate(hm):
+                di = i if i < 2 else i - 1
+                f.text(ch, x, -2, (255, 230, 60) if ch != ":" and cur and cur[0] == di else (200, 200, 200))
+                x += text_w(ch, TXT) + 1
+            if cur:
+                code = self.CODE[s[cur[0]]]
+                x = (lw - sum(3 if c == "-" else 1 for c in code) - len(code) + 1) // 2
+                for si, sym in enumerate(code):
+                    wdt = 1 if sym == "." else 3
+                    f.rect(x, 9, x + wdt - 1, 10, (255, 230, 60) if si == cur[1] and cur[2] else (90, 140, 255))
+                    x += wdt + 1
+        for di, d in enumerate(s if not NARROW else ""):
+            cx = 2 + di * 26 + (4 if di >= 2 else 0)
+            f.text(d, cx + 10, -2, (220, 220, 220))
+            x = cx
+            for si, sym in enumerate(self.CODE[d]):
+                wdt = 1 if sym == "." else 4
+                on = cur and cur[0] == di and cur[1] == si and cur[2]
+                c = (255, 230, 60) if on else (90, 140, 255)
+                f.rect(x, 9, x + wdt, 10, c)
+                x += wdt + 2
+        if not NARROW:
+            f.rect(55, 4, 55, 5, (150, 150, 150))
+        on = cur and cur[2]
+        disc(f, W - 5, 5.5, 3.5, (255, 240, 150) if on else (40, 30, 10))
+
+
+@reg("klepsydra")
+class Hourglass(Clock):
+    """Klepsydra minutowa: piasek sypie się z ruchomego lejka, kupka rośnie, a z nową minutą dno się otwiera."""
+
+    def __init__(self):
+        self.g = [[None] * W for _ in range(H)]
+        self.acc, self.minute, self.drain = 0.0, None, 0.0
+
+    def step(self):
+        g = self.g
+        for y in range(H - 2, -1, -1):
+            xs = list(range(W))
+            random.shuffle(xs)
+            for x in xs:
+                c = g[y][x]
+                if c is None:
+                    continue
+                if g[y + 1][x] is None:
+                    g[y + 1][x], g[y][x] = c, None
+                else:
+                    for dx in random.sample((-1, 1), 2):
+                        nx = x + dx
+                        if 0 <= nx < W and g[y + 1][nx] is None:
+                            g[y + 1][nx], g[y][x] = c, None
+                            break
+
+    def draw(self, f, now, t, dt):
+        if self.minute is not None and now.minute != self.minute:
+            self.drain = 1.2
+        self.minute = now.minute
+        if self.drain > 0:
+            self.drain -= dt
+            self.g[H - 1] = [None] * W
+        else:
+            self.acc += dt * 14
+            while self.acc >= 1:
+                self.acc -= 1
+                x = int(clamp(W / 2 + math.sin(t * 0.7) * (W / 2 - 8) + random.uniform(-2, 2), 0, W - 1))
+                if self.g[0][x] is None:
+                    self.g[0][x] = hsv(now.minute / 60 + random.uniform(-0.03, 0.03), 0.6, random.uniform(0.6, 1))
+        self.step()
+        for y in range(H):
+            for x in range(W):
+                if self.g[y][x] is not None:
+                    f.px[y][x] = self.g[y][x]
+        small_time(f, now, x=1)
+        small_time(f, now, fmt=":%S", c=(150, 150, 170))
+
+
+@reg("postep")
+class Progress(Clock):
+    """Paski postępu z procentami: na zmianę rok i miesiąc, a potem doba i godzina."""
+
+    def draw(self, f, now, t, dt):
+        y0 = dtm.datetime(now.year, 1, 1, tzinfo=now.tzinfo)
+        y1 = dtm.datetime(now.year + 1, 1, 1, tzinfo=now.tzinfo)
+        m0 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        m1 = (m0 + dtm.timedelta(days=32)).replace(day=1)
+        sec = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
+        pairs = [(("ROK", (now - y0) / (y1 - y0), (255, 140, 0)), ("MIESIĄC", (now - m0) / (m1 - m0), (0, 200, 255))),
+                 (("DOBA", sec / 86400, (255, 60, 160)), ("GODZINA", (sec % 3600) / 3600, (120, 255, 80)))]
+        def label(lab, pc, short, dec):
+            return f"{lab[:4] + '.' if short and len(lab) > 4 else lab} {pc * 100:.{dec}f}%"
+
+        if NARROW:
+            lab, pc, col = [x for pr in pairs for x in pr][page(t, 4, 4)]
+            opts = [label(lab, pc, sh, dec) for sh, dec in ((False, 1), (True, 1), (True, 0))]
+            txt = next((o for o in opts if text_w(o, SMALL) <= W), opts[-1])
+            f.text(txt, (W - text_w(txt, SMALL)) // 2, 0, col, SMALL)
+            for x in range(W):
+                k = 0.9 + 0.1 * math.sin(x * 0.3 - t * 5) if x < pc * W else 0.1
+                for y in (8, 9, 10):
+                    f.set(x, y, mul(col, k))
+            return
+        (l1, p1, c1), (l2, p2, c2) = pairs[int(t / 6) % 2]
+        for sh, dec in ((False, 2), (False, 1), (True, 2), (True, 1), (True, 0)):
+            s1, s2 = label(l1, p1, sh, dec), label(l2, p2, sh, dec)
+            if text_w(s1, SMALL) + 6 + text_w(s2, SMALL) <= W:
+                break
+        f.text(s1, 0, 0, c1, SMALL)
+        f.text(s2, W - text_w(s2, SMALL), 0, c2, SMALL)
+        for (p, c, ya) in ((p1, c1, 7), (p2, c2, 10)):
+            for x in range(W):
+                on = x < p * W
+                k = 0.9 + 0.1 * math.sin(x * 0.3 - t * 5) if on else 0.1
+                f.set(x, ya, mul(c, k))
+                f.set(x, ya + 1, mul(c, k * 0.7))
+
+
+@reg("kalendarz")
+class Calendar(Clock):
+    """Kartka z kalendarza: dzień miesiąca, dzień tygodnia, miesiąc, numer tygodnia i na zmianę godzina."""
+
+    def draw(self, f, now, t, dt):
+        f.rect(0, 0, 16, 11, (170, 165, 150))
+        f.rect(0, 0, 16, 1, (200, 30, 30))
+        f.draw(text_px(f"{now.day:02d}", 2, 2), (120, 0, 0))
+        f.rect(0, 2, 0, 2, (170, 165, 150))
+        wd = PL_DAYS[now.weekday()]
+        if NARROW:
+            lines = [(wd if text_w(wd, TXT) <= W - 20 else wd[:3], (255, 80, 80) if now.weekday() == 6 else (230, 230, 230)),
+                     (PL_MONTHS[now.month - 1][:3] + ".", (255, 200, 120)), (f"t.{now.isocalendar()[1]}", (150, 200, 255)),
+                     (now.strftime("%H:%M"), (255, 255, 255))]
+            txt, col = lines[page(t, 4, 3)]
+            f.text(txt, 20, 0, col)
+            return
+        wcol = (255, 80, 80) if now.weekday() == 6 else (230, 230, 230)
+        mon = f"{PL_MON3[now.month - 1]} {now.year}"
+        alt = [f"TYDZ {now.isocalendar()[1]}", f"DZIEŃ {now.timetuple().tm_yday}", now.strftime("%H:%M")]
+        if 20 + text_w(wd, TXT) + 6 + max(text_w(x, SMALL) for x in [mon] + alt) > W:
+            if page(t, 2, 6) == 0:  # długa nazwa dnia: na zmianę cała i skrót z resztą kartki
+                f.text(wd, 20, 0, wcol)
+                return
+            wd = wd[:3]
+        f.text(wd, 20, 0, wcol)
+        x2 = 20 + text_w(wd, TXT) + 6
+        f.text(mon, x2, 0, (255, 200, 120), SMALL)
+        f.text(alt[int(t / 3) % 3], x2, 6, (150, 200, 255), SMALL)
+
+
+def easter(y):
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    return dtm.date(y, month, (h + l - 7 * m + 114) % 31 + 1)
+
+
+@reg("odliczanie")
+class Countdown(Clock):
+    """Odliczania na zmianę: do północy, do weekendu, do Wigilii, do Wielkanocy i do Nowego Roku."""
+
+    def targets(self, now):
+        tz = now.tzinfo
+        mid = (now + dtm.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        wd = now.weekday()
+        if wd < 5:
+            wk = (("DO WEEKENDU", "WEEKEND"), (now + dtm.timedelta(days=5 - wd)).replace(hour=0, minute=0, second=0, microsecond=0))
+        else:
+            wk = (("DO PONIEDZIAŁKU", "PONIEDZ."), (now + dtm.timedelta(days=7 - wd)).replace(hour=0, minute=0, second=0, microsecond=0))
+        wig = dtm.datetime(now.year, 12, 24, tzinfo=tz)
+        if wig <= now:
+            wig = dtm.datetime(now.year + 1, 12, 24, tzinfo=tz)
+        e = easter(now.year)
+        ea = dtm.datetime(e.year, e.month, e.day, tzinfo=tz)
+        if ea <= now:
+            e = easter(now.year + 1)
+            ea = dtm.datetime(e.year, e.month, e.day, tzinfo=tz)
+        return [(("DO PÓŁNOCY", "PÓŁNOC"), mid, (120, 140, 255)), wk + ((255, 200, 0),),
+                (("DO WIGILII", "WIGILIA"), wig, (255, 60, 60)), (("DO WIELKANOCY", "WIELKANOC"), ea, (255, 160, 220)),
+                (("DO NOWEGO ROKU", "NOWY ROK"), dtm.datetime(now.year + 1, 1, 1, tzinfo=tz), (0, 230, 200))]
+
+    def draw(self, f, now, t, dt):
+        (name, short), when, col = self.targets(now)[int(t / 6) % 5]
+        left = int((when - now).total_seconds())
+        d, r = divmod(max(0, left), 86400)
+        days = f"{d} {'DZIEŃ' if d == 1 else 'DNI'}" if d else ""
+        opts = ([f"{name}: {days}", f"{short}: {days}"] if d else []) + [name, short]
+        label = next((o for o in opts if text_w(o, SMALL) <= W), short)
+        if d and label in (name, short):  # liczba dni się nie zmieściła – na zmianę z nazwą
+            label = [label, days][int(t / 3) % 2]
+        f.text(label, (W - text_w(label, SMALL)) // 2, 0, col, SMALL)
+        s = f"{r // 3600:02d}:{r % 3600 // 60:02d}:{r % 60:02d}"
+        f.text(s, (W - text_w(s, TXT)) // 2, 3, (255, 255, 255))
+
+
+@reg("nixie")
+class Nixie(Clock):
+    """Lampy Nixie: pomarańczowe cyfry z poświatą, widoczna siatka i duchy nieświecących katod; co minutę „przepłukanie” cyfr."""
+
+    def draw(self, f, now, t, dt):
+        s = now.strftime("%H%M" if NARROW else "%H%M%S")
+        x = (W - (len(s) * 8 + len(s) // 2 + (len(s) // 2 - 1) * 5)) // 2
+        flush = now.second == 0 and now.microsecond < 800000
+        for i, d in enumerate(s):
+            for y in range(H):
+                for xx in range(x, x + 8):
+                    edge = xx in (x, x + 7) or y == 11 or (y == 0 and xx not in (x, x + 7))
+                    if edge and not (y == 0 and xx in (x, x + 7)):
+                        f.set(xx, y, (110, 30, 0))
+                    elif (xx + y) % 2 == 0:
+                        f.set(xx, y, (8, 4, 2))
+            f.draw(text_px("8", x + 1, 1), (26, 10, 2))
+            dig = str((int(t * 25) + i) % 10) if flush else d
+            pts = text_px(dig, x + 1, 1)
+            f.draw(pts, (255, 130, 30))
+            x += 8 + (1 if i % 2 == 0 else 0)
+            if i in (1, 3) and i < len(s) - 1:
+                on = now.microsecond < 500000
+                for yy in (3, 8):
+                    f.set(x + 2, yy, (255, 110, 20) if on else (40, 12, 0))
+                x += 5
+
+
+SEG = {"0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc", "5": "afgcd", "6": "afgedc", "7": "abc",
+       "8": "abcdefg", "9": "abcdfg"}
+
+
+def seg_px(d, x0, y0, w=10):
+    pts = {"a": [(x, 0) for x in range(2, w - 2)], "g": [(x, 5) for x in range(2, w - 2)],
+           "d": [(x, 10) for x in range(2, w - 2)], "f": [(x, y) for x in (0, 1) for y in range(1, 5)],
+           "b": [(x, y) for x in (w - 2, w - 1) for y in range(1, 5)], "e": [(x, y) for x in (0, 1) for y in range(6, 10)],
+           "c": [(x, y) for x in (w - 2, w - 1) for y in range(6, 10)]}
+    return {k: [(x0 + x, y0 + y) for x, y in v] for k, v in pts.items()}
+
+
+@reg("segmenty")
+class SevenSeg(Clock):
+    """Wyświetlacz siedmiosegmentowy jak w starym radiobudziku: czerwone segmenty, słabo widoczne wygaszone, lekkie migotanie."""
+
+    def draw(self, f, now, t, dt):
+        s = now.strftime("%H%M" if NARROW else "%H%M%S")
+        x = (W - (len(s) * 11 + (len(s) // 2 - 1) * 5)) // 2
+        for i, d in enumerate(s):
+            segs = seg_px(d, x, 1)
+            for name, pts in segs.items():
+                f.draw(pts, (255, 25, 15) if name in SEG[d] else (24, 3, 2))
+            x += 11
+            if i in (1, 3) and i < len(s) - 1:
+                c = (255, 25, 15) if now.microsecond < 500000 else (24, 3, 2)
+                f.rect(x + 1, 3, x + 2, 4, c)
+                f.rect(x + 1, 7, x + 2, 8, c)
+                x += 5
+
+
+@reg("klapki")
+class SplitFlap(Clock):
+    """Tablica z klapkami jak na starym dworcu: przy zmianie cyfry górna klapka opada i odsłania nową."""
+
+    def __init__(self):
+        self.slots = {}
+
+    @staticmethod
+    def on(ch, cx, cy):
+        g = BIG.get(ch, BIG[" "])
+        gx, gy = cx - 1, cy - 1
+        return 0 <= gy < len(g) and 0 <= gx < len(g[0]) and g[gy][gx] == "#"
+
+    def draw(self, f, now, t, dt):
+        txt = now.strftime("%H:%M")
+        x = (W - (4 * 9 + 5)) // 2
+        for i, ch in enumerate(txt):
+            if ch == ":":
+                f.rect(x + 1, 3, x + 2, 4, (200, 200, 200))
+                f.rect(x + 1, 7, x + 2, 8, (200, 200, 200))
+                x += 5
+                continue
+            cur, old, tc = self.slots.get(i, (ch, ch, -9))
+            if ch != cur:
+                old, cur, tc = cur, ch, t
+            self.slots[i] = (cur, old, tc)
+            p = clamp((t - tc) / 0.4)
+            for cy in range(12):
+                for cx in range(8):
+                    top = cy < 6
+                    src = cur if top or p >= 1 else old
+                    lit = self.on(src, cx, cy)
+                    bg = (38, 38, 42) if top else (30, 30, 34)
+                    f.set(x + cx, cy, (230, 230, 220) if lit else bg)
+            if p < 1:
+                if p < 0.5:
+                    s = 1 - p * 2
+                    for cy in range(6):
+                        sy = 6 - (6 - cy) / max(s, 0.01)
+                        for cx in range(8):
+                            if sy >= 0:
+                                lit = self.on(old, cx, int(sy))
+                                f.set(x + cx, cy, mul((230, 230, 220) if lit else (38, 38, 42), 0.5 + 0.5 * s))
+                else:
+                    s = (p - 0.5) * 2
+                    for cy in range(6, 12):
+                        sy = 6 + (cy - 6) / max(s, 0.01)
+                        for cx in range(8):
+                            if sy < 12:
+                                lit = self.on(cur, cx, int(sy))
+                                f.set(x + cx, cy, mul((230, 230, 220) if lit else (30, 30, 34), 0.5 + 0.5 * s))
+            for cx in range(8):
+                f.set(x + cx, 6, (5, 5, 5))
+            x += 9
+
+
+@reg("lustro")
+class Mirror(Clock):
+    """Godzina nad taflą wody i jej falujące odbicie."""
+
+    def draw(self, f, now, t, dt):
+        for y in range(7):
+            for x in range(W):
+                f.px[y][x] = lerp((2, 2, 15), (12, 8, 30), y / 7)
+        s = now.strftime("%H:%M:%S")
+        x0 = (W - text_w(s, TXT)) // 2
+        pts = text_px(s, x0, -2, TXT)
+        for x, y in pts:
+            f.set(x, y, hsv(0.55 + x / 400 + t * 0.03, 0.5, 1))
+        for y in range(7, H):
+            k = y - 7
+            src = 6 - k
+            off = math.sin(t * 3 + k * 1.3) * (0.5 + k * 0.3)
+            for x in range(W):
+                f.px[y][x] = lerp((0, 10, 30), (0, 4, 14), k / 5)
+            for x, yy in pts:
+                if yy == src:
+                    f.add(x + off, y, mul(hsv(0.55 + x / 400 + t * 0.03, 0.6, 1), 0.45 - k * 0.07))
+            for x in range(W):
+                if hash1(x * 13 + k * 7 + int(t * 4)) > 0.97:
+                    f.add(x, y, (30, 40, 60))
+
+
+@reg("cien")
+class Shadow(Clock):
+    """Cyfry na ścianie rzucają długi cień, który obraca się jak w zegarze słonecznym, zgodnie z prawdziwym słońcem."""
+
+    def draw(self, f, now, t, dt):
+        elev, solar = sun_position(now)
+        day = elev > 0
+        wall = (60, 45, 30) if day else (10, 12, 25)
+        a = (solar - 12) / 12 * math.pi
+        dx = -math.sin(a) * 1.2
+        ln = int(3 + 6 * (1 - clamp(elev / 45))) if day else 4
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = mul(wall, 0.7 + 0.3 * (x / W if dx < 0 else 1 - x / W))
+        pts = clock_big(f, now, outline=None, c=(0, 0, 0))
+        ps = set(pts)
+        for k in range(ln, 0, -1):
+            for x, y in pts:
+                q = (round(x + dx * k), round(y + k * 0.35))
+                if q not in ps:
+                    f.set(q[0], q[1], mul(wall, 0.25 + 0.5 * k / ln))
+        f.draw(pts, (255, 240, 210) if day else (170, 180, 230))
+
+
+@reg("tetris")
+class Tetris(Clock):
+    """Cyfry układają się z klocków spadających z góry jak w Tetrisie; z nową minutą stare się rozsypują."""
+
+    PAL = [(0, 240, 240), (240, 240, 0), (160, 0, 240), (0, 240, 0), (240, 0, 0), (0, 0, 240), (240, 160, 0)]
+
+    def __init__(self):
+        self.txt, self.t0, self.old, self.old_t = None, 0, [], 0
+
+    def draw(self, f, now, t, dt):
+        txt = now.strftime("%H:%M")
+        if txt != self.txt:
+            if self.txt is not None:
+                self.old, self.old_t = [(x, y, self.col(x, y, self.txt)) for x, y in centered(self.txt)], t
+            self.txt, self.t0 = txt, t + 0.4
+        for x, y, c in self.old:
+            yy = y + (t - self.old_t) ** 2 * 40
+            if yy < H:
+                f.set(x, yy, c)
+        pts = sorted(centered(txt), key=lambda p: (-p[1], p[0]))
+        for i, (x, y) in enumerate(pts):
+            st = self.t0 + i * 0.012
+            if t >= st:
+                f.set(x, min(y, -1 + (t - st) * 30), self.col(x, y, txt))
+
+    def col(self, x, y, txt):
+        return self.PAL[int(hash1(x // 2 * 7 + y // 2 * 131 + sum(map(ord, txt))) * 7) % 7]
+
+
+@reg("hex")
+class HexTime(Clock):
+    """Czas szesnastkowy: doba = 16 hexgodzin × 256 hexminut × 16 hexsekund, zapis „A_3F_2”; pasek = hexgodzina."""
+
+    def draw(self, f, now, t, dt):
+        sec = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
+        v = int(sec / 86400 * 65536)
+        parts = [(f"{v >> 12:X}", (255, 90, 90)), ("_", (90, 90, 90)), (f"{(v >> 4) & 0xFF:02X}", (90, 255, 120)),
+                 ("_", (90, 90, 90)), (f"{v & 0xF:X}", (90, 150, 255))]
+        x = (W - sum(text_w(s, TXT) + 1 for s, _ in parts)) // 2
+        if x > text_w("HEX", SMALL) + 3:  # podpis tylko, gdy nie wchodzi na cyfry
+            f.text("HEX", 1, 0, (70, 70, 90), SMALL)
+        for s, c in parts:
+            f.text(s, x, 0, c)
+            x += text_w(s, TXT) + 1
+        for i in range(16):
+            c = (255, 90, 90) if i < (v >> 12) else (40, 20, 20) if i == (v >> 12) else (15, 15, 20)
+            if i == (v >> 12):
+                c = mul((255, 90, 90), 0.3 + 0.7 * ((v >> 4) & 0xFF) / 255)
+            f.rect(i * 7 + 4, 11, i * 7 + 8, 11, c)
+
+
+@reg("kolor")
+class ColorTime(Clock):
+    """Kolor czasu: godzina, minuta i sekunda to składowe R, G, B tła, zapisane jak kolor #HHMMSS."""
+
+    def draw(self, f, now, t, dt):
+        c = (now.hour / 23 * 255, now.minute / 59 * 255, now.second / 59 * 255)
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = c
+        lum = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11
+        s = now.strftime("#%H%M%S")
+        f.text(s, (W - text_w(s, TXT)) // 2, 0, (255, 255, 255) if lum < 140 else (0, 0, 0), TXT,
+               (0, 0, 0) if lum < 140 else None)
+
+
+@reg("dziesietny")
+class Decimal(Clock):
+    """Czas dziesiętny z Rewolucji Francuskiej: 10 godzin po 100 minut po 100 sekund; obok zwykły czas."""
+
+    def draw(self, f, now, t, dt):
+        sec = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
+        d = sec / 86400 * 100000
+        s = f"{int(d // 10000)}:{int(d // 100 % 100):02d}:{int(d % 100):02d}"
+        if NARROW:
+            if page(t, 4, 2) == 0:
+                f.text("CZAS", (W - text_w("CZAS", SMALL)) // 2, 0, (100, 100, 255), SMALL)
+                f.text("DZIESIĘTNY", (W - text_w("DZIESIĘTNY", SMALL)) // 2, 6, (255, 255, 255), SMALL)
+            else:
+                f.draw(text_px(s, (W - text_w(s)) // 2, 1), (255, 60, 60))
+            return
+        f.text("CZAS", 1, 0, (100, 100, 255), SMALL)
+        f.text("DZIES.", 1, 6, (255, 255, 255), SMALL)
+        f.draw(text_px(s, max(30, text_w("DZIES.", SMALL) + 4), 1), (255, 60, 60))
+        n = now.strftime("%H:%M")
+        f.text(n, W - text_w(n, SMALL), 6, (120, 120, 140), SMALL)
+        f.text("NORM", W - text_w("NORM", SMALL), 0, (70, 70, 90), SMALL)
+
+
+@reg("beaty")
+class Swatch(Clock):
+    """Czas internetowy Swatch: doba = 1000 beatów liczonych od Biel (UTC+1), wszędzie na świecie ten sam; obok kręci się Ziemia."""
+
+    def draw(self, f, now, t, dt):
+        u = now.astimezone(dtm.timezone.utc)
+        beats = ((u.hour + 1) % 24 * 3600 + u.minute * 60 + u.second + u.microsecond / 1e6) / 86.4
+        xa = 0 if NARROW else 2
+        f.text("@", xa, 0, (255, 60, 60))
+        s = f"{int(beats):03d}"
+        xd = xa + text_w("@", TXT) + 2
+        f.draw(text_px(s, xd, 1), (255, 255, 255))
+        f.text(f".{int(beats * 100) % 100:02d}", xd + text_w(s) + 1, 6, (180, 180, 180), SMALL)
+        cx, cy, r = W - 10, 5.5, 5.5
+        rot = t * 20
+        for y in range(H):
+            for x in range(W - 20, W):
+                dx, dy = (x + 0.5 - cx) / r, (y + 0.5 - cy) / r
+                if dx * dx + dy * dy < 1:
+                    lat = math.degrees(math.asin(-dy))
+                    lon = math.degrees(math.asin(dx / math.sqrt(max(1e-6, 1 - dy * dy)))) + rot
+                    mx, my = map_xy(lat, (lon + 180) % 360 - 180)
+                    shade = 0.4 + 0.6 * math.sqrt(1 - dx * dx - dy * dy)
+                    f.set(x, y, mul((30, 130, 40) if (int(mx), int(my)) in LAND else (0, 40, 120), shade))
+        if not NARROW:
+            small_time(f, now, x=58, y=0, c=(120, 120, 140))
+
+
+@reg("unix")
+class Unix(Clock):
+    """Znacznik czasu Unix – sekundy od 1 stycznia 1970; cyfry, które właśnie się zmieniły, rozbłyskują."""
+
+    def __init__(self):
+        self.prev, self.flash = "", {}
+
+    def draw(self, f, now, t, dt):
+        s = str(int(now.timestamp()))
+        for i, (a, b) in enumerate(zip(s, self.prev.ljust(len(s)))):
+            if a != b:
+                self.flash[i] = t
+        self.prev = s
+        if NARROW:  # 10 cyfr: wąska, wysoka czcionka
+            x = (W - text_w(s, TALL)) // 2
+            for i, ch in enumerate(s):
+                k = clamp(1 - (t - self.flash.get(i, -9)) / 0.6)
+                base = (60, 200, 255) if i >= len(s) - 3 else (200, 200, 210)
+                f.text(ch, x, 1, lerp(base, (255, 255, 255), k), TALL)
+                x += text_w(ch, TALL) + 1
+            return
+        x = (W - text_w(s) - 16) // 2 + 16
+        f.text("UNIX", 0, 0, (80, 80, 100), SMALL)
+        f.text("TIME", 0, 6, (80, 80, 100), SMALL)
+        for i, ch in enumerate(s):
+            k = clamp(1 - (t - self.flash.get(i, -9)) / 0.6)
+            base = (60, 200, 255) if i >= len(s) - 3 else (200, 200, 210)
+            f.draw(text_px(ch, x, 1), lerp(base, (255, 255, 255), k))
+            x += 7
+
+
+def tz_off(std, rule, u):
+    """Przesunięcie strefy w godzinach z prostymi regułami czasu letniego (bez zoneinfo)."""
+    y = u.year
+
+    def sun(m, n):  # n-ta niedziela miesiąca, n=-1 ostatnia
+        if n > 0:
+            d = dtm.datetime(y, m, 1)
+            return d + dtm.timedelta(days=(6 - d.weekday()) % 7 + 7 * (n - 1))
+        d = dtm.datetime(y, m + 1, 1) - dtm.timedelta(days=1) if m < 12 else dtm.datetime(y, 12, 31)
+        return d - dtm.timedelta(days=(d.weekday() + 1) % 7)
+
+    n = u.replace(tzinfo=None)
+    if rule == "eu":
+        dst = sun(3, -1) + dtm.timedelta(hours=1) <= n < sun(10, -1) + dtm.timedelta(hours=1)
+    elif rule == "us":
+        dst = sun(3, 2) + dtm.timedelta(hours=2 - std) <= n < sun(11, 1) + dtm.timedelta(hours=1 - std)
+    elif rule == "au":
+        dst = not (sun(4, 1) + dtm.timedelta(hours=3 - std - 1) <= n < sun(10, 1) + dtm.timedelta(hours=2 - std))
+    elif rule == "nz":
+        dst = not (sun(4, 1) + dtm.timedelta(hours=3 - std - 1) <= n < sun(9, -1) + dtm.timedelta(hours=2 - std))
+    else:
+        dst = False
+    return std + (1 if dst else 0)
+
+
+@reg("strefy")
+class WorldClocks(Clock):
+    """Zegary świata przewijane jak na lotnisku: Warszawa, Londyn, Nowy Jork, Tokio, Sydney…; dzień na żółto, noc na niebiesko."""
+
+    CITIES = [("Warszawa", 1, "eu"), ("Londyn", 0, "eu"), ("Nowy Jork", -5, "us"), ("Los Angeles", -8, "us"),
+              ("Rio", -3, None), ("Reykjavik", 0, None), ("Dubaj", 4, None), ("Delhi", 5.5, None),
+              ("Pekin", 8, None), ("Tokio", 9, None), ("Sydney", 10, "au"), ("Auckland", 12, "nz")]
+
+    def draw(self, f, now, t, dt):
+        u = now.astimezone(dtm.timezone.utc)
+        segs = []
+        for name, std, rule in self.CITIES:
+            lt = u + dtm.timedelta(hours=tz_off(std, rule, u))
+            day = 7 <= lt.hour < 19
+            segs += [(name, (150, 150, 170)), (lt.strftime("%H:%M") + "    ", (255, 220, 60) if day else (90, 140, 255))]
+        scroll_segs(f, segs, t, 22)
+
+
+@reg("obwod")
+class Perimeter(Clock):
+    """Sekundnik jako świetlny wąż biegnący dookoła krawędzi panelu (pełne okrążenie = minuta), w środku godzina."""
+
+    def __init__(self):
+        self.path = ([(x, 0) for x in range(W)] + [(W - 1, y) for y in range(1, H)]
+                     + [(x, H - 1) for x in range(W - 2, -1, -1)] + [(0, y) for y in range(H - 2, 0, -1)])
+
+    def draw(self, f, now, t, dt):
+        n = len(self.path)
+        for k in range(12):
+            f.set(*self.path[int(k * n / 12)], (60, 60, 60))
+        pos = (now.second + now.microsecond / 1e6) / 60 * n
+        for k in range(30):
+            x, y = self.path[int(pos - k) % n]
+            f.set(x, y, mul(hsv(now.minute / 60 + k * 0.01, 0.8, 1), 1 - k / 30))
+        clock_big(f, now, (255, 255, 255))
+
+
+@reg("wahadlo")
+class Pendulum(Clock):
+    """Dwa wahadła po bokach tykają co sekundę jak w zegarze stojącym; cyfry lekko rozbłyskują przy każdym tyknięciu."""
+
+    def draw(self, f, now, t, dt):
+        s = now.second + now.microsecond / 1e6
+        a = 0.55 * math.sin(math.pi * s)
+        for px, sign in (((10, 1), (109, -1)) if not NARROW else ((5, 1), (W - 6, -1))):
+            ln = 9.5 if not NARROW else 8.5
+            bx, by = px + math.sin(a * sign) * ln * (1 if not NARROW else 0.5), math.cos(a) * ln
+            f.line(px, 0, bx, by, (140, 110, 60))
+            disc(f, bx, by, 1.6, (255, 200, 80))
+            f.set(px, 0, (200, 200, 200))
+        k = clamp(1 - (now.microsecond / 1e6) / 0.25)
+        clock_big(f, now, lerp((220, 200, 160), (255, 255, 255), k))
+
+
+@reg("fala")
+class WaveText(Clock):
+    """Godzina z sekundami kołysze się na fali, pod nią morze z pianą."""
+
+    def draw(self, f, now, t, dt):
+        for x in range(W):
+            h = 9.5 + math.sin(x * 0.15 + t * 1.5) * 0.8 + math.sin(x * 0.4 - t) * 0.4
+            for y in range(H):
+                if y >= h:
+                    f.set(x, y, lerp((0, 70, 140), (0, 20, 60), (y - h) / 3))
+            f.set(x, h, (150, 200, 255))
+        s = now.strftime("%H:%M:%S")
+        x0 = (W - text_w(s, TXT)) // 2
+        for x, y in text_px(s, x0, 0, TXT):
+            f.set(x, y + math.sin(x * 0.12 - t * 3) * 1.6, (255, 255, 255))
+
+
+@reg("glitch")
+class Glitch(Clock):
+    """Cyfrowy glitch: rozjechane kanały RGB, przesunięte linie i szum, który co chwilę psuje obraz."""
+
+    def __init__(self):
+        self.until, self.nxt = 0, 1
+
+    def draw(self, f, now, t, dt):
+        if t > self.nxt:
+            self.until, self.nxt = t + random.uniform(0.1, 0.45), t + random.uniform(1, 4)
+        g = t < self.until
+        pts = centered(now.strftime("%H:%M"))
+        dr, db = (random.randint(-3, 3), random.randint(-3, 3)) if g else (0, 0)
+        for x, y in pts:
+            f.add(x + dr, y, (255, 0, 0))
+            f.add(x, y, (0, 255, 0))
+            f.add(x + db, y, (0, 0, 255))
+        if g:
+            for _ in range(3):
+                y = random.randrange(H)
+                k = random.randint(-8, 8)
+                f.px[y] = f.px[y][-k:] + f.px[y][:-k] if k else f.px[y]
+            for _ in range(4):
+                x, y = random.randrange(W), random.randrange(H)
+                f.rect(x, y, x + random.randint(1, 8), y, hsv(random.random(), 1, random.uniform(0.3, 1)))
+        for y in range(0, H, 2):
+            f.px[y] = [mul(c, 0.75) for c in f.px[y]]
+
+
+@reg("neon")
+class Neon(Clock):
+    """Neon na ceglanym murze: różowe cyfry z poświatą, które czasem zamrugają, i szyld „OTWARTE”."""
+
+    def __init__(self):
+        self.off = {}
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                mortar = y % 3 == 2 or (x + (4 if (y // 3) % 2 else 0)) % 8 == 0
+                f.px[y][x] = (6, 2, 2) if mortar else (22, 8, 6)
+        txt = now.strftime("%H:%M")
+        x = (W - text_w(txt)) // 2
+        if not NARROW:  # szyld „OTWARTE”, godzina i „24H” razem pośrodku
+            x0 = (W - text_w("OTWARTE", SMALL) - text_w(txt) - text_w("24H", SMALL) - 12) // 2
+            x = x0 + text_w("OTWARTE", SMALL) + 6
+            k = 1 if (t % 7) > 0.3 else 0.2
+            f.text("OTWARTE", x0, 3, mul((40, 140, 255), k), SMALL)
+            f.text("24H", x + text_w(txt) + 6, 3, (255, 200, 40), SMALL)
+        for i, ch in enumerate(txt):
+            if random.random() < 0.004:
+                self.off[i] = t + random.uniform(0.05, 0.25)
+            lit = t > self.off.get(i, 0)
+            pts = text_px(ch, x, 1)
+            f.draw(pts, (255, 50, 170) if lit else (110, 0, 60))
+            x += text_w(ch) + 1
+
+
+@reg("pismo")
+class Handwriting(Clock):
+    """Pióro co minutę pisze godzinę na papierze w linie – piksel po pikselu, z błyszczącą stalówką."""
+
+    def __init__(self):
+        self.txt, self.t0 = None, 0
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = (26, 22, 16) if y % 4 != 3 else (14, 18, 40)
+        for y in range(H):
+            f.set(8, y, (60, 10, 10))
+        txt = now.strftime("%H:%M")
+        if txt != self.txt:
+            self.txt, self.t0 = txt, t
+        x = (W - text_w(txt)) // 2
+        order = []
+        for ci, ch in enumerate(txt):
+            order += sorted(text_px(ch, x, 1), key=lambda p: (p[0], p[1] if p[0] % 2 else -p[1]))
+            x += text_w(ch) + 1
+        n = int(clamp((t - self.t0) / 2.5) * len(order))
+        for x, y in order[:n]:
+            f.set(x, y, (70, 130, 255))
+        if n < len(order):
+            px, py = order[n]
+            f.set(px, py, (255, 255, 255))
+            f.set(px + 1, py - 1, (180, 180, 180))
+
+
+@reg("kreskowy")
+class Barcode(Clock):
+    """Kod kreskowy EAN z godziną i datą (HHMMSSDDMM), z czerwonym laserem skanera."""
+
+    L = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"]
+
+    def draw(self, f, now, t, dt):
+        digs = now.strftime("%H%M%S")
+        mods = "101" + "".join(self.L[int(d)] for d in digs[:3]) + "01010" + "".join(
+            "".join("1" if b == "0" else "0" for b in self.L[int(d)]) for d in digs[3:]) + "101"
+        mw = 2 if len(mods) * 2 + 6 <= W else 1
+        x0 = (W - len(mods) * mw) // 2
+        hms = now.strftime("%H:%M:%S")
+        tx, tw = (W - text_w(hms, SMALL)) // 2, text_w(hms, SMALL)
+        f.rect(x0 - 3, 0, x0 + len(mods) * mw + 2, 11, (190, 190, 190))
+        for i, b in enumerate(mods):
+            if b == "1":
+                bx = x0 + i * mw
+                guard = not 3 <= i < len(mods) - 3 or 24 <= i < 29
+                long_ = guard and not tx - 2 <= bx <= tx + tw + 1  # dłuższe kreski nie wchodzą na napis
+                f.rect(bx, 0, bx + mw - 1, 8 if long_ else 6, (0, 0, 0))
+        f.text(hms, tx, 7, (0, 0, 0), SMALL)
+        lx = x0 + (math.sin(t * 2) * 0.5 + 0.5) * len(mods) * mw
+        for y in range(H):
+            f.add(lx, y, (255, 0, 0))
+
+
+@reg("maszyna")
+class Typewriter(Clock):
+    """Maszyna do pisania co minutę wystukuje godzinę i datę; karetka przesuwa się, na końcu dzwonek."""
+
+    def __init__(self):
+        self.txt, self.t0 = None, 0
+
+    def draw(self, f, now, t, dt):
+        full = f"{now:%H:%M} {PL_DAYS[now.weekday()]}, {now.day} {PL_MONTHS[now.month - 1]}"
+        if now.strftime("%H:%M") != self.txt:
+            self.txt, self.t0 = now.strftime("%H:%M"), t
+        n = min(len(full), int((t - self.t0) * 9))
+        s = full[:n]
+        tw = text_w(s, TXT)
+        pos = W - 30 if NARROW else 90
+        x0 = 2 if tw < pos - 2 else pos - tw
+        f.text(s, x0, 0, (255, 180, 60))
+        if n < len(full) or int(t * 2) % 2:
+            f.rect(x0 + tw + 2, 9, x0 + tw + 6, 9, (255, 255, 255))
+        done = (t - self.t0) * 9 - len(full)
+        if 0 < done < 3:
+            f.rect(W - 3, 0, W - 1, 11, (255, 255, 200))
+
+
+@reg("radar")
+class Radar(Clock):
+    """Radar: wiązka omiata niebo, cyfry godziny pojawiają się jak wykryte obiekty i powoli gasną."""
+
+    def __init__(self):
+        c, sy = W / 2, 5 * W / 120
+        self.ang = [[math.atan2((11.5 - y) * sy, x + 0.5 - c) for x in range(W)] for y in range(H)]
+        self.dist = [[math.hypot(x + 0.5 - c, (11.5 - y) * sy) for x in range(W)] for y in range(H)]
+        self.glow = [[0.0] * W for _ in range(H)]
+
+    def draw(self, f, now, t, dt):
+        a = (math.sin(t * 1.1) * 0.5 + 0.5) * math.pi
+        dset = set(centered(now.strftime("%H:%M")))
+        dec = math.exp(-dt * 1.3)
+        for y in range(H):
+            gy, ay, dy = self.glow[y], self.ang[y], self.dist[y]
+            for x in range(W):
+                g = gy[x] * dec
+                if abs(ay[x] - a) < 0.05:
+                    g = 1.0
+                gy[x] = g
+                ring = 0.12 if any(abs(dy[x] - r * W / 120) < 0.6 for r in (20, 40, 60)) else 0
+                if (x, y) in dset:
+                    f.px[y][x] = (40 * g, 255 * max(g, 0.06), 60 * g)
+                else:
+                    f.px[y][x] = (0, 70 * (g * 0.35 + ring), 0)
+        for k in range(W // 2 + 10):
+            f.add(W / 2 + math.cos(a) * k, 11.5 - math.sin(a) * k / (5 * W / 120), (60, 255, 60))
+
+
+@reg("domino")
+class Domino(Clock):
+    """Czas jako trzy kostki domina: oczka pokazują cyfry godzin, minut i sekund."""
+
+    PIPS = {0: [], 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
+            7: [0, 2, 3, 4, 5, 6, 8], 8: [0, 1, 2, 3, 5, 6, 7, 8], 9: list(range(9))}
+
+    def draw(self, f, now, t, dt):
+        digs = now.strftime("%H%M%S")
+        nd = 2 if NARROW else 3
+        x = (W - (nd * 23 + (nd - 1) * 6)) // 2
+        cols = [(255, 80, 80), (80, 255, 120), (80, 160, 255)]
+        for k in range(nd):
+            f.rect(x, 0, x + 22, 11, (200, 195, 180))
+            f.rect(x + 11, 1, x + 11, 10, (80, 75, 70))
+            for half in range(2):
+                d = int(digs[k * 2 + half])
+                hx = x + half * 12
+                for p in self.PIPS[d]:
+                    px, py = hx + 1 + (p % 3) * 3.5, 1 + (p // 3) * 3.5
+                    f.rect(px, py, px + 1, py + 1, mul(cols[k], 0.8))
+            x += 29
+
+
+@reg("ksiezyc")
+class MoonPhase(Clock):
+    """Faza Księżyca liczona z daty: tarcza z oświetloną częścią, nazwa fazy, procent oświetlenia i ile do pełni."""
+
+    def draw(self, f, now, t, dt):
+        syn = 29.530588853
+        ref = dtm.datetime(2000, 1, 6, 18, 14, tzinfo=dtm.timezone.utc)
+        age = ((now - ref).total_seconds() / 86400) % syn
+        frac = age / syn
+        phi = 2 * math.pi * frac
+        illum = (1 - math.cos(phi)) / 2
+        for i in range(30):
+            f.set(hash1(i) * W, hash1(i + 50) * H, mul((110, 110, 140), 0.3 + 0.3 * math.sin(t + i)))
+        cx, cy, r = 6, 6, 5.6
+        for y in range(H):
+            for x in range(13):
+                nx, ny = (x + 0.5 - cx) / r, (y + 0.5 - cy) / r
+                if nx * nx + ny * ny < 1:
+                    w = math.sqrt(1 - ny * ny)
+                    lit = nx >= w * math.cos(phi) if frac < 0.5 else nx <= -w * math.cos(phi)
+                    crater = 0.8 + 0.2 * noise2(x * 0.9, y * 0.9)
+                    f.set(x, y, mul((230, 230, 200), crater) if lit else (14, 14, 22))
+        names = [(0.0339, "nów"), (0.216, "młody sierp"), (0.284, "I kwadra"), (0.466, "przybywa"), (0.534, "pełnia"),
+                 (0.716, "ubywa"), (0.784, "III kwadra"), (0.966, "stary sierp"), (1.01, "nów")]
+        name = next(n for lim, n in names if frac < lim)
+        to_full = ((0.5 - frac) % 1) * syn
+        lines = [name, f"{illum * 100:.0f}% jasna", f"pełnia za {to_full:.0f} d" if to_full > 1 else "pełnia!",
+                 now.strftime("%H:%M")]
+        if max(text_w(x, TXT) for x in lines) <= W - 16:
+            f.text(lines[int(t / 4) % 4], 16, 0, (230, 230, 200))
+        else:  # wąski panel: wszystko po kolei jednym paskiem obok tarczy
+            scroll_segs(f, [(x + "   ", (230, 230, 200) if i % 2 == 0 else (170, 190, 255)) for i, x in enumerate(lines)],
+                        t, 22, 0, 14)
+
+# ================================================================ SCENY, SYMULACJE I GRY
+@reg("plazma")
+class Plasma(Clock):
+    """Klasyczna plazma z demosceny w płynących kolorach, godzina wycięta na czarno z białym środkiem."""
+
+    def draw(self, f, now, t, dt):
+        cx, cy = W / 2 + math.sin(t * 0.7) * W / 3, 6 + math.cos(t * 0.9) * 4
+        for y in range(H):
+            row = f.px[y]
+            for x in range(W):
+                v = (math.sin(x * 0.08 + t) + math.sin(y * 0.35 + t * 1.3) + math.sin((x * 0.05 + y * 0.2) + t * 0.7)
+                     + math.sin(math.hypot(x - cx, (y - cy) * 4) * 0.08))
+                row[x] = hsv(v * 0.12 + t * 0.05, 0.9, 0.65)
+        clock_big(f, now)
+
+
+@reg("lawa")
+class Lava(Clock):
+    """Lampa lawa: bąble gorącego wosku łączą się i rozdzielają w fioletowej butelce."""
+
+    def __init__(self):
+        self.b = [(random.uniform(0.1, 0.3), random.uniform(0.2, 0.5), random.random() * 6, random.uniform(3, 4.5)) for _ in range(7)]
+
+    def draw(self, f, now, t, dt):
+        balls = [(W / 2 + math.sin(t * sx + ph) * (W / 2 - 5), 6 + math.sin(t * sy + ph * 2) * 5.5, r) for sx, sy, ph, r in self.b]
+        for y in range(H):
+            row = f.px[y]
+            for x in range(W):
+                v = 0.0
+                for bx, by, r in balls:
+                    d = (x - bx) ** 2 + ((y - by) * 1.6) ** 2
+                    v += r * r / (d + 0.5)
+                if v > 1:
+                    row[x] = grad([(1, (200, 20, 0)), (2, (255, 110, 0)), (4, (255, 220, 60))], v)
+                elif v > 0.6:
+                    row[x] = lerp((25, 0, 30), (140, 10, 10), (v - 0.6) / 0.4)
+                else:
+                    row[x] = (25, 0, 30)
+        clock_big(f, now, (255, 240, 220), outline=(30, 0, 20))
+
+
+@reg("swietliki")
+class Fireflies(Clock):
+    """Nocna łąka: świetliki krążą i mrugają nad sylwetkami drzew, godzina świeci jak księżyc."""
+
+    def __init__(self):
+        rnd = random.Random(11)
+        self.trees = [9 - int(max(0, math.sin(x * 0.21) * 3 + math.sin(x * 0.07 + 2) * 2)) for x in range(W)]
+        self.f = [(rnd.random() * 100, rnd.uniform(0.6, 1.8), rnd.random() * 6) for _ in range(28)]
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = (0, 2, 8) if y < self.trees[x] else (0, 6, 2)
+        clock_big(f, now, (70, 80, 60), outline=None)
+        for seed, rate, ph in self.f:
+            x = noise1(seed + t * 0.08) * W * 1.2 - W * 0.1
+            y = noise1(seed + 50 + t * 0.1) * 11
+            b = max(0, math.sin(t * rate + ph)) ** 6
+            f.add(x, y, mul((200, 255, 60), b))
+            for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                f.add(x + ox, y + oy, mul((40, 60, 10), b))
+
+
+@reg("fajerwerki")
+class Fireworks(Clock):
+    """Fajerwerki ze smugami; na początku każdej minuty salwa, a o pełnej godzinie pokaz przez całą minutę."""
+
+    def __init__(self):
+        self.rk, self.pt, self.buf, self.acc = [], [], Persist(), 0.0
+
+    def draw(self, f, now, t, dt):
+        rate = 5 if now.minute == 0 else 7 if now.second < 4 else 1.1
+        self.acc += rate * dt
+        while self.acc >= 1:
+            self.acc -= 1
+            self.rk.append([random.uniform(10, W - 10), H, random.uniform(-3, 3), -random.uniform(14, 18), random.random()])
+        self.buf.fade(math.exp(-dt * 7))
+        keep = []
+        for r in self.rk:
+            r[3] += 15 * dt
+            r[0] += r[2] * dt
+            r[1] += r[3] * dt
+            self.buf.add(r[0], r[1], (255, 200, 120))
+            if r[3] > -2:
+                hue = r[4]
+                for _ in range(34):
+                    a, s = random.uniform(0, 2 * math.pi), random.uniform(4, 17)
+                    self.pt.append([r[0], r[1], math.cos(a) * s, math.sin(a) * s * 0.55, random.uniform(0.9, 1.7),
+                                    hsv(hue + random.uniform(-0.05, 0.05), 0.8, 1)])
+            else:
+                keep.append(r)
+        self.rk = keep
+        alive = []
+        for p in self.pt:
+            p[3] += 8 * dt
+            p[2] *= math.exp(-dt * 1.5)
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            p[4] -= dt
+            if p[4] > 0:
+                self.buf.add(p[0], p[1], mul(p[5], min(1, p[4])))
+                alive.append(p)
+        self.pt = alive
+        clock_big(f, now, (60, 60, 75), outline=None)
+        self.buf.blit(f)
+
+
+@reg("snieg")
+class Snow(Clock):
+    """Śnieg pada i osiada na cyfrach oraz na ziemi; po chwili topnieje, a z nową minutą zsuwa się z cyfr."""
+
+    def __init__(self):
+        self.fl, self.set_ = [], {}
+
+    def draw(self, f, now, t, dt):
+        digits = set(centered(now.strftime("%H:%M")))
+        if random.random() < 30 * dt:
+            self.fl.append([random.uniform(0, W), -1.0, random.uniform(2.5, 5), random.random() * 6])
+        solid = lambda x, y: y >= H or (x, y) in digits or (x, y) in self.set_
+        keep = []
+        for q in self.fl:
+            nx = q[0] + math.sin(t * 1.5 + q[3]) * dt * 2
+            ny = q[1] + q[2] * dt
+            cx, cy = int(nx), int(ny)
+            if cy >= 0 and solid(cx, cy + 1) and not solid(cx, cy):
+                self.set_[(cx, cy)] = t + random.uniform(20, 50)
+            else:
+                q[0], q[1] = nx % W, ny
+                keep.append(q)
+        self.fl = keep
+        for (x, y), end in list(self.set_.items()):
+            if end < t or (x, y) in digits or not solid(x, y + 1):
+                del self.set_[(x, y)]
+                if end >= t:
+                    self.fl.append([x + 0.5, y + 0.5, 4, 0])
+        f.outline(list(digits), (0, 0, 10))
+        f.draw(list(digits), (120, 170, 255))
+        for (x, y) in self.set_:
+            f.set(x, y, (240, 245, 255))
+        for q in self.fl:
+            f.add(q[0], q[1], (200, 200, 220))
+
+
+@reg("burza")
+class Storm(Clock):
+    """Burza: ukośny deszcz, kłębiące się chmury i pioruny, w których błysku lepiej widać godzinę."""
+
+    def __init__(self):
+        self.drops = [[random.uniform(0, W), random.uniform(0, H)] for _ in range(80)]
+        self.flash, self.nxt, self.bolt = 0.0, 2.0, []
+
+    def draw(self, f, now, t, dt):
+        if t > self.nxt:
+            self.nxt = t + random.uniform(2, 7)
+            self.flash = 1.0
+            x = random.uniform(10, W - 10)
+            self.bolt = [(x, 0)]
+            for y in range(1, H):
+                x += random.choice((-1, 0, 1))
+                self.bolt.append((x, y))
+        self.flash = max(0.0, self.flash - dt * 3)
+        fl = self.flash * (1 if int(self.flash * 10) % 3 else 0.4)
+        for y in range(H):
+            for x in range(W):
+                c = mul((30, 30, 45), noise2(x * 0.07 + t * 0.3, y * 0.4) * (1 - y / 5)) if y < 5 else (3, 3, 8)
+                f.px[y][x] = lerp(c, (140, 140, 180), fl * 0.6)
+        for d in self.drops:
+            d[0] = (d[0] - 12 * dt) % W
+            d[1] += 45 * dt
+            if d[1] >= H:
+                d[1] -= H
+            f.add(d[0], d[1], (60, 80, 130))
+            f.add(d[0] + 0.3, d[1] - 1, (25, 30, 55))
+        if self.flash > 0.4:
+            for x, y in self.bolt:
+                f.set(x, y, (255, 255, 255))
+                f.add(x + 1, y, (80, 60, 140))
+        clock_big(f, now, lerp((70, 75, 100), (255, 255, 255), fl))
+
+
+@reg("gwiazdy")
+class Stars(Clock):
+    """Nocne niebo: migoczące gwiazdy, pasmo Drogi Mlecznej i od czasu do czasu spadająca gwiazda."""
+
+    def __init__(self):
+        rnd = random.Random(21)
+        self.st = [(rnd.randrange(W), rnd.randrange(H), rnd.random() * 6, rnd.uniform(0.3, 1)) for _ in range(90)]
+        self.shoot, self.nxt = None, 3
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                band = math.exp(-((y - 6 + (x - 60) * 0.06) ** 2) / 6)
+                f.px[y][x] = mul((25, 18, 40), band * (0.5 + noise2(x * 0.2, y * 0.5)))
+        for x, y, ph, b in self.st:
+            f.add(x, y, mul((200, 200, 255), b * (0.5 + 0.5 * math.sin(t * 2.5 + ph))))
+        if self.shoot is None and t > self.nxt:
+            self.shoot = [random.uniform(20, W), random.uniform(0, 3), t]
+        if self.shoot:
+            sx, sy, st = self.shoot
+            p = (t - st) * 60
+            for k in range(10):
+                f.add(sx - p + k, sy + (p - k) * 0.12, mul((255, 255, 220), 1 - k / 10))
+            if p > 70:
+                self.shoot, self.nxt = None, t + random.uniform(3, 10)
+        clock_big(f, now, (170, 190, 255))
+
+
+@reg("ocean")
+class Ocean(Clock):
+    """Morze o prawdziwej porze dnia: fale z pianą, odbicie słońca lub księżyca i żaglówka na horyzoncie."""
+
+    def draw(self, f, now, t, dt):
+        elev, solar = sun_position(now)
+        top, hor = sky_colors(elev)
+        for y in range(6):
+            for x in range(W):
+                f.px[y][x] = mul(lerp(top, hor, y / 5), 0.5)
+        sx = W / 4 + (solar % 24) / 24 * W / 2
+        disc(f, sx, 3.5, 1.8, (255, 220, 120) if elev > -3 else (220, 220, 200))
+        for x in range(W):
+            h = 5.5 + math.sin(x * 0.15 + t * 1.2) * 0.6 + math.sin(x * 0.37 - t * 0.8) * 0.3
+            for y in range(int(h), H):
+                wc = lerp((0, 50, 110), (0, 12, 40), (y - h) / 6)
+                if abs(x - sx) < 3 + (y - 5) and hash1(x * 17 + y * 5 + int(t * 6)) > 0.7:
+                    wc = lerp(wc, (255, 230, 150), 0.6)
+                f.set(x, y, mul(wc, 0.5 + 0.5 * clamp((elev + 10) / 20)))
+            if math.sin(x * 0.15 + t * 1.2) > 0.85:
+                f.set(x, h, (200, 220, 255))
+        bx = (t * 3) % (W + 20) - 10
+        by = 5.5 + math.sin(bx * 0.15 + t * 1.2) * 0.6 - 1
+        f.line(bx, by - 3, bx, by, (150, 120, 80))
+        f.line(bx + 1, by - 3, bx + 3, by - 1, (230, 230, 230))
+        f.line(bx - 2, by, bx + 3, by, (120, 60, 30))
+        small_time(f, now, x=1)
+
+
+@reg("dym")
+class Smoke(Clock):
+    """Dym z kadzidła snuje się w górę; cyfry wyłaniają się tam, gdzie dym jest gęsty."""
+
+    def draw(self, f, now, t, dt):
+        dset = set(centered(now.strftime("%H:%M")))
+        for y in range(H):
+            for x in range(W):
+                d = noise2(x * 0.07 + math.sin(t * 0.2), y * 0.35 + t * 0.9) * noise2(x * 0.03 - t * 0.1, 3 + t * 0.2) * 1.8
+                if (x, y) in dset:
+                    f.px[y][x] = mul((255, 190, 120), 0.35 + clamp(d) * 0.8)
+                else:
+                    f.px[y][x] = lerp((4, 4, 8), (90, 95, 120), clamp(d) * 0.8)
+
+
+@reg("kalejdoskop")
+class Kaleido(Clock):
+    """Kalejdoskop: kolorowy wzór odbity czterokrotnie, obracający się i zmieniający barwy."""
+
+    def draw(self, f, now, t, dt):
+        for y in range(6):
+            for x in range((W + 1) // 2):
+                v = (math.sin(x * 0.25 + t) + math.sin(y * 0.9 - t * 1.3) + math.sin((x + y) * 0.2 + t * 0.7)
+                     + math.sin(math.hypot(x - W / 4 + math.sin(t) * W / 6, y * 3) * 0.3))
+                c = hsv(v * 0.15 + t * 0.05, 0.9, clamp(0.25 + 0.75 * (math.sin(v * 2) * 0.5 + 0.5)))
+                for xx, yy in ((x, y), (W - 1 - x, y), (x, H - 1 - y), (W - 1 - x, H - 1 - y)):
+                    f.px[yy][xx] = c
+        clock_big(f, now)
+
+
+@reg("labirynt")
+class Maze(Clock):
+    """Labirynt: generuje się na oczach, potem wąż szuka wyjścia; po rozwiązaniu wyświetla się godzina."""
+
+    CW, CH = (W - 1) // 2, 5
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.open, self.stack, self.seen = set(), [(0, 0)], {(0, 0)}
+        self.open.add((1, 1))
+        self.state, self.path, self.pi, self.hold = "gen", [], 0, 0
+
+    def draw(self, f, now, t, dt):
+        if self.state == "gen":
+            for _ in range(8):
+                if not self.stack:
+                    self.state = "solve"
+                    self.path = self.solve()
+                    break
+                cx, cy = self.stack[-1]
+                nb = [(cx + dx, cy + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                      if 0 <= cx + dx < self.CW and 0 <= cy + dy < self.CH and (cx + dx, cy + dy) not in self.seen]
+                if nb:
+                    nx, ny = random.choice(nb)
+                    self.seen.add((nx, ny))
+                    self.open.add((cx + nx + 1, cy + ny + 1))
+                    self.open.add((2 * nx + 1, 2 * ny + 1))
+                    self.stack.append((nx, ny))
+                else:
+                    self.stack.pop()
+        elif self.state == "solve":
+            self.pi += 40 * dt
+            if self.pi >= len(self.path):
+                self.state, self.hold = "hold", t
+        elif t - self.hold > 5:
+            self.reset()
+        for y in range(11):
+            for x in range(2 * self.CW + 1):
+                f.set(x, y, (0, 0, 0) if (x, y) in self.open else (15, 30, 90))
+        if self.state == "gen" and self.stack:
+            cx, cy = self.stack[-1]
+            f.set(2 * cx + 1, 2 * cy + 1, (255, 255, 255))
+        for i, (x, y) in enumerate(self.path[:int(self.pi)]):
+            f.set(x, y, hsv(i / 300, 0.9, 1))
+        if self.state == "hold":
+            clock_big(f, now)
+
+    def solve(self):
+        start, goal = (1, 1), (2 * self.CW - 1, 2 * self.CH - 1)
+        prev, q = {start: None}, [start]
+        for p in q:
+            if p == goal:
+                break
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (p[0] + dx, p[1] + dy)
+                if n in self.open and n not in prev:
+                    prev[n] = p
+                    q.append(n)
+        path, p = [], goal
+        while p is not None and p in prev:
+            path.append(p)
+            p = prev[p]
+        return path[::-1]
+
+
+@reg("waz")
+class Snake(Clock):
+    """Gra w węża, w którą gra komputer: szuka najkrótszej drogi do jabłka i rośnie, aż się zapętli."""
+
+    GW, GH = W // 2, 6
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.body = [(10, 3), (9, 3), (8, 3)]
+        self.food, self.acc = self.new_food(), 0.0
+
+    def new_food(self):
+        while True:
+            p = (random.randrange(self.GW), random.randrange(self.GH))
+            if p not in getattr(self, "body", []):
+                return p
+
+    def next_dir(self):
+        head, body = self.body[0], set(self.body[:-1])
+        prev, q = {head: None}, [head]
+        for p in q:
+            if p == self.food:
+                break
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (p[0] + dx, p[1] + dy)
+                if 0 <= n[0] < self.GW and 0 <= n[1] < self.GH and n not in body and n not in prev:
+                    prev[n] = p
+                    q.append(n)
+        if self.food in prev:
+            p = self.food
+            while prev[p] != head:
+                p = prev[p]
+            return p
+        free = [(head[0] + dx, head[1] + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+        free = [n for n in free if 0 <= n[0] < self.GW and 0 <= n[1] < self.GH and n not in body]
+        return random.choice(free) if free else None
+
+    def draw(self, f, now, t, dt):
+        self.acc += dt * 14
+        while self.acc >= 1:
+            self.acc -= 1
+            n = self.next_dir()
+            if n is None:
+                self.reset()
+                break
+            self.body.insert(0, n)
+            if n == self.food:
+                self.food = self.new_food()
+            else:
+                self.body.pop()
+        fx, fy = self.food
+        f.rect(fx * 2, fy * 2, fx * 2 + 1, fy * 2 + 1, (255, 30, 30) if int(t * 4) % 2 else (150, 0, 0))
+        for i, (x, y) in enumerate(self.body):
+            f.rect(x * 2, y * 2, x * 2 + 1, y * 2 + 1, (200, 255, 200) if i == 0 else hsv(0.3 + i * 0.005, 0.9, 0.9 - i * 0.004))
+        small_time(f, now, c=(200, 200, 200))
+
+
+@reg("arkanoid")
+class Arkanoid(Clock):
+    """Arkanoid, w którym cegiełkami są cyfry godziny: piłka je rozbija, a z nową minutą ściana się odbudowuje."""
+
+    def __init__(self):
+        self.txt, self.bricks, self.sparks = None, set(), []
+        self.bx, self.by, self.vx, self.vy, self.px = 60.0, 10.0, 34.0, -26.0, 60.0
+
+    def draw(self, f, now, t, dt):
+        txt = now.strftime("%H:%M")
+        if txt != self.txt:
+            self.txt, self.bricks = txt, set(text_px(txt, (W - text_w(txt)) // 2, 0))
+        self.px += clamp(self.bx - self.px, -50 * dt, 50 * dt)
+        self.px = clamp(self.px, 5, W - 6)
+        steps = int(max(abs(self.vx), abs(self.vy)) * dt / 0.4) + 1
+        for _ in range(steps):
+            h = dt / steps
+            nx, ny = self.bx + self.vx * h, self.by + self.vy * h
+            if nx < 0 or nx >= W:
+                self.vx = -self.vx
+                continue
+            if ny < 0:
+                self.vy = abs(self.vy)
+                continue
+            if ny >= 11:
+                if abs(nx - self.px) <= 6:
+                    self.vy = -abs(self.vy)
+                    self.vx = clamp(self.vx + (nx - self.px) * 4, -45, 45)
+                else:
+                    self.bx, self.by, self.vy = self.px, 10.0, -26.0
+                continue
+            cell = (int(nx), int(ny))
+            if cell in self.bricks:
+                self.bricks.discard(cell)
+                for _ in range(4):
+                    self.sparks.append([cell[0], cell[1], random.uniform(-15, 15), random.uniform(-15, 15), 0.4])
+                if (int(self.bx), int(ny)) in self.bricks or int(self.by) != int(ny):
+                    self.vy = -self.vy
+                else:
+                    self.vx = -self.vx
+                continue
+            self.bx, self.by = nx, ny
+        for x, y in self.bricks:
+            f.set(x, y, hsv(x / W, 0.8, 1))
+        keep = []
+        for s in self.sparks:
+            s[0] += s[2] * dt
+            s[1] += s[3] * dt
+            s[4] -= dt
+            if s[4] > 0:
+                f.add(s[0], s[1], mul((255, 220, 120), s[4] * 2))
+                keep.append(s)
+        self.sparks = keep
+        f.rect(self.px - 5, 11, self.px + 5, 11, (200, 200, 220))
+        f.set(self.bx, self.by, (255, 255, 255))
+
+
+@reg("najezdzcy")
+class Invaders(Clock):
+    """Space Invaders: szereg kosmitów maszeruje w rytm kroków, działko strzela samo, godzina jako wynik w rogu."""
+
+    SPR = [["#...#", ".###.", "##.##", "#####", "#.#.#"], [".#.#.", ".###.", "##.##", "#####", ".#.#."]]
+
+    def __init__(self):
+        self.dead, self.shots, self.boom = {}, [], []
+        self.gx, self.last = 60.0, 0
+
+    def draw(self, f, now, t, dt):
+        step = int(t / 0.35)
+        n_inv = 8 if not NARROW else max(2, (W - 25) // 10)
+        span = max(2, W - 25 - n_inv * 10)
+        ox = abs(step % (2 * span) - span)
+        frame = self.SPR[step % 2]
+        alive = []
+        for i in range(n_inv):
+            x = ox + i * 10
+            if self.dead.get(i, 0) > t:
+                continue
+            alive.append((i, x))
+            sprite(f, frame, x, 1, {"#": hsv(0.3 + i * 0.08, 0.8, 1)})
+        if alive:
+            tx = alive[int(t / 3) % len(alive)][1] + 2
+            self.gx += clamp(tx - self.gx, -30 * dt, 30 * dt)
+            if t - self.last > 0.7 and abs(tx - self.gx) < 1:
+                self.shots.append([self.gx, 9.0])
+                self.last = t
+        keep = []
+        for s in self.shots:
+            s[1] -= 30 * dt
+            hit = next((i for i, x in alive if x <= s[0] < x + 5 and 1 <= s[1] < 6), None)
+            if hit is not None:
+                self.dead[hit] = t + 4
+                self.boom.append([s[0], 3, t])
+            elif s[1] > -1:
+                f.set(s[0], s[1], (255, 255, 100))
+                keep.append(s)
+        self.shots = keep
+        self.boom = [b for b in self.boom if t - b[2] < 0.4]
+        for bx, by, bt in self.boom:
+            r = (t - bt) * 12
+            for k in range(8):
+                a = k * math.pi / 4
+                f.add(bx + math.cos(a) * r, by + math.sin(a) * r * 0.6, (255, 150, 0))
+        sprite(f, ["..#..", "#####"], self.gx - 2, 10, {"#": (0, 255, 120)})
+        small_time(f, now, c=(255, 255, 255))
+
+
+@reg("pacman")
+class Pacman(Clock):
+    """Pac-Man zjada kropki uciekając duszkom, aż trafi na dużą pigułkę – wtedy role się odwracają."""
+
+    GC = [(255, 0, 0), (255, 180, 255), (0, 255, 255), (255, 180, 80)]
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.x, self.dir, self.mode = -8.0, 1, "chase"
+        self.gh = [[-20.0 - i * 10, True] for i in range(4)]
+        self.dots = set(range(4, W, 5))
+        self.pill = True
+
+    def draw(self, f, now, t, dt):
+        for x in range(W):
+            f.set(x, 0, (30, 30, 200))
+            f.set(x, 11, (30, 30, 200))
+        spd = 22
+        if self.mode == "chase":
+            self.x += spd * dt
+            for g in self.gh:
+                g[0] += spd * 0.97 * dt
+            if self.pill and self.x >= W - 20:
+                self.pill, self.mode, self.fr = False, "fright", t
+        else:
+            self.x -= spd * 1.25 * dt
+            for g in self.gh:
+                if g[1]:
+                    g[0] -= spd * 0.8 * dt
+                    if abs(g[0] - self.x) < 3:
+                        g[1] = False
+            if self.x < -40:
+                self.reset()
+        self.dots = {d for d in self.dots if not (abs(d - self.x) < 2)}
+        for d in self.dots:
+            f.rect(d, 5, d + 1, 6, (255, 200, 150))
+        if self.pill:
+            disc(f, W - 19.5, 5.5, 1.6, (255, 200, 150) if int(t * 4) % 2 else (120, 90, 60))
+        for i, (gx, alive) in enumerate(self.gh):
+            if not alive:
+                continue
+            col = self.GC[i] if self.mode == "chase" else ((40, 40, 255) if t - self.fr < 5 or int(t * 6) % 2 else (230, 230, 255))
+            for oy in range(7):
+                for ox in range(7):
+                    inside = (oy < 3 and (ox - 3) ** 2 + (oy - 3) ** 2 <= 10) or (3 <= oy < 6) or (oy == 6 and (ox + int(t * 6)) % 2 == 0)
+                    if inside:
+                        f.set(gx + ox, 2 + oy, col)
+            for ex in (1, 4):
+                f.set(gx + ex + (1 if self.mode == "chase" else 0), 4, (255, 255, 255))
+        mouth = abs(math.sin(t * 12)) * 0.8
+        for oy in range(-3, 4):
+            for ox in range(-3, 4):
+                if ox * ox + oy * oy <= 11:
+                    a = math.atan2(oy, ox * self.dir) if (ox or oy) else 0
+                    if abs(a) > mouth or ox * self.dir <= 0:
+                        f.set(self.x + ox, 5.5 + oy, (255, 230, 0))
+        small_time(f, now, y=1, c=(255, 255, 255))
+        if self.mode == "chase" and self.x > W + 50:
+            self.reset()
+
+
+@reg("dino")
+class Dino(Clock):
+    """Dinozaur z Chrome'a biegnie przez pustynię i sam przeskakuje kaktusy; wynik to godzina."""
+
+    DINO = ["....####", "....#.##", "....####", "#..###..", "#.#####.", "######..", ".####...", ".#..#..."]
+    DINO2 = DINO[:-1] + ["..#..#.."]
+
+    def __init__(self):
+        self.y, self.vy, self.cacti, self.nxt, self.off = 0.0, 0.0, [], 1.0, 0.0
+
+    def draw(self, f, now, t, dt):
+        spd = 40
+        self.off += spd * dt
+        if t > self.nxt:
+            self.cacti.append([W + 2, random.randint(4, 6), random.choice((1, 2))])
+            self.nxt = t + random.uniform(1.1, 2.6)
+        for c in self.cacti:
+            c[0] -= spd * dt
+        self.cacti = [c for c in self.cacti if c[0] > -6]
+        near = any(8 < c[0] - 10 < 16 for c in self.cacti)
+        if self.y == 0 and near:
+            self.vy = -30
+        self.vy += 80 * dt
+        self.y = min(0.0, self.y + self.vy * dt)
+        for i in range(12):
+            cx = (20 + i * 40 - self.off * 0.3) % (W + 20) - 10
+            f.rect(cx, 2 + i % 2, cx + 5, 2 + i % 2, (40, 40, 50))
+        for x in range(W):
+            f.set(x, 11, (110, 110, 110) if (x + int(self.off)) % 7 else (60, 60, 60))
+        for cx, ch, n in self.cacti:
+            for k in range(n):
+                x = cx + k * 3
+                f.rect(x, 11 - ch, x, 10, (40, 200, 60))
+                f.set(x - 1, 11 - ch + 2, (40, 200, 60))
+                f.set(x + 1, 11 - ch + 1, (40, 200, 60))
+        spr = self.DINO if int(t * 10) % 2 or self.y < 0 else self.DINO2
+        sprite(f, spr, 8, 3 + self.y, {"#": (220, 220, 220)})
+        small_time(f, now, c=(200, 200, 200), outline=None)
+
+
+@reg("flappy")
+class Flappy(Clock):
+    """Flappy Bird na autopilocie: ptaszek przelatuje między rurami, godzina jako wynik u góry."""
+
+    def __init__(self):
+        self.y, self.vy, self.pipes, self.off = 5.0, 0.0, [[W + 5, 5]], 0.0
+
+    def draw(self, f, now, t, dt):
+        spd = 24
+        self.off += spd * dt
+        for p in self.pipes:
+            p[0] -= spd * dt
+        if self.pipes[-1][0] < W - 32:
+            self.pipes.append([W + 2, random.randint(3, 7)])
+        self.pipes = [p for p in self.pipes if p[0] > -6]
+        ahead = next((p for p in self.pipes if p[0] + 4 >= 20), self.pipes[0])
+        if self.y > ahead[1] + 0.6 and self.vy > -2:
+            self.vy = -13
+        self.vy += 45 * dt
+        self.y = clamp(self.y + self.vy * dt, 0, 10)
+        for px, gap in self.pipes:
+            for y in range(H - 1):
+                if not (gap - 2.5 <= y <= gap + 2.5):
+                    f.rect(px, y, px + 3, y, (40, 180, 40))
+                    f.set(px, y, (120, 255, 120))
+        for x in range(W):
+            f.set(x, 11, (160, 120, 50) if (x + int(self.off)) % 4 else (120, 90, 30))
+        wing = int(t * 10) % 2
+        sprite(f, [".##.", "####" if wing else "#.##", ".##."], 19, self.y - 1, {"#": (255, 220, 0)})
+        f.set(22, self.y, (255, 100, 0))
+        s = now.strftime("%H:%M")
+        f.text(s, (W - text_w(s, SMALL)) // 2, 0, (255, 255, 255), SMALL, (0, 0, 0))
+
+
+@reg("wyscig")
+class Race(Clock):
+    """Wyścig: czerwone auto wyprzedza ruch na dwupasmówce, w tle przesuwają się wzgórza."""
+
+    def __init__(self):
+        self.lane, self.ly, self.cars, self.off = 0, 6.0, [], 0.0
+
+    def draw(self, f, now, t, dt):
+        spd = 50
+        self.off += spd * dt
+        for y in range(5):
+            for x in range(W):
+                f.px[y][x] = lerp((10, 30, 70), (60, 80, 120), y / 5)
+        for x in range(W):
+            hh = 3 + noise1((x + self.off * 0.2) * 0.05) * 2
+            for y in range(int(hh), 5):
+                f.set(x, y, (20, 60, 25))
+        for y in range(5, H):
+            for x in range(W):
+                f.px[y][x] = (28, 28, 30)
+        for x in range(W):
+            f.set(x, 5, (160, 160, 160))
+            f.set(x, 11, (160, 160, 160))
+            if (x + int(self.off)) % 10 < 5:
+                f.set(x, 8, (200, 200, 120))
+        if random.random() < 0.9 * dt:
+            self.cars.append([W + 5, random.choice((0, 1)), random.uniform(15, 30), hsv(random.random(), 0.7, 1)])
+        for c in self.cars:
+            c[0] -= (spd - c[2]) * dt
+        self.cars = [c for c in self.cars if c[0] > -10]
+        ahead = [c for c in self.cars if c[1] == self.lane and 20 < c[0] < 42]
+        if ahead and not any(c[1] != self.lane and 10 < c[0] < 40 for c in self.cars):
+            self.lane = 1 - self.lane
+        ty = 6 if self.lane == 0 else 9
+        self.ly += clamp(ty - self.ly, -10 * dt, 10 * dt)
+        for cx, lane, _, col in self.cars:
+            sprite(f, [".###.", "#####"], cx, 6 if lane == 0 else 9, {"#": col})
+        sprite(f, [".####..", "#######"], 14, self.ly, {"#": (255, 30, 30)})
+        f.set(21, self.ly + 1, (255, 255, 180))
+        small_time(f, now, x=1, y=0)
+
+
+@reg("pociag")
+class Train(Clock):
+    """Parowóz ciągnie wagony, a na każdym wagonie jedna cyfra aktualnej godziny; z komina bucha para."""
+
+    LOCO = ["...........##...", "..######...##...", "..#....#.######.", "..#....#########", "################",
+            ".o..o.......o..o"]
+
+    def __init__(self):
+        self.puffs = []
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = lerp((20, 40, 80), (70, 90, 120), y / H)
+        for x in range(W):
+            hh = 7 + noise1(x * 0.04) * 2.5
+            for y in range(int(hh), 11):
+                f.set(x, y, (25, 70, 30))
+            f.set(x, 11, (90, 70, 60) if x % 3 else (50, 40, 35))
+        txt = now.strftime("%H:%M")
+        spd, length = 22, 17 + len(txt) * 13
+        period = (W + length + 50) / spd
+        x0 = W - (t % period) * spd
+        sprite(f, self.LOCO, x0, 5, {"#": (180, 30, 30), "o": (60, 60, 60)})
+        if random.random() < 8 * dt and -5 < x0 < W:
+            self.puffs.append([x0 + 12, 4, t])
+        for i, ch in enumerate(txt):
+            wx = x0 + 17 + i * 13
+            f.rect(wx, 5, wx + 11, 9, (30, 60, 150))
+            f.set(wx + 2, 10, (60, 60, 60))
+            f.set(wx + 9, 10, (60, 60, 60))
+            f.text(ch, wx + (12 - text_w(ch, SMALL)) // 2, 5, (255, 255, 255), SMALL)
+            f.set(wx - 1, 8, (80, 80, 80))
+        keep = []
+        for p in self.puffs:
+            age = t - p[2]
+            if age < 1.5:
+                keep.append(p)
+                disc(f, p[0] + age * 6, p[1] - age * 2.5, 0.8 + age, mul((200, 200, 210), (1.5 - age) / 3), add=True)
+        self.puffs = keep
+
+
+@reg("miasto")
+class City(Clock):
+    """Miasto o prawdziwej porze dnia: niebo według słońca, okna zapalają się wieczorem, po ulicy jeżdżą auta."""
+
+    def __init__(self):
+        rnd = random.Random(8)
+        self.bld, x = [], 0
+        while x < W:
+            w = rnd.randint(5, 12)
+            self.bld.append((x, w, rnd.randint(4, 9)))
+            x += w + rnd.randint(0, 1)
+        self.cars = [[rnd.uniform(0, W), rnd.choice((-1, 1)) * rnd.uniform(10, 25)] for _ in range(4)]
+
+    def draw(self, f, now, t, dt):
+        elev, solar = sun_position(now)
+        top, hor = sky_colors(elev)
+        night = clamp((-elev - 2) / 8)
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = mul(lerp(top, hor, y / H), 0.45)
+        if night > 0.3:
+            for i in range(25):
+                f.add(hash1(i) * W, hash1(i + 7) * 5, mul((150, 150, 180), night * 0.6))
+        hr = now.hour + now.minute / 60
+        p_lit = 0.65 if 17 <= hr < 23 else 0.15 if hr >= 23 or hr < 6 else 0.35 if hr < 8 else 0.05
+        for bx, bw, bh in self.bld:
+            for x in range(bx, bx + bw):
+                for y in range(H - 1 - bh, H - 1):
+                    f.set(x, y, mul((20, 20, 28), 1 - night * 0.4))
+            for x in range(bx + 1, bx + bw - 1, 2):
+                for y in range(H - bh, H - 2, 2):
+                    if noise1(x * 7.3 + y * 3.1 + t * 0.02) < p_lit:
+                        f.set(x, y, (255, 200, 90) if hash1(x * 3 + y) > 0.3 else (180, 210, 255))
+        for x in range(W):
+            f.set(x, 11, (15, 15, 15))
+        for c in self.cars:
+            c[0] = (c[0] + c[1] * dt) % W
+            f.set(c[0], 11, (255, 255, 200) if c[1] > 0 else (255, 20, 20))
+            f.set(c[0] - (1 if c[1] > 0 else -1), 11, (60, 60, 60))
+        small_time(f, now, x=1, y=0, c=(230, 230, 255))
+
+
+@reg("las")
+class Forest(Clock):
+    """Las w trzech warstwach przesuwa się jak z okna pociągu; niebo według prawdziwej pory dnia, nocą świetliki."""
+
+    def draw(self, f, now, t, dt):
+        elev, _ = sun_position(now)
+        top, hor = sky_colors(elev)
+        night = clamp((-elev - 2) / 8)
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = mul(lerp(top, hor, y / H), 0.45)
+        for layer, (spd, base, col) in enumerate(((3, 5, (0, 90, 60)), (8, 7, (20, 170, 40)), (16, 9, (60, 230, 60)))):
+            c = lerp(col, ((0, 0, 90), (0, 40, 130), (0, 90, 160))[layer], night)
+            off = t * spd
+            for x in range(W):
+                wx = x + off
+                tree = hash1(int(wx / 6) + layer * 1000)
+                cx = int(wx / 6) * 6 + 3 - off
+                hgt = base - 1 - int(tree * 3)
+                dist = abs(x - cx)
+                top_y = hgt + dist * 1.5
+                for y in range(int(top_y), H):
+                    f.set(x, y, c)
+        if night > 0.3:
+            for i in range(10):
+                f.add(noise1(i * 9 + t * 0.1) * W, 3 + noise1(i * 5 + t * 0.15) * 8,
+                      mul((200, 255, 60), night * max(0, math.sin(t * 2 + i)) ** 4))
+        else:
+            for i in range(3):
+                bx = (t * (8 + i * 3) + i * 40) % (W + 10) - 5
+                by = 2 + i + math.sin(t * 3 + i)
+                f.set(bx, by, (20, 20, 20))
+                f.set(bx - 1, by - (int(t * 8) % 2), (20, 20, 20))
+                f.set(bx + 1, by - (int(t * 8) % 2), (20, 20, 20))
+        small_time(f, now, c=(240, 240, 240))
+
+
+@reg("gory")
+class Mountains(Clock):
+    """Pasma gór z ośnieżonymi szczytami, chmury i krążący orzeł; niebo według prawdziwej pory dnia."""
+
+    def draw(self, f, now, t, dt):
+        elev, _ = sun_position(now)
+        top, hor = sky_colors(elev)
+        dim = 1 - clamp((-elev - 2) / 8) * 0.7
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = mul(lerp(top, hor, y / H), 0.45)
+        for layer, (spd, base, amp, col) in enumerate(((1.5, 4, 5, (60, 60, 90)), (4, 6, 4, (40, 50, 60)), (9, 9, 3, (20, 35, 25)))):
+            for x in range(W):
+                n = noise1((x + t * spd) * 0.04 + layer * 10) * amp + noise1((x + t * spd) * 0.15 + layer * 5) * 1.2
+                hy = base + amp / 2 - n
+                for y in range(max(0, int(hy)), H):
+                    snow = layer == 0 and y < hy + 1.2 and hy < 4.5
+                    f.set(x, y, mul((230, 230, 240) if snow else col, dim))
+        for x in range(W):
+            for y in range(0, 4):
+                v = noise2(x * 0.05 - t * 0.3, y * 0.5 + 20)
+                if v > 0.6:
+                    f.add(x, y, mul((120, 120, 130), (v - 0.6) * 2 * dim))
+        ex, ey = W / 2 + math.cos(t * 0.4) * W / 4, 3 + math.sin(t * 0.8)
+        wing = int(t * 4) % 2
+        f.set(ex, ey, (20, 15, 10))
+        f.set(ex - 1, ey - wing, (20, 15, 10))
+        f.set(ex + 1, ey - wing, (20, 15, 10))
+        small_time(f, now, c=(255, 255, 255))
+
+
+@reg("dna")
+class DNA(Clock):
+    """Podwójna helisa DNA obraca się; szczeble to pary zasad A-T i G-C w swoich kolorach."""
+
+    BASES = [((255, 60, 60), (60, 255, 60)), ((60, 120, 255), (255, 220, 0))]
+
+    def draw(self, f, now, t, dt):
+        back, front = [], []
+        for x in range(W):
+            ph = x * 0.18 + t * 2
+            y1, y2 = 5.5 + math.sin(ph) * 4.5, 5.5 - math.sin(ph) * 4.5
+            z = math.cos(ph)
+            (front if z > 0 else back).append((x, y1, (80, 160, 255), z))
+            (back if z > 0 else front).append((x, y2, (255, 110, 200), -z))
+            if x % 4 == 0:
+                pair = self.BASES[int(hash1(x // 4 + int(t * 2 // 30) * 100) * 2)]
+                k = 0.35 + 0.3 * abs(z)
+                lo, hi = sorted((y1, y2))
+                for y in range(int(lo) + 1, int(hi) + 1):
+                    f.set(x, y, mul(pair[0] if y < 5.5 else pair[1], k))
+        for x, y, c, z in back:
+            f.set(x, y, mul(c, 0.3 + 0.2 * (1 + z)))
+        for x, y, c, z in front:
+            f.set(x, y, mul(c, 0.6 + 0.4 * z))
+        s = now.strftime("%H:%M")
+        f.text(s, (W - text_w(s, SMALL)) // 2, 3, (255, 255, 255), SMALL, (0, 0, 0))
+
+
+@reg("oscyloskop")
+class Scope(Clock):
+    """Oscyloskop rysuje figury Lissajous z fosforową poświatą; proporcja częstotliwości zmienia się co minutę."""
+
+    RATIOS = [(1, 2), (2, 3), (3, 4), (3, 5), (4, 5), (1, 3), (2, 5), (5, 6)]
+
+    def __init__(self):
+        self.buf = Persist()
+
+    def draw(self, f, now, t, dt):
+        a, b = self.RATIOS[now.minute % len(self.RATIOS)]
+        self.buf.fade(math.exp(-dt * 5))
+        d = t * 0.3
+        for i in range(160):
+            s = t * 2 + i * dt * 2 / 160
+            self.buf.add(W / 2 + math.sin(a * s + d) * (W / 2 - 2), 5.5 + math.sin(b * s) * 5.4, (30, 160, 60))
+        for x in range(0, W, 10):
+            for y in range(0, H, 3):
+                f.set(x, y, (0, 25, 10))
+        self.buf.blit(f)
+        f.text(f"{a}:{b}", 1, 0, (60, 200, 90), SMALL)
+        small_time(f, now, c=(60, 200, 90), outline=None)
+
+
+@reg("equalizer")
+class Equalizer(Clock):
+    """Korektor graficzny jak w wieży stereo: słupki skaczą w rytm 120 BPM, a kreski szczytów powoli opadają."""
+
+    def __init__(self):
+        self.n = W // 5
+        self.h, self.peak = [0.0] * self.n, [0.0] * self.n
+
+    def draw(self, f, now, t, dt):
+        beat = max(0, math.sin(t * math.pi * 2 * 2)) ** 8
+        for i in range(self.n):
+            target = 11 * clamp(noise1(i * 0.5 + t * 2.5) * 0.7 + beat * 0.5 * (1 - i / self.n) + 0.05)
+            self.h[i] += (target - self.h[i]) * (0.6 if target > self.h[i] else 0.15)
+            self.peak[i] = max(self.peak[i] - dt * 6, self.h[i])
+            x = i * 5
+            for y in range(H - int(self.h[i]), H):
+                c = (0, 230, 60) if y > 6 else (255, 210, 0) if y > 2 else (255, 40, 30)
+                f.rect(x, y, x + 3, y, c)
+            f.rect(x, H - 1 - int(self.peak[i]), x + 3, H - 1 - int(self.peak[i]), (220, 220, 255))
+        small_time(f, now, x=1)
+
+
+@reg("ekg")
+class ECG(Clock):
+    """Monitor EKG: zielona linia z załamkami P-QRS-T, serce bije w rytm; obok tętno i godzina."""
+
+    def __init__(self):
+        self.tw = W - 30
+        self.buf, self.pos = [5.5] * self.tw, 0.0
+
+    @staticmethod
+    def wave(p):
+        g = lambda c, w, a: a * math.exp(-((p - c) / w) ** 2)
+        return g(0.12, 0.03, 0.9) - g(0.28, 0.012, 0.8) + g(0.31, 0.012, 5.5) - g(0.34, 0.012, 1.8) + g(0.55, 0.05, 1.4)
+
+    def draw(self, f, now, t, dt):
+        bpm = 64 + 8 * math.sin(t * 0.05)
+        prev = int(self.pos)
+        self.pos = (self.pos + 60 * dt) % self.tw
+        for k in range(prev, prev + int(60 * dt) + 2):
+            x = k % self.tw
+            p = ((t - (int(self.pos) - k) / 60) * bpm / 60) % 1
+            self.buf[x] = 7.5 - self.wave(p)
+        head = int(self.pos)
+        for x in range(self.tw):
+            gap = (x - head) % self.tw
+            if gap < 5:
+                continue
+            k = 1 if gap > self.tw - 10 else 0.7
+            y0 = self.buf[x]
+            y1 = self.buf[(x + 1) % self.tw] if (x + 1 - head) % self.tw >= 5 else y0
+            f.line(x, y0, x + 0.4, y1, mul((40, 255, 90), k))
+        f.set(head - 1, self.buf[(head - 1) % self.tw], (220, 255, 220))
+        p = (t * bpm / 60) % 1
+        k = 1 if 0.28 < p < 0.4 else 0.45
+        sprite(f, [".#.#.", "#####", "#####", ".###.", "..#.."], W - 26, 0, {"#": mul((255, 30, 50), k)})
+        f.text(f"{bpm:.0f}", W - text_w(f"{bpm:.0f}", SMALL), 0, (40, 255, 90), SMALL)
+        small_time(f, now, y=6, c=(200, 200, 200))
+
+
+@reg("mrowka")
+class Ant(Clock):
+    """Mrówki Langtona (wariant LRRL, 4 kolory): z prostych reguł wyrastają szalone wzory; restart co 3 minuty."""
+
+    RULE = "LRRL"
+    PAL = [(0, 0, 0), (255, 60, 60), (60, 200, 255), (255, 210, 60)]
+
+    def __init__(self):
+        self.reset(0)
+
+    def reset(self, t):
+        self.g = [[0] * W for _ in range(H)]
+        self.ants = [[W // 4, 6, 0], [W // 2, 6, 1], [3 * W // 4, 6, 2]]
+        self.t0 = t
+
+    def draw(self, f, now, t, dt):
+        if t - self.t0 > 180:
+            self.reset(t)
+        for _ in range(12):
+            for a in self.ants:
+                x, y, d = a
+                c = self.g[y][x]
+                d = (d + (1 if self.RULE[c] == "R" else -1)) % 4
+                self.g[y][x] = (c + 1) % len(self.RULE)
+                dx, dy = ((0, -1), (1, 0), (0, 1), (-1, 0))[d]
+                a[0], a[1], a[2] = (x + dx) % W, (y + dy) % H, d
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = mul(self.PAL[self.g[y][x]], 0.6)
+        for x, y, _ in self.ants:
+            f.set(x, y, (255, 255, 255))
+        small_time(f, now)
+
+
+@reg("piasek")
+class Sand(Clock):
+    """Symulacja sypiącego się piasku: ziarna zatrzymują się na cyfrach godziny; gdy jest pełno, dno się otwiera."""
+
+    def __init__(self):
+        self.g = [[None] * W for _ in range(H)]
+        self.drain, self.txt = 0.0, None
+
+    def draw(self, f, now, t, dt):
+        digits = set(centered(now.strftime("%H:%M")))
+        if now.strftime("%H:%M") != self.txt:
+            self.txt = now.strftime("%H:%M")
+            for x, y in digits:
+                self.g[y][x] = None
+        g = self.g
+        filled = sum(1 for row in g for c in row if c is not None)
+        if filled > 600 and self.drain <= 0:
+            self.drain = 2.0
+        if self.drain > 0:
+            self.drain -= dt
+            g[H - 1] = [None] * W
+        for k in range(3):
+            x = int(clamp(W / 2 + math.sin(t * 0.5 + k * 2) * (W / 2 - 4), 0, W - 1))
+            if g[0][x] is None and (x, 0) not in digits:
+                g[0][x] = hsv(t * 0.03 + random.uniform(-0.02, 0.02), 0.7, random.uniform(0.6, 1))
+        for y in range(H - 2, -1, -1):
+            xs = list(range(W))
+            random.shuffle(xs)
+            for x in xs:
+                c = g[y][x]
+                if c is None:
+                    continue
+                free = lambda nx, ny: 0 <= nx < W and g[ny][nx] is None and (nx, ny) not in digits
+                if free(x, y + 1):
+                    g[y + 1][x], g[y][x] = c, None
+                else:
+                    for dx in random.sample((-1, 1), 2):
+                        if free(x + dx, y + 1):
+                            g[y + 1][x + dx], g[y][x] = c, None
+                            break
+        for y in range(H):
+            for x in range(W):
+                if g[y][x] is not None:
+                    f.px[y][x] = g[y][x]
+        f.draw(list(digits), (255, 255, 255))
+
+
+@reg("kule")
+class Balls(Clock):
+    """Kolorowe kulki odbijają się od ścian i od siebie nawzajem (zderzenia sprężyste), w tle godzina."""
+
+    def __init__(self):
+        self.b = [[random.uniform(5, W - 5), random.uniform(2, 8), random.uniform(-30, 30), random.uniform(-10, 10),
+                   hsv(i / 8, 0.8, 1)] for i in range(8)]
+
+    def draw(self, f, now, t, dt):
+        clock_big(f, now, (40, 40, 60), outline=None)
+        r = 1.6
+        for b in self.b:
+            b[3] += 30 * dt
+            b[0] += b[2] * dt
+            b[1] += b[3] * dt
+            if b[0] < r or b[0] > W - r:
+                b[2] = -b[2]
+                b[0] = clamp(b[0], r, W - r)
+            if b[1] > H - r:
+                b[1], b[3] = H - r, -abs(b[3]) * 0.95
+                if abs(b[3]) < 8:
+                    b[3] = -random.uniform(14, 20)
+            if b[1] < r:
+                b[1], b[3] = r, abs(b[3])
+        for i in range(len(self.b)):
+            for j in range(i + 1, len(self.b)):
+                a, c = self.b[i], self.b[j]
+                dx, dy = c[0] - a[0], c[1] - a[1]
+                d = math.hypot(dx, dy)
+                if 0 < d < 2 * r:
+                    nx, ny = dx / d, dy / d
+                    p = (a[2] - c[2]) * nx + (a[3] - c[3]) * ny
+                    if p > 0:
+                        a[2] -= p * nx
+                        a[3] -= p * ny
+                        c[2] += p * nx
+                        c[3] += p * ny
+        for x, y, _, _, col in self.b:
+            for oy in (-1, 0, 1):
+                for ox in (-1, 0, 1):
+                    d = math.hypot(ox, oy)
+                    if d <= 1.2:
+                        f.set(x + ox, y + oy, mul(col, 1 - d * 0.4))
+
+
+@reg("kregi")
+class Ripples(Clock):
+    """Krople wpadają do wody, a rozchodzące się kręgi nakładają się na siebie; godzina faluje pod powierzchnią."""
+
+    def __init__(self):
+        self.drops, self.nxt = [], 0
+
+    def draw(self, f, now, t, dt):
+        if t > self.nxt:
+            self.drops.append((random.uniform(0, W), random.uniform(0, H), t))
+            self.nxt = t + random.uniform(0.3, 1.0)
+        self.drops = [d for d in self.drops if t - d[2] < 4]
+        dset = set(centered(now.strftime("%H:%M")))
+        for y in range(H):
+            for x in range(W):
+                v = 0.0
+                for dx_, dy_, dt0 in self.drops:
+                    age = t - dt0
+                    d = math.hypot(x - dx_, (y - dy_) * 2)
+                    front = age * 18
+                    if d < front:
+                        v += math.sin((d - front) * 0.9) * math.exp(-age * 0.9) * math.exp(-d * 0.03)
+                base = (160, 210, 255) if (x, y) in dset else (0, 30, 70)
+                f.px[y][x] = lerp(base, (120, 200, 255), clamp(v * 0.5 + 0.1))
+
+
+@reg("wir")
+class Vortex(Clock):
+    """Hipnotyczna tęczowa spirala wciągająca do środka, z godziną w oku cyklonu."""
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            row = f.px[y]
+            for x in range(W):
+                dx, dy = x - W / 2, (y - 5.5) * 4
+                r = math.hypot(dx, dy) + 1
+                a = math.atan2(dy, dx)
+                v = math.sin(a * 3 + math.log(r) * 4 - t * 3)
+                row[x] = hsv(a / (2 * math.pi) + t * 0.05, 0.85, clamp(0.5 + 0.5 * v) * clamp(r / 30))
+        clock_big(f, now)
+
+
+@reg("synthwave")
+class Synthwave(Clock):
+    """Retro synthwave: pasiasty zachód słońca, neonowe góry i siatka pędząca pod horyzont."""
+
+    def draw(self, f, now, t, dt):
+        for y in range(7):
+            for x in range(W):
+                f.px[y][x] = lerp((20, 0, 40), (120, 0, 80), y / 6)
+        for y in range(1, 7):
+            for x in range(W):
+                d = math.hypot(x - W / 2, (y - 6.5) * 1.3)
+                if d < 5.8 and not (y >= 4 and (y + int(t * 3)) % 2 == 0):
+                    f.set(x, y, lerp((255, 230, 0), (255, 0, 140), (y - 1) / 6))
+        for x in range(W):
+            m = max(0, 3 - abs((x % 40) - 20) * 0.25) if abs(x - W / 2) > 20 else 0
+            for y in range(int(7 - m), 7):
+                f.set(x, y, (40, 0, 60))
+            if m > 0:
+                f.set(x, 7 - m, (255, 0, 200))
+        for y in range(7, H):
+            for x in range(W):
+                f.px[y][x] = (5, 0, 12)
+        for k in range(1, 12):
+            z = k - (t * 2 % 1)
+            y = 6.5 + 6 / z
+            if y < H:
+                for x in range(W):
+                    f.set(x, y, (200, 0, 180))
+        for i in range(-12, 13):
+            f.line(W / 2 + i * 3, 7, W / 2 + i * 16, 11, (140, 0, 160))
+        s = now.strftime("%H:%M")
+        for x, y in text_px(s, 3, -1, TXT):
+            f.set(x, y, lerp((0, 255, 255), (255, 0, 255), (y - 1) / 7))
+
+
+@reg("pory")
+class Seasons(Clock):
+    """Pora roku według daty: wiosną kwiaty i motyle, latem pszczoły, jesienią spadające liście, zimą śnieg i bałwan."""
+
+    def __init__(self):
+        self.p = []
+
+    def draw(self, f, now, t, dt):
+        md = now.month * 100 + now.day
+        season = "zima" if md < 321 or md >= 1222 else "wiosna" if md < 621 else "lato" if md < 923 else "jesien"
+        sky = {"zima": (8, 12, 30), "wiosna": (10, 30, 50), "lato": (20, 50, 90), "jesien": (30, 20, 20)}[season]
+        ground = {"zima": (200, 200, 220), "wiosna": (30, 140, 30), "lato": (60, 150, 20), "jesien": (120, 70, 20)}[season]
+        for y in range(H):
+            for x in range(W):
+                f.px[y][x] = mul(sky, 1 - y / 20)
+        for x in range(W):
+            f.set(x, 11, ground)
+        if season == "wiosna":
+            for i in range(12):
+                x = 5 + i * 10
+                f.set(x, 10, (20, 120, 20))
+                f.set(x, 9, hsv(hash1(i), 0.7, 1))
+            for i in range(4):
+                bx, by = noise1(i * 7 + t * 0.2) * W, 2 + noise1(i * 3 + t * 0.3) * 6
+                wing = int(t * 8 + i) % 2
+                f.set(bx - 1, by - wing, hsv(i / 4, 0.8, 1))
+                f.set(bx + 1, by - wing, hsv(i / 4, 0.8, 1))
+                f.set(bx, by, (60, 40, 20))
+        elif season == "lato":
+            disc(f, W - 10, 2.5, 2.5, (255, 220, 60))
+            for i in range(6):
+                bx = noise1(i * 11 + t * 0.4) * W
+                by = 3 + noise1(i * 5 + t * 0.9) * 7
+                f.set(bx, by, (255, 210, 0) if int(t * 10 + i) % 2 else (40, 30, 0))
+            for x in range(0, W, 2):
+                f.set(x, 10, (40, 170, 30))
+        else:
+            rate = 12 if season == "zima" else 5
+            if random.random() < rate * dt:
+                col = (240, 240, 255) if season == "zima" else random.choice([(255, 120, 0), (200, 40, 0), (230, 180, 0), (140, 70, 20)])
+                self.p.append([random.uniform(0, W), -1.0, random.uniform(2, 4), random.random() * 6, col])
+            keep = []
+            for q in self.p:
+                q[1] += q[2] * dt
+                q[0] += math.sin(t * 1.5 + q[3]) * dt * (6 if season == "jesien" else 2)
+                if q[1] < 11:
+                    keep.append(q)
+                    f.set(q[0], q[1], q[4])
+            self.p = keep
+            if season == "zima":
+                disc(f, W - 10, 8.5, 2.5, (230, 230, 240))
+                disc(f, W - 10, 4.5, 1.8, (230, 230, 240))
+                f.set(W - 10, 4, (255, 120, 0))
+                f.rect(W - 12, 1, W - 8, 2, (20, 20, 20))
+        clock_big(f, now, (255, 255, 255))
+
+
+@reg("planety")
+class Planets(Clock):
+    """Układ Słoneczny z prawdziwym położeniem planet na dziś (średnie długości orbitalne); po kolei podpisujemy każdą planetę."""
+
+    P = [("MERKURY", 0.387, 252.25, 4.09233, (180, 160, 140)), ("WENUS", 0.723, 181.98, 1.60213, (255, 220, 150)),
+         ("ZIEMIA", 1.0, 100.46, 0.98561, (60, 140, 255)), ("MARS", 1.524, 355.45, 0.52403, (255, 80, 40)),
+         ("JOWISZ", 5.203, 34.40, 0.08309, (230, 180, 120)), ("SATURN", 9.537, 49.94, 0.03346, (230, 210, 140)),
+         ("URAN", 19.19, 313.23, 0.01173, (140, 220, 230)), ("NEPTUN", 30.07, 304.88, 0.00598, (80, 110, 255))]
+
+    def draw(self, f, now, t, dt):
+        days = (now - dtm.datetime(2000, 1, 1, 12, tzinfo=dtm.timezone.utc)).total_seconds() / 86400
+        for name, a, l0, n, col in self.P:
+            rs = math.sqrt(a) * 10 * W / 120
+            for k in range(0, 360, 4):
+                f.add(W / 2 + rs * math.cos(math.radians(k)), 5.5 + rs * math.sin(math.radians(k)) * 0.1 * 120 / W, (8, 8, 14))
+        disc(f, W / 2, 5.5, 1.7, (255, 210, 60))
+        sel = int(t / 3) % len(self.P)
+        for i, (name, a, l0, n, col) in enumerate(self.P):
+            L = math.radians((l0 + n * days) % 360)
+            rs = math.sqrt(a) * 10 * W / 120
+            x, y = W / 2 + rs * math.cos(L), 5.5 + rs * math.sin(L) * 0.1 * 120 / W
+            f.set(x, y, col)
+            if i == sel:
+                for ox, oy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                    f.add(x + ox, y + oy, mul(col, 0.5 + 0.5 * math.sin(t * 6)))
+                f.text(name, 1, 0, col, SMALL, (0, 0, 0))
+        if not NARROW:
+            small_time(f, now, c=(150, 150, 170))
+
+
+# co ludzik robi z nudów: wyłączone zajęcia i jak często (ustawiane w TUI, zapisywane w konfiguracji)
+LUDZIK = {"lvl": {}, "freq": 2}  # lvl: częstość każdego zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami
+LUDZIK_FREQ = [("nigdy", None), ("rzadko", (20, 40)), ("normalnie", (4, 10)), ("często", (1, 4)), ("bez przerwy", (0, 0.5))]
+LUDZIK_LVL = ["wył.", "rzadko", "normalnie", "często"]
+LVL_WEIGHT = [0, 1, 3, 9]                     # zajęcia: waga losowania
+BANNER_EVERY = [None, 10, 5, 2]               # transparent z pogodą: co ile minut
+WALK_REST = [None, (8, 16), (2, 6), (0.5, 2)]  # spacer: ile stoi między spacerami (s)
+CROSS_P = [0, 0.15, 0.35, 0.7]                # przechodzenie: jaka część spacerów kończy się po drugiej stronie
+
+
+def ludzik_lvl(name):
+    return LUDZIK["lvl"].get(name, 2)
+
+
+@reg("ludzik")
+class Worker(Clock):
+    """Robotnik w kasku sam przestawia cyfry: przed nową minutą wyciąga stare za panel, a o pełnej wpycha nowe;
+    z nudów spaceruje po obu stronach zegara, czyta, śpi, je, pije kawę, żongluje, zamiata, robi pajacyki i pompki,
+    strzela przez zegar do tarczy z łuku, pistoletu albo bazooki; co kilka minut przeciąga transparent z pogodą."""
+
+    POSES = {k: [r.ljust(max(map(len, v)), ".") for r in v] for k, v in {  # twarzą w lewo; kolumna 0 = dłonie
+        "stoi": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", ".BBBBBBB", ".SBBBBBS",
+                 "..PPPPP.", "..PP.PP.", ".OOO.OOO"],
+        "idzie1": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", ".BBBBBBB", "SSBBBBBS",
+                   "..PPPPP.", ".PP...PP", "OOO...OO"],
+        "idzie2": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", "..BBBBBB", "..SBBBS.",
+                   "..PPPPP.", "...PPP..", "..OOOO.."],
+        "pcha1": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SSMSS.", "SSBBBBBB.", "SSBBBBBBB", "....BBBBB",
+                  "....PPPPP", "...PP...PP", "..OOO....OO"],
+        "pcha2": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SSMSS.", "SSBBBBBB.", "SSBBBBBBB", "....BBBBB",
+                  "....PPPPP", ".....PPPP.", "....OOO.OO"],
+        "ciagnie1": [".....YYYYY", "....YYYYYYY", ".....SESES", ".....SSSSS", ".....SSMSS", "SSBBBBBBB.", "SSBBBBBBBB",
+                     ".....BBBBB", "....PPPPP.", "..PP...PP.", ".OOO..OOO."],
+        "ciagnie2": [".....YYYYY", "....YYYYYYY", ".....SESES", ".....SSSSS", ".....SSMSS", "SSBBBBBBB.", "SSBBBBBBBB",
+                     ".....BBBBB", "....PPPPP.", "....PPPP..", "...OOOOO.."],
+        "macha": ["..YYYYY.SS", ".YYYYYYYSS", "..SESESBB.", "..SSSSSB..", "..SRRRSB..", "..BBBBB...", ".BBBBBB...",
+                  ".SBBBBB...", "..PPPPP...", "..PP.PP...", ".OOO.OOO.."],
+        "pajac": ["S.YYYYY.S", "BYYYYYYYB", "B.SESES.B", ".BSSSSSB.", ".BSMMMSB.", "..BBBBB..", "..BBBBB..", "..BBBBB..",
+                  ".PPPPPPP.", "PP.....PP", "OO.....OO"],
+        "pajac_pol": ["..YYYYY..", ".YYYYYYY.", "..SESES..", "..SSSSS..", "..SMMMS..", "SBBBBBBBS", "..BBBBB..", "..BBBBB..",
+                      "..PPPPP..", ".PP...PP.", ".OO...OO."],
+        "kuca": ["........", "........", "..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SSMSS.", "SSBBBBB.", "..BBBBB.",
+                 ".PPPPPPP", ".OO...OO"],
+        "taniec": ["..YYYYY.SS", ".YYYYYYYSS", "..SESESBB.", "..SSSSSB..", "..SRRRSB..", "..BBBBB...", ".BBBBBB...",
+                   "SSBBBBB...", "..PPPPP...", "..PP..PPP.", ".OOO...OO."],
+        "pompka1": ["............"] * 7 + ["YYSSBBBB....", "YYESBBBBPP..", "....S...PPP.", "....S.....OO"],
+        "pompka2": ["............"] * 8 + [".....B......", "YYSSBBBBPPP.", "YYESBBBBPPOO"],
+        "czyta1": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SMMMS.", "WWWSBBBBB", "KKKSBBBBB", "....BBBBS",
+                   "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
+        "czyta2": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", ".W.SMMMS.", "W.WSBBBBB", "KKKSBBBBB", "....BBBBS",
+                   "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
+        "spi1": ["............"] * 9 + ["YYSSBBBBPPP.", "YYCSBBBBPPOO"],
+        "spi2": ["............"] * 8 + [".....BB.....", "YYSSBBBBPPP.", "YYCSBBBBPPOO"],
+        "je1": ["...YYYYY.", "..YYYYYYY", "...SESES.", ".AASSSSS.", ".AASRRRS.", "..SBBBBBB", "...BBBBBB", "...BBBBBS",
+                "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
+        "je2": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SMMMS.", ".AABBBBBB", ".AASBBBBB", "...BBBBBS",
+                "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
+        "je3": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SSMSS.", ".AABBBBBB", ".AASBBBBB", "...BBBBBS",
+                "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
+        "zongl1": ["..YYYYY..", ".YYYYYYY.", "..SESES..", "..SSSSS..", "..SRRRS..", "..BBBBB..", ".SBBBBBB.", "..BBBBBS.",
+                   "..PPPPP..", "..PP.PP..", ".OOO.OOO."],
+        "zongl2": ["..YYYYY..", ".YYYYYYY.", "..SESES..", "..SSSSS..", "..SRRRS..", "..BBBBB..", ".BBBBBBS.", ".SBBBBB..",
+                   "..PPPPP..", "..PP.PP..", ".OOO.OOO."],
+        "zamiata1": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SMMMS.", "...BBBBB.", "..SBBBBBB", "..TSBBBBS",
+                     ".T.PPPPP.", "T..PP.PP.", "GG.OOO.OOO"],
+        "zamiata2": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SMMMS.", "...BBBBB.", "..SBBBBBB", "..TSBBBBS",
+                     "..TPPPPP.", "..TPP.PP.", ".GGGOO.OOO"],
+        "luk1": ["......YYYYY.", ".....YYYYYYY", "..T...SESES.", ".T.W..SSSSS.", ".T..W.SMMMS.", "DTTTTSBBBBB.",
+                 ".TSBBBBBBBB.", ".T.W..BBBBBS", "..T...PPPPP.", "......PP.PP.", ".....OOO.OOO"],
+        "luk2": ["......YYYYY.", ".....YYYYYYY", "..T...SESES.", ".TW...SSSSS.", ".TW...SMMMS.", ".TW..SBBBBB.",
+                 ".TSBBBBBBBB.", ".TW...BBBBBS", "..T...PPPPP.", "......PP.PP.", ".....OOO.OOO"],
+        "pist1": ["....YYYYY.", "...YYYYYYY", "....SESES.", "....SSSSS.", "....SMMMS.", "DDSBBBBBB.", ".D..BBBBBB",
+                  "....BBBBBS", "....PPPPP.", "....PP.PP.", "...OOO.OOO"],
+        "pist2": ["....YYYYY.", "...YYYYYYY", "....SESES.", "....SSSSS.", "DDSBSSMSS.", ".D.BBBBBB.", "....BBBBBB",
+                  "....BBBBBS", "....PPPPP.", "....PP.PP.", "...OOO.OOO"],
+        "baz1": ["....YYYYY..", "...YYYYYYY.", "....SESES..", "....SSSSS..", "....SMMMS..", "DVVVVVVVVVV", "DVVVVVVVVVV",
+                 "...SBBBBBS.", "....PPPPP..", "....PP.PP..", "...OOO.OOO."],
+        "baz2": ["....YYYYY..", "...YYYYYYY.", "....SESES..", "....SSSSS..", "....SSMSS..", "DVVVVVVVVVV", "DVVVVVVVVVV",
+                 "...SBBBBBS.", "....PPPPP..", "....PP.PP..", "...OOO.OOO."],
+    }.items()}
+    POSES["kawa1"] = [r.replace("A", "W") for r in POSES["je1"]]  # kubek zamiast jabłka
+    POSES["kawa2"] = [r.replace("A", "W") for r in POSES["je2"]]
+    POSES["glowa1"], POSES["glowa2"] = POSES["stoi"][::-1], POSES["idzie1"][::-1]  # stanie na głowie, nogi machają
+    TRICKS = {  # nudzi się: nazwa -> (czas, kolejne pozy, czas jednej pozy, co druga odbita w lustrze)
+        "pajacyki": (3.0, ("stoi", "pajac_pol", "pajac", "pajac_pol"), 0.14, False),
+        "przysiady": (3.0, ("stoi", "kuca"), 0.5, False),
+        "taniec": (3.5, ("taniec", "taniec"), 0.35, True),
+        "pompki": (3.2, ("pompka1", "pompka2"), 0.45, False),
+        "na głowie": (2.6, ("glowa1", "glowa2"), 0.3, False),
+        "czytanie": (9.0, ("czyta1",) * 7 + ("czyta2",), 0.25, False),
+        "spanie": (10.0, ("spi1", "spi2"), 0.9, False),
+        "jedzenie": (6.0, ("je1", "je2", "je3", "je2", "je3"), 0.35, False),
+        "kawa": (7.0, ("kawa2",) * 5 + ("kawa1",) * 2, 0.4, False),
+        "żonglerka": (6.0, ("zongl1", "zongl2"), 0.25, False),
+        "zamiatanie": (6.0, ("zamiata1", "zamiata2"), 0.4, False),
+        "łuk": (5.4, ("luk1",) * 4 + ("luk2",) * 14, 0.3, False),
+        "pistolet": (4.6, ("pist1",) * 5 + ("pist2", "pist1", "pist1", "pist1") * 3 + ("pist1",) * 5, 0.2, False),
+        "bazooka": (5.4, ("baz1",) * 4 + ("baz2",) * 2 + ("baz1",) * 12, 0.3, False),
+    }
+    # strzelanie przez zegar do tarczy po drugiej stronie: kiedy strzał (s od początku) i prędkość pocisku (px/s)
+    SHOTS = {"łuk": ((1.2,), 45), "pistolet": ((1.0, 1.8, 2.6), 120), "bazooka": ((1.2,), 50)}
+    TARGET = [".R.", "RWR", "WRW", "RYR", "WRW", "RWR", ".R.", "T.T", "T.T"]
+    TARGET_PAL = {"R": (230, 30, 30), "W": (235, 235, 235), "Y": (255, 220, 0), "T": (150, 90, 40)}
+    PAL = {"Y": (255, 200, 0), "S": (255, 180, 130), "E": (0, 0, 0), "M": (0, 0, 0), "R": (170, 0, 25),
+           "B": (230, 40, 40), "P": (40, 90, 230), "O": (210, 210, 210), "C": (150, 90, 60), "W": (235, 235, 235),
+           "K": (40, 170, 90), "A": (110, 220, 40), "T": (150, 90, 40), "G": (230, 180, 60), "D": (130, 130, 145),
+           "V": (100, 125, 40)}  # D broń/grot, V rura bazooki
+    # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech, W kartki/kubek, K okładka, A jabłko, T kij, G miotła
+    WALK, MOVE = 10, 9  # px/s: chód i przesuwanie cyfr
+
+    def __init__(self):
+        self.shown, self.job, self.x = None, None, None
+        self.goal, self.wait, self.moon = None, 0.0, False
+        self.trick, self.next_trick, self.pending = None, None, None
+        self.banner, self.banner_at = None, None
+        self.rate, self.prev = None, None
+
+    @staticmethod
+    def layout(s):
+        """x każdego znaku godziny i jej prawa krawędź."""
+        xs, x = [], (W - text_w(s)) // 2
+        for ch in s:
+            xs.append(x)
+            x += text_w(ch) + 1
+        return xs, x - 2
+
+    def plan(self, old, new, t):
+        xs, xr = self.layout(new)
+        k = next(i for i, (a, b) in enumerate(zip(old, new)) if a != b)  # od tej cyfry w prawo wszystko jedzie
+        dist = W - xs[k]
+        mv = dist / max(self.MOVE, dist / 4.5)  # długi blok cyfr: szybciej, żeby zegar nie stał długo pusty
+        return {"old": old, "new": new, "k": k, "dist": dist, "t0": t, "x0": self.x,
+                "d": [abs(self.x - xr - 1) / self.WALK, 0.5, mv, 0.8, mv, 1.8]}
+
+    def man(self, f, pose, x, flip=False, blink=False):
+        pal = dict(self.PAL, E=self.PAL["S"]) if blink else self.PAL
+        sprite(f, self.POSES[pose], x, 0, pal, flip)
+
+    def place(self, pose, flip):
+        """O ile przesunąć pozę, żeby środek twarzy był zawsze w x + 4 (głowa nie skacze między pozami)."""
+        rows = self.POSES[pose]
+        eyes = next(([i for i, ch in enumerate(r) if ch in "EC"] for r in rows if "E" in r or "C" in r), [4])
+        c = (min(eyes) + max(eyes)) / 2
+        return round(4 - (len(rows[0]) - 1 - c if flip else c))
+
+    def span(self, pose, x, flip):
+        """Pierwsza i ostatnia zapalona kolumna pozy narysowanej przy x (ustawionej po twarzy)."""
+        rows = self.POSES[pose]
+        lit = [i for r in rows for i, ch in enumerate(r) if ch != "."]
+        a, b = (len(rows[0]) - 1 - max(lit), len(rows[0]) - 1 - min(lit)) if flip else (min(lit), max(lit))
+        d = x + self.place(pose, flip)
+        return d + a, d + b
+
+    def fits(self, trick, fl, xs, xr, x=None):
+        """Czy sztuczka mieści się tu, gdzie ludzik stoi (albo w x): w panelu i nie na cyfrach."""
+        for i, pose in enumerate(trick[1]):
+            a, b = self.span(pose, self.x if x is None else x, fl != (trick[3] and i % 2 == 1))
+            if a < 0 or b > W - 1 or (b >= xs[0] and a <= xr):
+                return False
+        return True
+
+    @staticmethod
+    def zones(xs, xr):
+        """Gdzie może spacerować (x pozy „stoi”): z prawej i z lewej strony godziny."""
+        return [z for z in ((xr + 1, W - 8), (-1, xs[0] - 9)) if z[0] <= z[1]]
+
+    def props(self, f, name, pose, e, sx, flip):
+        """Rzeczy przy niektórych zajęciach: piłeczki, para z kubka, „Z” nad śpiącym."""
+        w = len(self.POSES[pose][0])
+        cx = lambda c: sx + (w - 1 - c if flip else c)
+        if name == "żonglerka":
+            for i, c in enumerate(((0, 200, 255), (255, 0, 200), (90, 255, 60))):
+                ph = (e / 1.5 + i / 3) % 1
+                if ph < 0.65:  # wysoko łukiem z lewej ręki do prawej, nisko z powrotem
+                    a = ph / 0.65
+                    f.set(cx(1 + 6 * a), 6 - 6 * math.sin(math.pi * a), c)
+                else:
+                    f.set(cx(7 - 6 * (ph - 0.65) / 0.35), 7, c)
+        elif name == "kawa" and pose == "kawa2":
+            steam = visible((90, 90, 100), 4)
+            for k in range(3):
+                f.add(cx(1 + (int(e * 3) + k) % 2), 4 - k - (e * 2) % 1, mul(steam, 1 - k * 0.25))
+        elif name in self.SHOTS:
+            self.shoot(f, name, e, flip, cx)
+        elif name == "spanie":
+            for k in (0, 1):
+                ph = (e / 2.4 + k / 2) % 1
+                f.draw(text_px("Z", cx(7 + 3 * ph) if flip else cx(3 + 3 * ph), 3 - 5 * ph, SMALL),
+                       mul((150, 180, 255), 1 - 0.7 * ph))
+
+    def shoot(self, f, name, e, flip, cx):
+        """Tarcza przy przeciwnej krawędzi panelu, pocisk leci za cyframi; trafienia: strzała, dziury albo wybuch."""
+        times, v = self.SHOTS[name]
+        d = 1 if flip else -1                      # kierunek lotu
+        tx = W - 3 if flip else 0                  # lewy brzeg tarczy
+        face = tx if flip else tx + 2              # kolumna tarczy od strony strzelca
+        mx, my = cx(-1), 5                         # wylot tuż przed bronią
+        dist = abs(face - mx)
+        hits = []
+        for i, ft in enumerate(times):
+            fe = e - ft
+            if fe < 0:
+                continue
+            if fe * v < dist:                      # w locie
+                px = mx + d * fe * v
+                if name == "łuk":
+                    f.set(px, my, (200, 200, 215))
+                    for q in range(1, 4):
+                        f.set(px - d * q, my, (170, 110, 50))
+                    f.set(px - d * 4, my, (230, 40, 40))
+                elif name == "pistolet":
+                    f.set(px, my, (255, 235, 130))
+                    f.set(px - d, my, (140, 110, 40))
+                    if fe < 0.08:
+                        f.set(mx, my - 1, (255, 255, 200))  # błysk z lufy
+                else:
+                    for q in range(3, 12):                  # dym za rakietą
+                        f.add(px - d * q, my + 0.5 + math.sin(q * 1.7 + e * 9) * 0.6, mul(visible((90, 90, 95), 4), 1 - q / 12))
+                    f.set(px, my, (220, 40, 30))
+                    f.set(px - d, my, (100, 125, 40))
+                    f.set(px - d * 2, my, (255, 150 + 100 * (int(e * 20) % 2), 0))
+                    if fe < 0.5:                            # ogień z tyłu rury
+                        for q in range(3):
+                            f.add(cx(11 + q), 5 + (q + int(e * 15)) % 2, mul((255, 140, 20), 1 - fe * 2))
+            else:
+                hits.append((i, fe - dist / v))
+        if name == "bazooka" and hits:             # wybuch: tarcza znika
+            h = hits[0][1]
+            cx_, cy_ = tx + 1, 5
+            if h < 0.15:
+                disc(f, cx_, cy_, 2.5, (255, 255, 220))
+            for k in range(16):
+                a = k * math.pi / 8 + k * 0.3
+                r = h * (5 + 3 * hash1(k))
+                c = lerp((255, 230, 80), (200, 30, 0), clamp(h * 1.2))
+                if h < 1.2:
+                    f.set(cx_ + math.cos(a) * r, cy_ + math.sin(a) * r * 0.8 + h * h * 3, mul(c, 1 - h / 1.2))
+            return
+        wob = (1 if int(e * 25) % 2 else -1) if any(name == "łuk" and h < 0.4 for _, h in hits) else 0
+        y0 = 2 + round((1 - clamp(e / 0.4)) * 9)    # tarcza wyskakuje z podłogi
+        sprite(f, self.TARGET, tx + wob, y0, self.TARGET_PAL)
+        for i, h in hits:
+            if name == "łuk":                       # strzała wbita w tarczę
+                for q in range(0, 3):
+                    f.set(face - d * q + wob, my, (170, 110, 50))
+                f.set(face - d * 3 + wob, my, (230, 40, 40))
+            else:                                   # dziura po kuli (i błysk przy trafieniu)
+                f.set(tx + 1, my + (0, -2, 2)[i], (255, 255, 255) if h < 0.1 else (20, 10, 10))
+
+    BANNER_SPEED = 18  # px/s przy tempie tekstu 1 – wolno, żeby dało się przeczytać
+
+    @staticmethod
+    def banner_text():
+        m = NET.get("baner")
+        if not m:
+            return None
+        try:
+            tmax, code = m["daily"]["temperature_2m_max"][1], m["daily"]["weather_code"][1]
+            return (f"{round(m['current']['temperature_2m'])}°C we {BANNER['city']}, jutro {round(tmax)}°C, "
+                    f"{wmo(code)[1].lower()}")
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    def banner_due(self, now, t, nxt_t, lead):
+        """Czy pora na transparent: co kilka minut, i tylko gdy zdąży przed następnym przestawianiem cyfr."""
+        every = BANNER_EVERY[ludzik_lvl("transparent z pogodą")] if LUDZIK["freq"] else None
+        if not every:
+            return None
+        txt = self.banner_text()
+        if txt is None or (self.banner_at is not None and (now - self.banner_at).total_seconds() < every * 60 - 5):
+            return None
+        length = text_w(txt, TXT) + 12
+        dur = abs(self.x - (W - 9)) / self.WALK + 0.8 + scroll_time(W + length + 10, self.BANNER_SPEED)
+        rate = self.rate or 1 / ANIM["tempo"]
+        left = (nxt_t - now).total_seconds() - lead * rate
+        just_changed = now.second < 15
+        if dur * rate < left - 2 or (dur * rate > 50 and just_changed):  # za długi na minutę: tuż po zmianie
+            return {"txt": txt, "len": length, "t0": t, "x0": self.x}
+        return None
+
+    def draw_banner(self, f, t, xs, col):
+        """Ludzik przeciąga przez panel transparent z pogodą; zasłania zegar. -> False, gdy skończył."""
+        b = self.banner
+        e, walk = t - b["t0"], abs(b["x0"] - (W - 9)) / self.WALK
+        start = W - 9
+        for ch, x in zip(self.shown, xs):
+            if e < walk:
+                continue
+            f.draw(text_px(ch, x, 1), col)
+        if e < walk:  # idzie do prawej krawędzi (za cyframi)
+            x = b["x0"] + (start - b["x0"]) * e / walk
+            pose, flip = "idzie1" if int(t * 6) % 2 else "idzie2", start > b["x0"]
+            self.man(f, pose, x + self.place(pose, flip), flip)
+            for ch, xx in zip(self.shown, xs):
+                f.draw(text_px(ch, xx, 1), col)
+            return True
+        e -= walk
+        if e < 0.8:  # sięga po zwinięty transparent
+            self.man(f, "ciagnie2", start)
+            f.rect(W - 1, 0, W - 1, 10, (150, 90, 40))
+            return True
+        bl = W - scroll_px(e - 0.8, self.BANNER_SPEED)  # lewy brzeg transparentu
+        if bl + b["len"] < 0:
+            return False
+        cloth, pole = visible((30, 25, 70), 4), (150, 90, 40)
+        f.rect(bl, 0, bl + b["len"] - 1, 10, cloth)
+        f.draw(text_px(b["txt"], bl + 6, 0, TXT), (255, 230, 120))
+        f.rect(bl - 1, 0, bl - 1, 10, pole)
+        f.rect(bl + b["len"], 0, bl + b["len"], 10, pole)
+        pose = "idzie1" if int(t * 6) % 2 else "idzie2"
+        self.man(f, pose, bl - 9)
+        return True
+
+    def idle(self, f, t, dt, xs, xr, blink):
+        """Bez roboty: spaceruje po obu stronach zegara (przechodzi za cyframi), a z nudów coś robi."""
+        pause = LUDZIK_FREQ[LUDZIK["freq"]][1]
+        off = {a for a in LUDZIK_ACTS if not ludzik_lvl(a)}
+        weight = lambda n: LVL_WEIGHT[ludzik_lvl(n)]
+        if self.next_trick is None:
+            self.next_trick = t + (random.uniform(*pause) if pause else 0)
+        standing = self.goal is None or abs(self.x - self.goal) < 0.5
+        if self.trick and self.trick[0] in off:  # właśnie wyłączone w ustawieniach
+            self.trick = None
+        if self.pending in off or not pause:
+            self.pending = None
+        if self.trick is None and standing and t >= self.next_trick and pause:
+            away = self.x > xr  # rzeczy (książka, kubek, miotła) najlepiej po stronie z dala od cyfr
+            dirs = lambda n: (self.x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
+            opts = [(n, fl) for n, tr in self.TRICKS.items() if n not in off
+                    for fl in [next((fl for fl in dirs(n) if self.fits(tr, fl, xs, xr)), None)] if fl is not None]
+            if self.pending in [n for n, _ in opts]:  # doszedł na stanowisko strzeleckie
+                opts = [o for o in opts if o[0] == self.pending]
+            elif self.pending is None and not any(n in self.SHOTS for n, _ in opts) and \
+                    random.random() < min(0.8, 0.1 * max(weight(n) for n in self.SHOTS)):
+                zs = self.zones(xs, xr) if "na drugą stronę" not in off else \
+                    [z for z in self.zones(xs, xr) if z[0] - 1 <= self.x <= z[1] + 1]
+                spots = [(n, x) for n in self.SHOTS if n not in off for z in zs for x in range(z[0], z[1] + 1)
+                         if self.fits(self.TRICKS[n], x < xs[0], xs, xr, x)]
+                if spots:  # strzelanie się tu nie mieści – idzie tam, skąd się da
+                    self.pending, self.goal = random.choices(spots, [weight(n) for n, _ in spots])[0]
+                    self.wait, self.next_trick = t, t
+                    standing = False
+                    opts = []
+            self.pending = None if opts else self.pending
+            self.next_trick = t + 3 if self.pending is None else t
+            if opts:  # częstsze zajęcia losują się częściej
+                n, fl = random.choices(opts, [weight(n) for n, _ in opts])[0]
+                self.trick = (n, t, fl)
+                self.next_trick = t + self.TRICKS[n][0] + random.uniform(*pause)
+        if self.trick:
+            name, t0, fl = self.trick
+            dur, poses, step, mirror = self.TRICKS[name]
+            if t - t0 < dur:
+                i = int((t - t0) / step) % len(poses)
+                flip = fl != (mirror and i % 2 == 1)
+                sx = self.x + self.place(poses[i], flip)
+                self.man(f, poses[i], sx, flip, blink)
+                self.props(f, name, poses[i], t - t0, sx, flip)
+                return
+            self.trick, self.wait = None, max(self.wait, t + 1)
+        if t >= self.wait and standing and "spacer" not in off:
+            if self.goal is not None:
+                self.wait = t + random.uniform(*WALK_REST[ludzik_lvl("spacer")])
+            zs = self.zones(xs, xr)
+            here = next((z for z in zs if z[0] - 1 <= self.x <= z[1] + 1), zs[0])
+            other = [z for z in zs if z != here]
+            z = random.choice(other) if other and random.random() < CROSS_P[ludzik_lvl("na drugą stronę")] else here
+            self.goal = random.randint(z[0], z[1])
+            self.moon = random.random() < 0.25  # czasem idzie tyłem, moonwalkiem
+        if self.goal is not None and t >= self.wait and abs(self.x - self.goal) >= 0.5:
+            self.x += min(abs(self.goal - self.x), self.WALK * dt) * (1 if self.goal > self.x else -1)
+            pose, flip = "idzie1" if int(t * 6) % 2 else "idzie2", (self.goal > self.x) != self.moon
+            self.man(f, pose, self.x + self.place(pose, flip), flip)
+        else:  # stoi przodem do zegara, czasem się odwraca
+            flip = (self.x < xs[0]) != ((t % 9) > 6.5)
+            self.man(f, "stoi", self.x + self.place("stoi", flip), flip, blink)
+
+    def draw(self, f, now, t, dt):
+        if self.prev and t > self.prev[0]:  # ile sekund zegara mija na sekundę animacji (tempo, przyspieszenie)
+            r = clamp((now - self.prev[1]).total_seconds() / (t - self.prev[0]), 0, 1e5)
+            self.rate = r if self.rate is None else self.rate * 0.9 + r * 0.1
+        self.prev = (t, now)
+        cur = now.strftime("%H:%M")
+        nxt_t = (now + dtm.timedelta(minutes=1)).replace(second=0, microsecond=0)
+        nxt = nxt_t.strftime("%H:%M")
+        if self.shown is None:
+            self.shown = cur
+        xs, xr = self.layout(self.shown)
+        home = xr + 1
+        if self.x is None:
+            self.x = home
+        if LUDZIK["freq"] and ludzik_lvl("transparent z pogodą"):
+            NET.get("baner")  # dane do transparentu pobierają się w tle
+        if self.banner is None and self.job is None and self.trick is None and self.shown == cur:
+            job = self.plan(self.shown, nxt, t)
+            self.banner = self.banner_due(now, t, nxt_t, sum(job["d"][:4]))
+            if self.banner:
+                self.banner_at = now
+        if self.banner:
+            for x in range(W):
+                f.set(x, 11, visible((40, 26, 12)))
+            if self.draw_banner(f, t, xs, (235, 235, 255)):
+                return
+            self.banner, self.x, self.goal, self.wait = None, -10, home, t  # wraca zza lewej krawędzi
+            self.next_trick = max(self.next_trick or 0, t + 4)
+        if self.job is None:
+            if self.shown not in (cur, nxt):  # spóźniony (start efektu, skok czasu) – od razu do roboty
+                self.job = self.plan(self.shown, cur, t)
+            elif nxt != self.shown:  # zaczyna wcześniej, żeby nowe cyfry wjeżdżały równo z pełną minutą
+                job = self.plan(self.shown, nxt, t)
+                if (nxt_t - now).total_seconds() <= sum(job["d"][:4]) * (self.rate or 1 / ANIM["tempo"]):
+                    self.job = job
+        ground = visible((40, 26, 12))
+        for x in range(W):
+            f.set(x, 11, ground)
+        col = (235, 235, 255)
+        blink = (t % 3.7) < 0.15
+        j = self.job
+        if j is None:  # ludzik najpierw, cyfry na wierzchu – gdy przechodzi na drugą stronę, idzie za nimi
+            self.idle(f, t, dt, xs, xr, blink)
+            for ch, x in zip(self.shown, xs):
+                f.draw(text_px(ch, x, 1), col)
+            return
+        p, ph, d = t - j["t0"], 0, j["d"]
+        while ph < len(d) and p >= d[ph]:
+            p -= d[ph]
+            ph += 1
+        k, dist = j["k"], j["dist"]
+        if ph == len(d):
+            self.shown, self.job, self.x, self.goal, self.wait = j["new"], None, home, None, t + 3
+            self.next_trick = max(self.next_trick or 0, t + 4)
+            return self.draw(f, now, t, 0)
+        s = j["new"] if ph >= 4 else j["old"]
+        off = dist * p / d[2] if ph == 2 else dist if ph == 3 else dist * (1 - p / d[4]) if ph == 4 else 0
+        if ph == 0:  # idzie do roboty (z lewej strony – za cyframi)
+            x = j["x0"] + (home - j["x0"]) * (p / d[0] if d[0] else 1)
+            pose, flip = "idzie1" if int(t * 6) % 2 else "idzie2", home > j["x0"]
+            self.man(f, pose, x + self.place(pose, flip), flip)
+        for i, (ch, x) in enumerate(zip(s, xs)):
+            f.draw(text_px(ch, x + (off if i >= k else 0), 1), col)
+        if ph in (2, 4) and xs[k] + off < W:  # kurz spod przesuwanych cyfr
+            for q in range(3):
+                f.add(xs[k] + off - 1 - q, 11, mul((140, 110, 70), hash1(int(t * 20) + q) * (1 - q / 3)))
+        if ph == 1:
+            self.man(f, "ciagnie2", home)
+        elif ph in (2, 4):
+            push = ph == 4
+            self.man(f, ("pcha" if push else "ciagnie") + ("1" if int(off / 2) % 2 else "2"), home + off)
+            if push:  # kropla potu
+                f.set(home + off + 8, 3 + int(t * 8) % 4, (120, 190, 255))
+        elif ph == 5:
+            self.man(f, "stoi" if p < 0.4 else "macha", home, flip=p >= 0.4, blink=blink)
+
+
+LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, "transparent z pogodą"]  # co można włączyć/wyłączyć
+
+
+CLOCKS = {
+    "licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "niebo": Sky, "doba": DayRibbon,
+    "skaner": Scanner, "tecza": Rainbow, "hiperskok": Warp, "zycie": Life, "akwarium": Aquarium, "pong": Pong,
+    **REG,
+}
+
+
+class Cycle(Clock):
+    """Wszystkie zegary po kolei z płynnym przenikaniem."""
+
+    def __init__(self, every, fade=1.5, inst=None):
+        self.names = list(CLOCKS)
+        self.inst = inst if inst is not None else {n: CLOCKS[n]() for n in self.names}
+        self.every, self.fade = every, fade
+        self.idx, self.acc, self.prev = 0, 0.0, None
+        self.shuffle = False
+        self.allowed = lambda name: True
+
+    @property
+    def current(self):
+        return self.names[self.idx]
+
+    def skip(self, d=1):
+        ok = [i for i in range(len(self.names)) if i != self.idx and self.allowed(self.names[i])] or \
+             [i for i in range(len(self.names)) if i != self.idx]
+        if self.shuffle and d == 1:
+            nxt = random.choice(ok)
+        else:
+            nxt = min(ok, key=lambda i: (i - self.idx) * d % len(self.names))
+        self.prev, self.idx, self.acc = self.idx, nxt, 0.0
+
+    def draw(self, f, now, t, dt):
+        self.acc += dt
+        if self.acc >= self.every:
+            self.skip()
+        a = Frame()
+        self.inst[self.current].draw(a, now, t, dt)
+        if self.prev is not None and self.acc < self.fade:
+            b = Frame()
+            self.inst[self.names[self.prev]].draw(b, now, t, dt)
+            a = blend(b, a, self.acc / self.fade)
+        else:
+            self.prev = None
+        f.px = a.px
+
+
+# ================================================================ DDP / main
+def wled_state(host, payload):
+    """POST /json/state – np. {"bri": 16} albo {"lor": 0}."""
+    req = urllib.request.Request(f"http://{host}/json/state", data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=4).read()
+
+
+def send_ddp(sock, host, data, seq):
+    step = 1440
+    for off in range(0, len(data), step):
+        chunk = data[off:off + step]
+        last = off + step >= len(data)
+        hdr = bytes((0x41 if last else 0x40, seq & 0x0F, 0x01, 0x01)) + off.to_bytes(4, "big") + len(chunk).to_bytes(2, "big")
+        sock.sendto(hdr + chunk, (host, 4048))
+
+
+# ================================================================ TUI
+class Tui:
+    """Interaktywny panel w terminalu: podgląd na żywo (1 dioda = 1 kropka), lista efektów i ustawienia."""
+
+    NAMES = list(CLOCKS) + ["cykl"]
+    SPEEDS = [1, 10, 60, 600, 3600]
+    TEMPOS = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
+    FPSES = [10, 12, 15, 20, 24, 25, 30, 40, 50, 60]  # panel 120x12 na jednym pinie: max ok. 20-22
+    FADES = [0.0, 0.3, 0.6, 1.0, 1.5, 2.0, 3.0]
+    PREVIEWS = ["włączony", "wyłączony"]
+
+    def __init__(self, a, cfg):
+        self.host = a.host or ""
+        self.sending = bool(a.host)
+        self.tempo, self.text = a.tempo, a.text_speed
+        self.fps = a.fps
+        self.inst = {n: CLOCKS[n]() for n in CLOCKS}
+        self.cycle = Cycle(a.every, inst=self.inst)
+        self.cycle.shuffle = cfg.get("shuffle", False)
+        self.fade = cfg.get("fade", 0.6)
+        self.cycle.fade = max(self.fade, 0.01)
+        self.mode, self.cursor = a.mode, self.NAMES.index(a.mode)
+        self.fade_from, self.fade_acc = None, 0.0
+        self.paused, self.running = False, True
+        self.preview = cfg.get("preview") if cfg.get("preview") in self.PREVIEWS else "włączony"
+        if a.speed not in self.SPEEDS:
+            self.SPEEDS = sorted(self.SPEEDS + [a.speed])
+        self.speed_i = self.SPEEDS.index(a.speed)
+        self.offset = dtm.timedelta()
+        if a.start:
+            hh, mm, *ss = [int(v) for v in a.start.split(":")]
+            real = dtm.datetime.now().astimezone()
+            self.offset = real.replace(hour=hh, minute=mm, second=ss[0] if ss else 0, microsecond=0) - real
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.seq, self.pkts, self.err = 1, 0, ""
+        self.edit = None          # tekst wpisywanego hosta albo None
+        self.search = None        # tekst wyszukiwania (/) albo None
+        self.focus, self.scur, self.acur, self.afilt = "list", 0, 0, ""
+        self.note, self.note_until = "", 0.0
+        self.fps_ema, self.cost_ema = float(self.fps), 0.0
+        self.resized = True
+        self.limiter = PowerLimiter()
+        self.new_width = None
+        self._last_st = None
+        self.lor = 0
+        if self.sending:
+            self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")   # WLED ma pokazywać nasz strumień
+        self.peak = cfg.get("peaks", {})            # najwyższy szacowany prąd każdego efektu (mA przy danej jasności)
+        self.skip_heavy = cfg.get("skip_heavy", True)
+        self.cycle.allowed = lambda n: not (self.skip_heavy and self.heavy(n))
+        self.settings = self.make_settings()
+
+    # ---------------------------------------------------------- ustawienia
+    @staticmethod
+    def step_in(lst, v, d):
+        i = min(range(len(lst)), key=lambda k: abs(lst[k] - v))
+        return lst[max(0, min(len(lst) - 1, i + d))]
+
+    @staticmethod
+    def bar(v, lo, hi, n=12):
+        k = round(clamp((v - lo) / (hi - lo)) * n)
+        return "█" * k + "░" * (n - k)
+
+    def make_settings(self):
+        def s_tempo(d):
+            self.tempo = self.step_in(self.TEMPOS, self.tempo, d)
+
+        def s_text(d):
+            self.text = self.step_in(self.TEMPOS, self.text, d)
+
+        def s_fps(d):
+            self.fps = self.step_in(self.FPSES, self.fps, d)
+
+        def s_every(d):
+            self.cycle.every = max(10, self.cycle.every + 10 * d)
+
+        def s_order(d):
+            self.cycle.shuffle = not self.cycle.shuffle
+
+        def s_fade(d):
+            self.fade = self.step_in(self.FADES, self.fade, d)
+            self.cycle.fade = max(self.fade, 0.01)
+
+        def s_speed(d):
+            self.speed_i = max(0, min(len(self.SPEEDS) - 1, self.speed_i + d))
+
+        def s_prev(d):
+            self.preview = self.PREVIEWS[(self.PREVIEWS.index(self.preview) + d) % len(self.PREVIEWS)]
+            self.resized = True
+
+        def s_send(d):
+            if self.host:
+                self.sending = not self.sending
+            else:
+                self.edit = ""
+
+        def s_host(d):
+            self.edit = self.host
+
+        def s_levels(d):
+            opts = [None, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 48, 64]
+            cur = PANEL["levels"] if panel_manual() else None
+            i = opts.index(cur) if cur in opts else 0
+            PANEL["levels"] = opts[(i + d) % len(opts)]
+            PANEL["levels_bri"] = PANEL["bri"]
+            PANEL["pe"] = 1 / 2.2
+
+        def s_wbri(d):
+            opts = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 160, 192, 224, 255]
+            PANEL["bri"] = self.step_in(opts, PANEL["bri"], d)
+            self.set_wled_bri(PANEL["bri"])
+
+        def s_psu(d):
+            opts = [0, 1000, 1500, 2000, 3000, 4000, 6000, 8500, 12000, 17000, 20000, 35000]
+            POWER["psu"] = self.step_in(opts, POWER["psu"], d)
+
+        def s_heavy(d):
+            self.skip_heavy = not self.skip_heavy
+
+        def s_mirror(d):
+            PANEL["mirror"] = not PANEL["mirror"]
+
+        def s_lacts(d):
+            self.focus, self.acur, self.afilt = "acts", 0, ""
+
+        def s_lfreq(d):
+            LUDZIK["freq"] = max(0, min(len(LUDZIK_FREQ) - 1, LUDZIK["freq"] + d))
+
+        def s_width(d):
+            self.new_width = 60 if W != 60 else 120
+            self.running = False          # main() zapisze i uruchomi skrypt ponownie z nową szerokością
+
+        return [  # (nazwa, wartość do wyświetlenia, zmiana, podpowiedź)
+            ("jasność WLED", lambda: f"{self.bar(math.log(PANEL['bri']), 0, math.log(255))} {PANEL['bri']}/255", s_wbri,
+             "zmienia jasność w panelu"),
+            ("zasilacz", lambda: f"{POWER['psu'] / 1000:g} A" if POWER["psu"] else "bez limitu", s_psu,
+             "budżet prądu (ok. 85% zasilacza)"),
+            ("ciężkie efekty", lambda: "pomijaj w cyklu" if self.skip_heavy else "pokazuj", s_heavy, "⚡ = nie mieszczą się w budżecie"),
+            ("tempo anim.", lambda: f"{self.bar(self.tempo, 0.25, 3)} x{self.tempo:g}", s_tempo, "wszystkie ruchy"),
+            ("tempo tekstu", lambda: f"{self.bar(self.text, 0.25, 3)} x{self.text:g}", s_text,
+             f"{self.text_step()}"),
+            ("fps", lambda: f"{self.bar(self.fps, 10, 60)} {self.fps:g}", s_fps, "klatek na sekundę"),
+            ("cykl co", lambda: f"{self.cycle.every:.0f} s", s_every, "[ ]"),
+            ("kolejność", lambda: "losowo" if self.cycle.shuffle else "po kolei", s_order, "l"),
+            ("przenikanie", lambda: f"{self.fade:g} s", s_fade, "przy zmianie efektu"),
+            ("czas", lambda: f"x{self.speed:g}", s_speed, "< > r"),
+            ("podgląd", lambda: self.preview, s_prev, "v"),
+            ("odbicie lustrz.", lambda: "włączone" if PANEL["mirror"] else "wyłączone", s_mirror,
+             "m – obraz odbity w poziomie, żeby w kamerce wyglądał dobrze"),
+            ("ludzik zajęcia", lambda: f"{len([a for a in LUDZIK_ACTS if ludzik_lvl(a)])}/{len(LUDZIK_ACTS)} włączone",
+             s_lacts, "Enter = co robi z nudów i jak często"),
+            ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
+            ("wysyłanie", lambda: "włączone" if self.sending else "wyłączone", s_send, "s"),
+            ("host", lambda: self.host or "(brak)", s_host, "h, Enter = zmień"),
+            ("szerokość", lambda: f"{W} kolumn", s_width, "Enter = 60/120 (np. gdy działa połowa panelu), restart"),
+            ("poziomy", lambda: (f"{PANEL['levels']} na kanał (ręcznie)" if panel_manual() else f"auto = {PANEL['bri']}"),
+             s_levels, "ile stopni jasności widać (--kalibracja); auto = z jasności WLED"),
+        ]
+
+    def heavy(self, name):
+        pk = self.peak.get(name)
+        return bool(POWER["psu"]) and pk is not None and pk[1] == PANEL["bri"] and pk[0] > POWER["psu"] * 1.15
+
+    def wled_post(self, payload, what):
+        if not self.host:
+            return
+        def go():
+            try:
+                wled_state(self.host, payload)
+            except Exception as e:  # noqa: BLE001
+                self.say(f"nie udało się {what}: {e}")
+        threading.Thread(target=go, daemon=True).start()
+
+    def set_wled_bri(self, bri):
+        self.wled_post({"bri": bri}, "ustawić jasności")
+
+    def text_step(self):
+        ppf = 28 * self.text * self.tempo / self.fps
+        return f"{round(ppf)} px/klatkę" if ppf >= 1 else f"1 px co {max(1, round(1 / ppf))} klatki"
+
+    def save(self):
+        cfg = {"host": self.host, "tempo": self.tempo,
+               "text_speed": self.text, "fps": self.fps, "every": self.cycle.every, "shuffle": self.cycle.shuffle,
+               "fade": self.fade, "preview": self.preview, "mode": self.mode, "panel_bri": PANEL["bri"],
+               "panel_levels": PANEL["levels"] if panel_manual() else None,
+               "panel_levels_bri": PANEL["bri"] if panel_manual() else None, "panel_pe": PANEL["pe"],
+               "psu": POWER["psu"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
+               "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"]}
+        try:
+            os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+            with open(CONFIG, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+
+    # ---------------------------------------------------------- logika
+    @property
+    def speed(self):
+        return self.SPEEDS[self.speed_i]
+
+    def drawer(self, name):
+        return self.cycle if name == "cykl" else self.inst[name]
+
+    def select(self, name):
+        self.cursor = self.NAMES.index(name)
+        if name == self.mode:
+            return
+        same = "cykl" in (name, self.mode) and self.cycle.current in (name, self.mode)
+        self.fade_from, self.fade_acc = (None if same or self.fade <= 0 else self.mode), 0.0
+        self.mode = name
+
+    def skip(self, d):
+        if self.mode == "cykl":
+            self.cycle.skip(d)
+        else:
+            names = list(CLOCKS)
+            self.select(names[(names.index(self.mode) + d) % len(names)])
+
+    def render(self, now, t, dt):
+        f = Frame()
+        self.drawer(self.mode).draw(f, now, t, dt)
+        if self.fade_from is not None:
+            self.fade_acc += dt
+            if self.fade_acc < self.fade:
+                b = Frame()
+                self.drawer(self.fade_from).draw(b, now, t, dt)
+                f = blend(b, f, self.fade_acc / self.fade)
+            else:
+                self.fade_from = None
+        return f
+
+    def say(self, msg):
+        self.note, self.note_until = msg, time.monotonic() + 3
+
+    # ---------------------------------------------------------- klawisze
+    @staticmethod
+    def parse_keys(data):
+        i = 0
+        while i < len(data):
+            ch = data[i]
+            if ch == "\x1b" and i + 1 < len(data) and data[i + 1] in "[O":
+                j = i + 2
+                while j < len(data) and not ("@" <= data[j] <= "~"):
+                    j += 1
+                seq = data[i + 2:j + 1]
+                yield {"A": "up", "B": "down", "C": "right", "D": "left", "H": "home", "F": "end", "5~": "pgup",
+                       "6~": "pgdn", "1~": "home", "4~": "end", "Z": "backtab"}.get(seq, "")
+                i = j + 1
+            else:
+                yield "esc" if ch == "\x1b" else ch
+                i += 1
+
+    @staticmethod
+    def fold(s):
+        """Małe litery bez polskich znaków – „glowie” pasuje do „głowie”."""
+        s = unicodedata.normalize("NFD", s.lower().replace("ł", "l"))
+        return "".join(ch for ch in s if not unicodedata.combining(ch))
+
+    def matches(self):
+        q = self.fold(self.search or "")
+        return [i for i, n in enumerate(self.NAMES) if q in n or q in self.fold(self.doc(n) or "")]
+
+    def act_matches(self):
+        """Zajęcia ludzika pasujące do wpisanego fragmentu nazwy."""
+        q = self.fold(self.afilt)
+        return [i for i, a in enumerate(LUDZIK_ACTS) if q in self.fold(a)]
+
+    @staticmethod
+    def doc(name):
+        return ((CLOCKS[name] if name in CLOCKS else Cycle).__doc__ or "").strip()
+
+    def on_key(self, k):
+        if self.search is not None:
+            if k in ("\r", "\n"):
+                self.search = None
+                self.select(self.NAMES[self.cursor])
+            elif k == "esc":
+                self.search = None
+            elif k in ("up", "down"):
+                m = self.matches()
+                if m:
+                    pos = m.index(self.cursor) if self.cursor in m else 0
+                    self.cursor = m[(pos + (1 if k == "down" else -1)) % len(m)]
+            else:
+                if k in ("\x7f", "\b"):
+                    self.search = self.search[:-1]
+                elif len(k) == 1 and k.isprintable():
+                    self.search += k
+                m = self.matches()
+                if m:
+                    self.cursor = m[0]
+            return
+        if self.edit is not None:
+            if k in ("\r", "\n"):
+                self.host, self.edit = self.edit.strip(), None
+                self.sending = bool(self.host)
+                self.err = ""
+                self.say(f"host: {self.host or '(brak)'}")
+            elif k == "esc":
+                self.edit = None
+            elif k in ("\x7f", "\b"):
+                self.edit = self.edit[:-1]
+            elif len(k) == 1 and k.isprintable():
+                self.edit += k
+            return
+        if self.focus == "acts":  # podlista: częstość każdego zajęcia ludzika; litery filtrują po nazwie
+            m = self.act_matches()
+            pos = m.index(self.acur) if self.acur in m else 0
+            act = LUDZIK_ACTS[self.acur] if self.acur in m else None
+            if k in ("up", "down") and m:
+                self.acur = m[(pos + (1 if k == "down" else -1)) % len(m)]
+            elif k in ("left", "right") and act:
+                LUDZIK["lvl"][act] = max(0, min(3, ludzik_lvl(act) + (1 if k == "right" else -1)))
+            elif k in (" ", "\r", "\n") and act:
+                LUDZIK["lvl"][act] = (ludzik_lvl(act) + 1) % 4
+            elif k in ("0", "1", "2", "3") and act:
+                LUDZIK["lvl"][act] = int(k)
+            elif k == "*" and m:  # wszystkie widoczne: wyłącz, a gdy już wyłączone – normalnie
+                names = [LUDZIK_ACTS[i] for i in m]
+                v = 0 if any(ludzik_lvl(a) for a in names) else 2
+                LUDZIK["lvl"].update({a: v for a in names})
+            elif k == "esc" and self.afilt:
+                self.afilt = ""
+            elif k in ("esc", "\t", "backtab"):
+                self.focus, self.afilt = "set", ""
+            elif k in ("\x7f", "\b") or (len(k) == 1 and k.isprintable()):
+                self.afilt = self.afilt[:-1] if k in ("\x7f", "\b") else self.afilt + k
+                m = self.act_matches()
+                if m and self.acur not in m:
+                    self.acur = m[0]
+            return
+        if k in ("\t", "backtab"):
+            self.focus = "set" if self.focus == "list" else "list"
+            return
+        if self.focus == "set":
+            ns = len(self.settings)
+            if k in ("up", "k"):
+                self.scur = (self.scur - 1) % ns
+                return
+            if k in ("down", "j"):
+                self.scur = (self.scur + 1) % ns
+                return
+            if k in ("left", "right", "+", "=", "-", "_", "\r", "\n"):
+                d = 1 if k in ("right", "+", "=", "\r", "\n") else -1
+                self.settings[self.scur][2](d)
+                return
+            if k == "esc":
+                self.focus = "list"
+                return
+        n = len(self.NAMES)
+        if k in ("up", "k"):
+            self.cursor = (self.cursor - 1) % n
+        elif k in ("down", "j"):
+            self.cursor = (self.cursor + 1) % n
+        elif k == "pgup":
+            self.cursor = max(0, self.cursor - 10)
+        elif k == "pgdn":
+            self.cursor = min(n - 1, self.cursor + 10)
+        elif k == "home":
+            self.cursor = 0
+        elif k == "end":
+            self.cursor = n - 1
+        elif k == "/":
+            self.search, self.focus = "", "list"
+        elif k == "l":
+            self.cycle.shuffle = not self.cycle.shuffle
+            self.say("cykl: " + ("losowa kolejność" if self.cycle.shuffle else "po kolei"))
+        elif k in ("\r", "\n"):
+            self.select(self.NAMES[self.cursor])
+        elif k in ("right", "n"):
+            self.skip(1)
+        elif k in ("left", "p"):
+            self.skip(-1)
+        elif k == "c":
+            self.select("cykl")
+        elif k == "]":
+            self.cycle.every += 10
+        elif k == "[":
+            self.cycle.every = max(10, self.cycle.every - 10)
+        elif k in (">", "."):
+            self.speed_i = min(self.speed_i + 1, len(self.SPEEDS) - 1)
+        elif k in ("<", ","):
+            self.speed_i = max(self.speed_i - 1, 0)
+        elif k == "r":
+            self.offset, self.speed_i = dtm.timedelta(), self.SPEEDS.index(1)
+            self.say("czas = prawdziwa godzina")
+        elif k == " ":
+            self.paused = not self.paused
+        elif k == "s":
+            if self.host:
+                self.sending = not self.sending
+            else:
+                self.edit = ""
+        elif k == "h":
+            self.edit = self.host
+        elif k == "o":
+            self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")
+            self.lor = 0
+            self.say("WLED znów pokazuje obraz ze skryptu")
+        elif k == "v":
+            self.preview = self.PREVIEWS[(self.PREVIEWS.index(self.preview) + 1) % len(self.PREVIEWS)]
+            self.resized = True
+        elif k == "m":
+            PANEL["mirror"] = not PANEL["mirror"]
+            self.say("odbicie lustrzane włączone – obraz odwrócony w poziomie (do kamerki)" if PANEL["mirror"]
+                     else "odbicie lustrzane wyłączone")
+        elif k in ("q", "Q", "\x03"):
+            self.running = False
+
+    # ---------------------------------------------------------- ekran
+    @staticmethod
+    def panel_leds(rows):
+        """1:1 z panelem: każda dioda to „● ” (2 znaki szerokości ≈ wysokość wiersza), więc piksele są kwadratowe
+        i mają przerwy jak prawdziwe diody. Zgaszone diody = ciemne kropki."""
+        out = []
+        for row in rows:
+            s, last = [], None
+            for c in row:
+                key = "off" if c == (0, 0, 0) else c
+                if key != last:
+                    s.append("\x1b[38;2;34;34;38m" if key == "off" else "\x1b[38;2;%d;%d;%dm" % c)
+                    last = key
+                s.append("· " if key == "off" else "● ")
+            out.append("".join(s)[:-1] + "\x1b[0m")
+        return out, 2 * W - 1
+
+    @staticmethod
+    def panel_blocks(rows):
+        """Półbloki: 1 znak = 1 piksel szerokości i 2 piksele wysokości – też kwadratowe piksele, ale bez przerw."""
+        out = []
+        for y in range(0, H, 2):
+            top, bot = rows[y], rows[y + 1] if y + 1 < H else [(0, 0, 0)] * W
+            s, last = [], None
+            for a, b in zip(top, bot):
+                if (a, b) != last:
+                    s.append("\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm" % (a + b))
+                    last = (a, b)
+                s.append("▀")
+            out.append("".join(s) + "\x1b[0m")
+        return out, W
+
+    def screen(self, frame, now):
+        cols, rows_n = shutil.get_terminal_size((100, 30))
+        B, D, R, G, Y, C, INV = "\x1b[1m", "\x1b[2m", "\x1b[0m", "\x1b[32m", "\x1b[33m", "\x1b[36m", "\x1b[7m"
+        L = []
+        if self.edit is not None:
+            state = f"{Y}wpisz IP WLED, Enter = OK, Esc = anuluj{R}"
+        elif self.sending:
+            state = f"{G}● wysyła{R}"
+        else:
+            state = f"{D}○ nie wysyła{R}"
+        host = (self.edit + "█") if self.edit is not None else (self.host or "(brak – naciśnij h)")
+        clock_txt = now.strftime("%H:%M:%S") + (f" {Y}(udawany){R}" if self.offset or self.speed != 1 else "")
+        L.append(f" {B}WLED zegary{R}  {D}│{R}  host: {B}{host}{R}  {D}│{R}  {state}  {D}│{R}  {clock_txt}"
+                 + (f"  {Y}⏸ pauza{R}" if self.paused else "")
+                 + (f"  {C}⇋ odbicie{R}" if PANEL["mirror"] else "")
+                 + (f"  \x1b[41m\x1b[97m WLED pokazuje własny efekt (nadpisanie) – naciśnij o {R}" if self.lor and self.sending else ""))
+        if self.preview != "wyłączony":
+            rows = panel_view(frame.rgb_rows())
+            leds = cols >= 2 * W + 3
+            lines, pw = self.panel_leds(rows) if leds else self.panel_blocks(rows)
+            L.append(f" {D}┌{'─' * pw}┐{R}")
+            L += [f" {D}│{R}{ln}{D}│{R}" for ln in lines]
+            L.append(f" {D}└{'─' * pw}┘{R}" + ("" if leds else
+                     f"  {D}terminal {cols} kol.; od {2 * W + 3} kolumn podgląd pokaże pojedyncze diody (Ctrl + minus){R}"))
+        # lewa kolumna: przewijana lista efektów
+        lh = max(6, rows_n - len(L) - 5)
+        lf = self.focus == "list"
+        if self.search is not None:
+            head = f"{Y}/{self.search}█{R} {D}({len(self.matches())}){R}"
+        else:
+            head = (f"{INV if lf else B} Efekt {R}" if lf else f"{D}Efekt{R}") + f" {D}{self.cursor + 1}/{len(self.NAMES)}{R}"
+        left = [head]
+        top = int(clamp(self.cursor - lh // 2, 0, max(0, len(self.NAMES) - lh)))
+        for i in range(top, min(len(self.NAMES), top + lh)):
+            name = self.NAMES[i]
+            cur = "▸" if i == self.cursor and lf else " "
+            if name == self.mode:
+                mark = f"{G}● {name}{R}"
+            elif self.mode == "cykl" and name == self.cycle.current:
+                mark = f"{C}↻ {name}{R}"
+            else:
+                mark = f"  {name}"
+            if name in CLOCKS and self.heavy(name):
+                mark += f" {Y}⚡{R}"
+            if self.search and i not in self.matches():
+                mark = f"{D}{strip_ansi(mark)}{R}"
+            left.append(f"{Y}{cur}{R} {D}{i + 1:3d}{R} {mark}")
+        # prawa kolumna: ustawienia (Tab), potem statystyki i opis
+        sf = self.focus == "set"
+        if self.focus == "acts":
+            right = [f"{INV} Zajęcia ludzika {R} " + (f"{Y}szukaj: {self.afilt}█{R}" if self.afilt else
+                                                      f"{D}(co robi z nudów i jak często; pisz, żeby szukać){R}")]
+            m = self.act_matches()
+            if not m:
+                right.append(f"  {D}nic nie pasuje do „{self.afilt}” (Backspace / Esc){R}")
+            for i in m:
+                act = LUDZIK_ACTS[i]
+                sel = i == self.acur
+                lv = ludzik_lvl(act)
+                lab = (D, Y, G, C)[lv] + "◂ " + f"{LUDZIK_LVL[lv]:9s}" + " ▸" + R
+                right.append(f"{Y + '▸' if sel else ' '}{R} {(B if sel else '')}{act:20s}{R} {lab}")
+        else:
+            right = [(f"{INV} Ustawienia {R}" if sf else f"{D}Ustawienia{R}") + f" {D}(Tab){R}"]
+            for i, (name, val, _, hint) in enumerate(self.settings):
+                sel = sf and i == self.scur
+                hint = self.text_step() if name == "tempo tekstu" else hint
+                right.append(f"{Y + '▸' if sel else ' '}{R} {name:15s} {(B if sel else '')}{val()}{R}  {D}{hint}{R}")
+        right += [
+            "",
+            f"{D}prąd ~{self.limiter.est / 1000:.2f} A" + (f" / limit {POWER['psu'] / 1000:g} A" if POWER["psu"] else "")
+            + (f"{R}  {Y}przyciemniam do {self.limiter.k * 100:.0f}% (efekt chce {self.limiter.raw / 1000:.1f} A){R}"
+               if self.limiter.k < 0.98 else R),
+            f"{D}panel: jasność WLED {PANEL['bri']}/255, model: {panel_levels()} poziomów na kanał{R}"
+            + (f"  {Y}fps > 20: panel nie nadąży{R}" if self.fps > 22 else ""),
+            f"{D}fps {self.fps_ema:4.1f}/{self.fps:g}  render {self.cost_ema * 1000:4.1f} ms  pakiety {self.pkts}{R}"
+            + (f"  {Y}błąd: {self.err}{R}" if self.err else ""),
+            f"{D}sieć: {NET.status()[:max(10, cols - 40)] or '—'}{R}",
+            "",
+            f"{C}{self.NAMES[self.cursor]}{R}" + (f"  {D}(teraz w cyklu: {self.cycle.current}){R}" if self.mode == "cykl" else ""),
+        ] + wrap(self.doc(self.NAMES[self.cursor]), max(20, cols - 34))
+        L.append("")
+        for i in range(max(len(left), len(right))):
+            lt = left[i] if i < len(left) else ""
+            pad = 26 - len(strip_ansi(lt))
+            L.append(" " + lt + " " * max(pad, 1) + (right[i] if i < len(right) else ""))
+        L.append("")
+        note = self.note if time.monotonic() < self.note_until else ""
+        if self.focus == "acts":
+            L.append(f" {D}pisz = szukaj  ↑↓ wybór  ←→ lub 0–3 częstość (0 = wył.)  spacja następna  "
+                     f"* wył./wł. widoczne  Esc {'czyść' if self.afilt else 'powrót'}{R}")
+        elif sf:
+            L.append(f" {D}Tab lista  ↑↓ ustawienie  ←→ / + - zmiana  Enter przełącz  spacja pauza  q wyjście{R}")
+        else:
+            L.append(f" {D}Tab ustawienia  ↑↓ PgUp PgDn Enter wybór  / szukaj  ←→ następny  c cykl  m odbicie  spacja pauza  q wyjście{R}")
+        if note:
+            L.append(f" {Y}{note}{R}")
+        L = L[:rows_n - 1]
+        out = ("\x1b[2J" if self.resized else "") + "\x1b[H" + "\x1b[K\r\n".join(L) + "\x1b[K\x1b[J"
+        self.resized = False
+        sys.stdout.write(out)
+        sys.stdout.flush()
+
+    # ---------------------------------------------------------- pętla
+    def send(self, data):
+        if not (self.sending and self.host):
+            return
+        try:
+            send_ddp(self.sock, self.host, data, self.seq)
+            self.seq = self.seq % 15 + 1
+            self.pkts += 1
+            self.err = ""
+        except OSError as e:
+            self.err = e.strerror or str(e)
+
+    def run(self):
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        signal.signal(signal.SIGWINCH, lambda *_: setattr(self, "resized", True))
+        try:
+            tty.setcbreak(fd)
+            sys.stdout.write("\x1b[?1049h\x1b[?25l")
+            t, frame = 0.0, None
+            last = nxt = time.monotonic()
+            while self.running:
+                m = time.monotonic()
+                rdt, last = m - last, m
+                self.fps_ema += ((1 / rdt if rdt > 0 else self.fps) - self.fps_ema) * 0.1
+                if self.paused:
+                    self.offset -= dtm.timedelta(seconds=rdt)          # zegar stoi
+                else:
+                    self.offset += dtm.timedelta(seconds=rdt * (self.speed - 1))
+                now = dtm.datetime.now().astimezone() + self.offset
+                ANIM.update(fps=self.fps, tempo=self.tempo, text=self.text)
+                if self.host:
+                    PANEL["host"] = self.host
+                    st = NET.get("wled")
+                    if st and "bri" in st and st is not self._last_st:
+                        self._last_st = st
+                        PANEL["bri"] = st["bri"]
+                        self.lor = st.get("lor", 0)
+                c0 = time.monotonic()
+                if frame is None or not self.paused:
+                    # stały krok animacji = równe ruchy w każdej klatce (bez szarpania przy wahaniach zegara)
+                    dt = self.tempo / self.fps
+                    t += dt
+                    frame = self.render(now, t, dt)
+                out, data = self.limiter.apply(frame, 1 / self.fps)
+                name = self.cycle.current if self.mode == "cykl" else self.mode
+                pk = self.peak.get(name)
+                if not pk or pk[1] != PANEL["bri"] or self.limiter.raw > pk[0]:
+                    self.peak[name] = [round(self.limiter.raw), PANEL["bri"]]
+                self.send(data)
+                self.cost_ema += (time.monotonic() - c0 - self.cost_ema) * 0.1
+                self.screen(out, now)
+                nxt += 1 / self.fps
+                if nxt < time.monotonic():      # spóźnienie: nie nadrabiamy serią klatek (panel by ich nie pokazał)
+                    nxt = time.monotonic()
+                while self.running:
+                    wait = nxt - time.monotonic()
+                    if wait <= 0:
+                        break
+                    if select.select([fd], [], [], wait)[0]:
+                        for k in self.parse_keys(os.read(fd, 64).decode("utf-8", "ignore")):
+                            self.on_key(k)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            sys.stdout.write("\x1b[0m\x1b[?25h\x1b[?1049l")
+            sys.stdout.flush()
+            self.save()
+
+
+def strip_ansi(s):
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", s)
+
+
+def wrap(text, width):
+    return textwrap.wrap(" ".join(text.split()), width) or [""]
+
+
+# ================================================================ zapis podglądu (bez Pillow)
+def _scaled(rows, k):
+    """Wiersze pikseli powiększone k razy (każda dioda = kwadrat k x k)."""
+    return [[c for c in row for _ in range(k)] for row in rows for _ in range(k)]
+
+
+def save_png(path, rows, k=6):
+    rows = _scaled(rows, k)
+    w, h = len(rows[0]), len(rows)
+    raw = b"".join(b"\0" + bytes(v for c in row for v in c) for row in rows)
+    chunk = lambda t, d: len(d).to_bytes(4, "big") + t + d + zlib.crc32(t + d).to_bytes(4, "big")
+    with open(path, "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", w.to_bytes(4, "big") + h.to_bytes(4, "big") + b"\x08\x02\0\0\0")
+                 + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def _palette(rows):
+    """Do 256 kolorów na klatkę: wszystkie, a gdy jest ich więcej – podział „median cut” na 256 grup."""
+    count = {}
+    for row in rows:
+        for c in row:
+            count[c] = count.get(c, 0) + 1
+    if len(count) <= 256:
+        return list(count), {c: i for i, c in enumerate(count)}
+
+    def box(cs):
+        rng = [max(c[i] for c in cs) - min(c[i] for c in cs) for i in range(3)]
+        return max(rng), rng.index(max(rng)), cs
+
+    boxes = [box(list(count))]
+    while len(boxes) < 256:
+        i = max(range(len(boxes)), key=lambda j: boxes[j][0])
+        r, ch, cs = boxes[i]
+        if r == 0:
+            break
+        cs.sort(key=lambda c: c[ch])
+        boxes[i:i + 1] = [box(cs[:len(cs) // 2]), box(cs[len(cs) // 2:])]
+    pal, index = [], {}
+    for i, (_, _, cs) in enumerate(boxes):
+        n = sum(count[c] for c in cs)
+        pal.append(tuple(round(sum(c[k] * count[c] for c in cs) / n) for k in range(3)))
+        index.update((c, i) for c in cs)
+    return pal, index
+
+
+def _lzw(data, min_size):
+    """Kompresja LZW obrazka GIF."""
+    clear, eoi = 1 << min_size, (1 << min_size) + 1
+    size, nxt, table = min_size + 1, eoi + 1, {}
+    out, bits, nbits = bytearray(), 0, 0
+
+    def emit(code):
+        nonlocal bits, nbits
+        bits |= code << nbits
+        nbits += size
+        while nbits >= 8:
+            out.append(bits & 255)
+            bits >>= 8
+            nbits -= 8
+
+    emit(clear)
+    prefix = data[0]
+    for k in data[1:]:
+        key = prefix << 8 | k
+        code = table.get(key)
+        if code is not None:
+            prefix = code
+            continue
+        emit(prefix)
+        if nxt < 4096:
+            if nxt >= 1 << size:
+                size += 1
+            table[key] = nxt
+            nxt += 1
+        else:  # słownik pełny – od nowa
+            emit(clear)
+            size, nxt, table = min_size + 1, eoi + 1, {}
+        prefix = k
+    emit(prefix)
+    emit(eoi)
+    if nbits:
+        out.append(bits & 255)
+    return bytes(out)
+
+
+def save_gif(path, frames, k=6, ms=100):
+    """Animowany GIF w pętli; każda klatka ma własną paletę (do 256 kolorów)."""
+    w, h = len(frames[0][0]) * k, len(frames[0]) * k
+    out = bytearray(b"GIF89a" + w.to_bytes(2, "little") + h.to_bytes(2, "little") + b"\0\0\0")
+    out += b"\x21\xff\x0bNETSCAPE2.0\x03\x01\0\0\0"
+    for rows in frames:
+        pal, index = _palette(rows)
+        bits = max(1, (len(pal) - 1).bit_length())
+        data = [index[c] for row in _scaled(rows, k) for c in row]
+        out += b"\x21\xf9\x04\0" + max(2, round(ms / 10)).to_bytes(2, "little") + b"\0\0"
+        out += b"\x2c\0\0\0\0" + w.to_bytes(2, "little") + h.to_bytes(2, "little") + bytes([0x80 | (bits - 1)])
+        out += bytes(v for c in pal for v in c) + bytes(3 * ((1 << bits) - len(pal)))
+        lzw = _lzw(data, max(2, bits))
+        out.append(max(2, bits))
+        for i in range(0, len(lzw), 255):
+            out += bytes([len(lzw[i:i + 255])]) + lzw[i:i + 255]
+        out += b"\0"
+    out += b"\x3b"
+    with open(path, "wb") as fh:
+        fh.write(out)
+
+
+def main():
+    global LAT, LON
+    ap = argparse.ArgumentParser(description="Kreatywne zegary dla WLED 120x12")
+    ap.add_argument("--host", help="IP panelu WLED")
+    ap.add_argument("--mode", choices=list(CLOCKS) + ["cykl"], default="cykl")
+    ap.add_argument("--every", type=float, default=60, help="sekundy na zegar w trybie cykl")
+    ap.add_argument("--fps", type=float, default=20, help="klatki na sekundę (panel 120x12 na jednym pinie: max ~20)")
+    ap.add_argument("--width", type=int, help="ile kolumn panelu działa (np. 60 dla połowy); zapamiętywane")
+    ap.add_argument("--psu", type=int, help="budżet prądu zasilacza w mA (0 = bez limitu; domyślnie 2000)")
+    ap.add_argument("--panel-bri", type=int, help="jasność WLED 1-255 do modelu kolorów (domyślnie odczyt z panelu)")
+    ap.add_argument("--tempo", type=float, default=0.75, help="tempo animacji, np. 0.5 = dwa razy wolniej (domyślnie 0.75)")
+    ap.add_argument("--text-speed", type=float, default=2.0, help="mnożnik prędkości przewijanego tekstu (domyślnie 2)")
+    ap.add_argument("--speed", type=float, default=1.0, help="przyspieszenie czasu (test), np. 60")
+    ap.add_argument("--start", help="udawana godzina startu HH:MM:SS (test)")
+    ap.add_argument("--preview", help="zapisz animację GIF/PNG zamiast wysyłać")
+    ap.add_argument("--seconds", type=float, default=6, help="długość podglądu")
+    ap.add_argument("--no-tui", action="store_true", help="bez interfejsu, tylko wysyłanie (np. w tle / usłudze)")
+    ap.add_argument("--odbicie", action="store_true", help="obraz odbity w poziomie, np. gdy panel ogląda się przez kamerkę")
+    ap.add_argument("--bez-odbicia", dest="odbicie", action="store_false", help="wyłącz odbicie zapamiętane w ustawieniach")
+    ap.set_defaults(odbicie=None)
+    ap.add_argument("--lat", type=float, default=LAT, help="szerokość geogr. do pogody i słońca (domyślnie Warszawa)")
+    ap.add_argument("--lon", type=float, default=LON, help="długość geogr.")
+    ap.add_argument("--list", action="store_true", help="wypisz wszystkie efekty z opisami")
+    ap.add_argument("--kalibracja", action="store_true",
+                    help="wyślij na panel surowe przejścia jasności (czerwony, zielony, niebieski, biały) do sprawdzenia modelu kolorów")
+    cfg = {}
+    try:
+        with open(CONFIG, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        pass
+    ap.set_defaults(**{k: v for k, v in cfg.items() if k in ("host", "tempo", "text_speed", "fps", "every")})
+    if cfg.get("mode") in list(CLOCKS) + ["cykl"]:
+        ap.set_defaults(mode=cfg["mode"])
+    a = ap.parse_args()
+    if a.width and a.width != W:
+        cfg["width"] = a.width
+        try:
+            os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+            with open(CONFIG, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+        os.environ["WLED_W"] = str(a.width)
+        os.execv(sys.executable, [sys.executable] + sys.argv)   # efekty liczą układ z szerokości przy starcie
+    LAT, LON = a.lat, a.lon
+    ANIM.update(fps=a.fps, tempo=a.tempo, text=a.text_speed)
+    PANEL["bri"] = a.panel_bri or cfg.get("panel_bri", 255)
+    PANEL["levels"] = cfg.get("panel_levels")
+    PANEL["levels_bri"] = cfg.get("panel_levels_bri")
+    PANEL["pe"] = cfg.get("panel_pe", 1 / 2.2)
+    PANEL["mirror"] = a.odbicie if a.odbicie is not None else bool(cfg.get("mirror", False))
+    LUDZIK["lvl"] = {n: int(clamp(v, 0, 3)) for n, v in (cfg.get("ludzik_lvl") or {}).items() if n in LUDZIK_ACTS}
+    for n in cfg.get("ludzik_off", []):  # starszy zapis: lista wyłączonych
+        if n in LUDZIK_ACTS:
+            LUDZIK["lvl"].setdefault(n, 0)
+    LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
+    POWER["psu"] = a.psu if a.psu is not None else cfg.get("psu", 2000)
+    PANEL["ddp_w"] = W
+    if a.host:
+        try:
+            if not a.panel_bri:
+                PANEL["bri"] = http(f"http://{a.host}/json/state")["bri"]
+            PANEL["ddp_w"] = max(W, http(f"http://{a.host}/json/info")["leds"]["matrix"]["w"])
+        except Exception:  # noqa: BLE001
+            pass
+    if a.list:
+        for i, (n, c) in enumerate(CLOCKS.items(), 1):
+            print(f"{i:3d}. {n:12s} {' '.join((c.__doc__ or '').split())}")
+        return
+
+    if a.kalibracja:
+        if not a.host:
+            ap.error("podaj --host")
+        # oszczędnie: jeden wiersz na kolor i co druga dioda (ok. 1/6 prądu pełnego wzoru) – słaby zasilacz
+        # nie „przytnie” wtedy jasności i widać prawdziwe stopnie
+        data = bytearray()
+        rows = {1: (1, 0, 0), 4: (0, 1, 0), 7: (0, 0, 1), 10: (1, 1, 1)}
+        for y in range(H):
+            for x in range(W):
+                v = round(x * 255 / (W - 1)) if y in rows and x % 2 == 0 else 0
+                data += bytes(c * v for c in rows.get(y, (0, 0, 0)))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        print("Na panelu: 4 cienkie linie (czerwona, zielona, niebieska, biała), od lewej wartość 0 do 255.\n"
+              f"Model: {panel_levels()} stopnie jasności, granice co ok. {W // max(1, panel_levels())} diod.\n"
+              "Policz stopnie jasności w białym pasie i sprawdź, czy pierwsza dioda z lewej jest zgaszona. Ctrl+C kończy.")
+        try:
+            seq = 1
+            while True:
+                send_ddp(sock, a.host, bytes(data), seq)
+                seq = seq % 15 + 1
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            return
+
+    if not a.preview and not a.no_tui and sys.stdin.isatty() and sys.stdout.isatty():
+        tui = Tui(a, cfg)
+        tui.run()
+        if tui.new_width:
+            os.environ["WLED_W"] = str(tui.new_width)
+            os.execv(sys.executable, [sys.executable] + [x for x in sys.argv if not x.startswith("--width")])
+        return
+
+    clock = Cycle(a.every) if a.mode == "cykl" else CLOCKS[a.mode]()
+    real0 = dtm.datetime.now().astimezone()
+    base = real0
+    if a.start:
+        hh, mm, *ss = [int(v) for v in a.start.split(":")]
+        base = real0.replace(hour=hh, minute=mm, second=ss[0] if ss else 0, microsecond=0)
+
+    def now_at(t):
+        return base + dtm.timedelta(seconds=t * a.speed)
+
+    dt = a.tempo / a.fps
+    if a.preview:
+        imgs, n = [], int(a.seconds * a.fps)
+        clock.draw(Frame(), now_at(0), 0, dt)   # rozgrzewka: efekt zgłasza, jakich danych z sieci potrzebuje
+        NET.prefetch()
+        for i in range(n):
+            f = Frame()
+            clock.draw(f, now_at(i * dt), i * dt, dt)
+            if i % 2 == 0 or n < 3:
+                imgs.append(f.rgb_rows())
+        if a.preview.lower().endswith(".gif"):
+            save_gif(a.preview, imgs, 6, int(2000 / a.fps))
+        else:
+            save_png(a.preview, imgs[-1], 6)
+        return
+
+    if not a.host:
+        ap.error("podaj --host albo --preview")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    seq, t, t0, nxt = 1, 0.0, time.monotonic(), time.monotonic()
+    limiter = PowerLimiter()
+    try:
+        wled_state(a.host, {"lor": 0})
+    except Exception:  # noqa: BLE001
+        pass
+    while True:
+        t += dt                                       # stały krok animacji – bez szarpania
+        f = Frame()
+        clock.draw(f, dtm.datetime.now().astimezone() + (base - real0) + dtm.timedelta(
+            seconds=(time.monotonic() - t0) * (a.speed - 1)), t, dt)
+        f, data = limiter.apply(f, dt)
+        send_ddp(sock, a.host, data, seq)
+        seq = seq % 15 + 1
+        nxt += 1 / a.fps
+        time.sleep(max(0, nxt - time.monotonic()))
+        if nxt < time.monotonic():
+            nxt = time.monotonic()
+
+
+if __name__ == "__main__":
+    main()

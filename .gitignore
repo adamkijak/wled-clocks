@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.gif
+*.png
+!wled_clocks/icon.png
+!wled_clocks/logo.png
+.venv/
