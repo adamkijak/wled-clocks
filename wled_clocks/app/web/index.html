@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WLED zegary</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <h1>WLED zegary</h1>
+  <span id="send-state" class="pill">…</span>
+  <span id="host" class="muted"></span>
+  <span id="clock" class="clock"></span>
+  <span id="badges"></span>
+</header>
+
+<div id="override" class="banner" hidden>
+  WLED pokazuje własny efekt (nadpisanie strumienia).
+  <button data-op="override">Przywróć obraz ze skryptu</button>
+</div>
+
+<main>
+  <section class="panel-wrap">
+    <canvas id="panel" aria-label="Podgląd panelu na żywo"></canvas>
+  </section>
+
+  <section class="controls">
+    <button data-op="skip" data-d="-1" title="Poprzedni (←)">◀ Poprzedni</button>
+    <button id="btn-pause" data-op="pause" title="Pauza (spacja)">⏸ Pauza</button>
+    <button data-op="skip" data-d="1" title="Następny (→)">Następny ▶</button>
+    <button id="btn-cycle" data-select="cykl" title="Cykl (c)">↻ Cykl</button>
+    <button id="btn-send" data-op="send" title="Wysyłanie on/off (s)">● Wysyłanie</button>
+    <button id="btn-mirror" data-op="mirror" title="Odbicie lustrzane (m)">⇋ Odbicie</button>
+  </section>
+
+  <section class="now">
+    <div><strong id="now-name"></strong> <span id="now-cycle" class="muted"></span></div>
+    <p id="now-doc" class="muted"></p>
+  </section>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card-head">
+        <h2>Efekty</h2>
+        <input id="search" type="search" placeholder="Szukaj po nazwie i opisie…" autocomplete="off">
+      </div>
+      <ol id="list" class="list"></ol>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Ustawienia</h2></div>
+      <div id="settings" class="settings"></div>
+      <div id="acts" class="acts" hidden>
+        <div class="card-head">
+          <h3>Zajęcia ludzika</h3>
+          <button id="acts-close" class="small">Zamknij</button>
+        </div>
+        <div id="acts-list"></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card stats">
+    <div id="stat-power"></div>
+    <div id="stat-panel"></div>
+    <div id="stat-fps"></div>
+    <div id="stat-net" class="muted"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -38,6 +38,7 @@ Przykłady:
 WLED: Config > Sync Interfaces > "Receive UDP realtime" włączone (DDP, port 4048).
 """
 import argparse
+import base64
 import datetime as dtm
 import math
 import os
@@ -54,6 +55,7 @@ import textwrap
 import time
 import tty
 import html
+import http.server as httpd  # „http” to w tym pliku funkcja pobierająca dane
 import json
 import threading
 import unicodedata
@@ -5766,6 +5768,164 @@ def wrap(text, width):
     return textwrap.wrap(" ".join(text.split()), width) or [""]
 
 
+# ================================================================ panel WWW (np. Home Assistant Ingress)
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+WEB_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8",
+             "style.css": "text/css; charset=utf-8"}
+
+
+def web_cmd(e, c):
+    """Polecenie z panelu WWW -> funkcja do wykonania w wątku klatek; ValueError = złe polecenie."""
+    op = c.get("op")
+    d = 1 if int(c.get("d", 1)) > 0 else -1
+    simple = {"pause": e.toggle_pause, "send": e.toggle_send, "mirror": e.toggle_mirror, "shuffle": e.toggle_shuffle,
+              "override": e.override_off, "realtime": e.real_time}
+    if op in simple:
+        return simple[op]
+    if op == "select":
+        name = c.get("name")
+        if name not in e.NAMES:
+            raise ValueError(f"nie ma efektu {name!r}")
+        return lambda: e.select(name)
+    if op == "skip":
+        return lambda: e.skip(d)
+    if op == "every":
+        return lambda: e.every_step(d)
+    if op == "speed":
+        return lambda: e.speed_step(d)
+    if op == "setting":
+        name = c.get("name")
+        if name not in [s[0] for s in e.settings]:
+            raise ValueError(f"nie ma ustawienia {name!r}")
+        return lambda: e.setting(name, d)
+    if op == "host":
+        host = str(c.get("host", "")).strip()
+        if len(host) > 64 or not re.fullmatch(r"[A-Za-z0-9.:\-\[\]]*", host):
+            raise ValueError("zły adres hosta")
+        return lambda: e.set_host(host)
+    if op == "ludzik":
+        act, lvl = c.get("act"), int(c.get("lvl", 2))
+        if act not in LUDZIK_ACTS or not 0 <= lvl <= 3:
+            raise ValueError("złe zajęcie ludzika")
+        return lambda: LUDZIK["lvl"].__setitem__(act, lvl)
+    raise ValueError(f"nieznane polecenie {op!r}")
+
+
+class WebHandler(httpd.BaseHTTPRequestHandler):
+    """Ścieżki dopasowujemy po końcówce, bo Ingress HA (i inne proxy) mogą dokładać prefiks – strona używa
+    wyłącznie względnych adresów."""
+
+    engine = None
+    server_version = "wled-clocks"
+
+    def log_message(self, fmt, *args):  # bez logu każdego zapytania
+        pass
+
+    def route(self):
+        parts = urllib.parse.urlsplit(self.path).path.split("/")
+        if len(parts) >= 3 and parts[-2] == "api":
+            return "api", parts[-1]
+        return "file", parts[-1] or "index.html"
+
+    def reply(self, code, body, ctype="application/json; charset=utf-8"):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body, ensure_ascii=False)
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def watch(self):
+        """Ktoś patrzy: silnik liczy podgląd i stan; czeka chwilę na pierwszy."""
+        e = self.engine
+        e.view_until = time.monotonic() + 3
+        end = time.monotonic() + 1.5
+        while (e.snap is None or e.view is None) and time.monotonic() < end:
+            time.sleep(0.02)
+
+    def do_GET(self):
+        kind, name = self.route()
+        e = self.engine
+        if kind == "file":
+            if name not in WEB_FILES:
+                return self.reply(404, {"error": "nie ma"})
+            try:
+                with open(os.path.join(WEB_DIR, name), "rb") as fh:
+                    return self.reply(200, fh.read(), WEB_FILES[name])
+            except OSError:
+                return self.reply(500, {"error": f"brak pliku web/{name}"})
+        if name == "clocks":
+            return self.reply(200, {"names": e.NAMES, "docs": {n: " ".join(e.doc(n).split()) for n in e.NAMES},
+                                    "ludzik_acts": LUDZIK_ACTS, "ludzik_lvl": LUDZIK_LVL})
+        if name == "state":
+            self.watch()
+            return self.reply(200, e.snap or {})
+        if name == "frame":
+            self.watch()
+            return self.reply(200, e.view or b"", "application/octet-stream")
+        if name == "stream":
+            return self.stream()
+        self.reply(404, {"error": "nie ma"})
+
+    def do_POST(self):
+        kind, name = self.route()
+        if (kind, name) != ("api", "cmd"):
+            return self.reply(404, {"error": "nie ma"})
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            if n > 4096:
+                raise ValueError("za długie")
+            fn = web_cmd(self.engine, json.loads(self.rfile.read(n) or b"{}"))
+        except (ValueError, TypeError, AttributeError) as ex:
+            return self.reply(400, {"ok": False, "error": str(ex)})
+        self.engine.cmds.put(fn)
+        self.reply(200, {"ok": True})
+
+    def stream(self):
+        """Server-Sent Events: podgląd ok. 10 razy na sekundę (base64 RGB, W x H x 3) i stan, gdy się zmieni."""
+        e = self.engine
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        last_view, last_snap, ping = None, None, 0.0
+        try:
+            while e.running:
+                e.view_until = time.monotonic() + 2
+                out = []
+                v, sn = e.view, e.snap
+                if v is not None and v is not last_view:
+                    last_view = v
+                    out.append("event: frame\ndata: " + base64.b64encode(v).decode() + "\n\n")
+                if sn is not None:
+                    js = json.dumps(sn, ensure_ascii=False)
+                    if js != last_snap:
+                        last_snap = js
+                        out.append("event: state\ndata: " + js + "\n\n")
+                if not out and time.monotonic() > ping:
+                    out.append(": ping\n\n")
+                if out:
+                    self.wfile.write("".join(out).encode("utf-8"))
+                    self.wfile.flush()
+                    ping = time.monotonic() + 15
+                time.sleep(0.05)
+        except OSError:  # przeglądarka zamknęła połączenie
+            pass
+
+
+def start_web(engine, port, bind="127.0.0.1"):
+    WebHandler.engine = engine
+    srv = httpd.ThreadingHTTPServer((bind, port), WebHandler)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
 # ================================================================ zapis podglądu (bez Pillow)
 def _scaled(rows, k):
     """Wiersze pikseli powiększone k razy (każda dioda = kwadrat k x k)."""
@@ -5890,6 +6050,10 @@ def main():
     ap.add_argument("--preview", help="zapisz animację GIF/PNG zamiast wysyłać")
     ap.add_argument("--seconds", type=float, default=6, help="długość podglądu")
     ap.add_argument("--no-tui", action="store_true", help="bez interfejsu, tylko wysyłanie (np. w tle / usłudze)")
+    ap.add_argument("--web", type=int, metavar="PORT",
+                    help="panel WWW na tym porcie (np. 8099); w terminalu działa razem z TUI, z --no-tui sam")
+    ap.add_argument("--web-bind", default="127.0.0.1",
+                    help="adres nasłuchu panelu WWW (domyślnie tylko ten komputer; 0.0.0.0 = cała sieć)")
     ap.add_argument("--odbicie", action="store_true", help="obraz odbity w poziomie, np. gdy panel ogląda się przez kamerkę")
     ap.add_argument("--bez-odbicia", dest="odbicie", action="store_false", help="wyłącz odbicie zapamiętane w ustawieniach")
     ap.set_defaults(odbicie=None)
@@ -5968,11 +6132,22 @@ def main():
         except KeyboardInterrupt:
             return
 
-    if not a.preview and not a.no_tui and sys.stdin.isatty() and sys.stdout.isatty():
-        tui = Tui(a, cfg)
-        tui.run()
-        if tui.new_width:
-            os.environ["WLED_W"] = str(tui.new_width)
+    interactive = not a.no_tui and sys.stdin.isatty() and sys.stdout.isatty()
+    if not a.preview and (interactive or a.web):
+        eng = Tui(a, cfg) if interactive else Engine(a, cfg)
+        if a.web:
+            try:
+                start_web(eng, a.web, a.web_bind)
+            except OSError as e:
+                ap.error(f"nie mogę uruchomić panelu WWW na {a.web_bind}:{a.web}: {e}")
+        if interactive:
+            eng.run()
+        else:
+            print(f"panel WWW: http://{a.web_bind}:{a.web}/  (host WLED: {eng.host or 'brak – ustaw w panelu'})", flush=True)
+            signal.signal(signal.SIGTERM, lambda *_: setattr(eng, "running", False))  # stop add-onu: zapisz i wyjdź
+            eng.run_headless()
+        if eng.new_width:
+            os.environ["WLED_W"] = str(eng.new_width)
             os.execv(sys.executable, [sys.executable] + [x for x in sys.argv if not x.startswith("--width")])
         return
 
