@@ -1,0 +1,21 @@
+name: WLED zegary
+version: "1.0.0"
+slug: wled_clocks
+description: 101 zegarów i efektów dla panelu WLED (DDP) ze sterowaniem w pasku bocznym Home Assistant
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:clock-digital
+panel_title: WLED zegary
+homeassistant_api: true  # tylko odczyt położenia domu (pogoda, słońce), gdy lat/lon puste
+options:
+  host: ""
+schema:
+  host: str?
+  lat: float?
+  lon: float?
