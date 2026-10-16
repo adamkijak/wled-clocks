@@ -1,6 +1,6 @@
 # WLED zegary
 
-103 zegary i efekty dla panelu WLED 120x12, wysyłanych protokołem DDP. Po starcie add-onu w pasku bocznym
+104 zegary i efekty dla panelu WLED 120x12, wysyłanych protokołem DDP. Po starcie add-onu w pasku bocznym
 Home Assistant pojawia się **WLED zegary**: podgląd panelu na żywo, lista efektów z wyszukiwarką, cykl, pauza
 i wszystkie ustawienia znane z TUI.
 
@@ -57,6 +57,20 @@ adres nadawcy w nagłówku (Cloudflare) – inaczej limity da się obejść.
 Przycisk **● Wysyłanie** w panelu (albo klawisz `s`) wstrzymuje wysyłanie klatek DDP – po chwili WLED wraca do
 własnego efektu. Stan jest zapamiętywany, więc wyłączone wysyłanie zostaje wyłączone także po restarcie dodatku.
 Całkiem wyłączyć można też przez zatrzymanie dodatku.
+
+## Kolory: podgląd = panel
+
+Diody WS2812 mają inne barwy niż monitor: czerwony jest głębszy, a zielony daje mniejszą część jasności, więc kolor
+„czerwony z odrobiną zielonego” na panelu wygląda czerwono, a na ekranie pomarańczowo. Podgląd przelicza to według
+typowych diod WS2812.
+
+1. Włącz efekt **kolory** (ostatni na liście) i porównaj panel z podglądem.
+2. Jeśli się różnią, przesuwaj w jego ustawieniach „diody: zielony” (pomarańczowy i żółty na panelu czerwieńsze niż
+   w podglądzie → w lewo) i „diody: niebieski” (biel na panelu bardziej niebieska → w prawo).
+3. Chcesz, żeby na panelu pomarańczowy był pomarańczowy, a biel neutralna? Włącz **popraw kolory** w ustawieniach
+   wspólnych – skrypt przeliczy kolory pod diody (podgląd pokazuje wtedy też wynik poprawki).
+
+Przy małej jasności WLED panel ma mało poziomów na kanał, więc odcienie są przybliżone.
 
 ## Efekty wbudowane w WLED
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-103 kreatywne zegary i efekty dla panelu WLED 120x12 (wysyłanie klatek protokołem DDP).
+104 kreatywne zegary i efekty dla panelu WLED 120x12 (wysyłanie klatek protokołem DDP).
 Tylko biblioteka standardowa Pythona 3.8+ – bez żadnych dodatkowych pakietów (podgląd GIF/PNG też).
 
   python3 wled_clocks.py --list     – pełna lista ze opisami
@@ -16,7 +16,7 @@ Kategorie:
   * style zegarów (38-69): binarny, analogowy, slownie, rzymski, morse, klepsydra, postep, kalendarz,
       odliczanie, nixie, segmenty, klapki, lustro, cien, tetris, hex, kolor, dziesietny, beaty, unix,
       strefy, obwod, wahadlo, fala, glitch, neon, pismo, kreskowy, maszyna, radar, domino, ksiezyc
-  * sceny, symulacje i gry (70-103): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
+  * sceny, symulacje i gry (70-103), kolory (104, test do kalibracji): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
       dym, kalejdoskop, labirynt, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, pociag, miasto,
       las, gory, dna, oscyloskop, equalizer, ekg, mrowka, piasek, kule, kregi, wir, synthwave, pory, planety
   * cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
@@ -397,12 +397,17 @@ class Frame:
 
     def to_bytes(self):
         q = panel_q()
-        out = bytearray()
+        fix = led_fix if COLOR["fix"] else None
+        out, lut = bytearray(), {}  # lut: kolor -> 3 bajty (w klatce zwykle mało różnych kolorów)
         for y, row in enumerate(self.rgb_rows()):
             if SERPENTINE and y % 2:
                 row = row[::-1]
             for c in row:
-                out += bytes((q[c[0]], q[c[1]], q[c[2]]))
+                px = lut.get(c)
+                if px is None:
+                    s = fix(c) if fix else c
+                    px = lut[c] = bytes((q[s[0]], q[s[1]], q[s[2]]))
+                out += px
             pad = PANEL.get("ddp_w", W) - W
             if pad > 0:
                 out += bytes(3 * pad)
@@ -456,15 +461,83 @@ def panel_q(lv=None):
     return panel_model(lv)[0]
 
 
+# Barwy diod WS2812 to nie barwy monitora: czerwony głębszy, a zielony daje dużo mniejszą część jasności bieli niż
+# na ekranie – mieszanka „czerwony + trochę zielonego” na diodach wygląda czerwono, na ekranie pomarańczowo.
+LED_XY = ((0.69, 0.31), (0.17, 0.72), (0.13, 0.07))  # chromatyczność diody czerwonej, zielonej, niebieskiej (~625/520/470 nm)
+LED_Y = (1.0, 2.27, 0.43)  # jasność kanałów: z karty katalogowej (1 : 1,7 : 0,47) dopasowana do bieli ok. 9000 K
+COLOR = {"r": 1.0, "g": 1.0, "b": 1.0, "fix": False}  # kalibracja jasności kanałów (efekt „kolory”); fix = popraw kolory
+COLOR_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
+_SRGB = ((3.2406, -1.5372, -0.4986), (-0.9689, 1.8758, 0.0415), (0.0557, -0.2040, 1.0570))  # XYZ -> liniowe sRGB
+_LEDM, _FIX = {}, {}
+
+
+def _inv3(m):
+    (a, b, c), (d, e, f), (g, h, i) = m
+    det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    return [[(e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det],
+            [(f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det],
+            [(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det]]
+
+
+def led_matrix():
+    """(m, odwrotność): m[i][j] = ile liniowej składowej i monitora daje kanał j diody; biel diod -> najjaśniejsza
+    składowa 1. Przelicza się przy zmianie kalibracji."""
+    key = (COLOR["r"], COLOR["g"], COLOR["b"])
+    if key not in _LEDM:
+        cols = []
+        for (x, y), lum, k in zip(LED_XY, LED_Y, key):
+            Y = lum * k
+            xyz = (x / y * Y, Y, (1 - x - y) / y * Y)
+            cols.append([sum(a * v for a, v in zip(row, xyz)) for row in _SRGB])
+        top = max(sum(col[i] for col in cols) for i in range(3))
+        m = [[cols[j][i] / top for j in range(3)] for i in range(3)]
+        _LEDM.clear()
+        _FIX.clear()
+        _LEDM[key] = (m, _inv3(m))
+    return _LEDM[key]
+
+
+def led_fix(c):
+    """„popraw kolory”: co wysłać, żeby dioda wyglądała jak kolor c na ekranie (pomarańczowy = pomarańczowy,
+    biel neutralna zamiast niebieskawej). Kolory spoza zasięgu diod – najbliższe możliwe."""
+    inv = led_matrix()[1]
+    r = _FIX.get(c)
+    if r is None:
+        t = [(v / 255) ** 2.2 for v in c]
+        d = [max(0.0, sum(a * v for a, v in zip(row, t))) for row in inv]
+        top = max(d)
+        d = [v / top for v in d] if top > 1 else d
+        r = tuple(round(255 * v ** (1 / 2.2)) for v in d)
+        if len(_FIX) > 4096:
+            _FIX.clear()
+        _FIX[c] = r
+    return r
+
+
 def panel_view(rows, lv=None):
-    """Co naprawdę zobaczy oko na panelu (do podglądu)."""
+    """Co naprawdę zobaczy oko na panelu (do podglądu): poziomy, na jakie panel zapali kanały przy tej jasności WLED,
+    i barwy diod WS2812 przeliczone na barwy monitora (także po „popraw kolory”)."""
     lv = panel_levels() if lv is None else lv
-    q, seen = panel_model(lv)
-    if lv >= 255:
-        lut = [round(255 * seen[v]) for v in range(256)]
-    else:
-        lut = [round(255 * seen[panel_level(q[v], lv)]) for v in range(256)]
-    return [[(lut[r], lut[g], lut[b]) for r, g, b in row] for row in rows]
+    q = panel_model(lv)[0]
+    k = panel_pe() * 2.2  # 1 = światło diody rośnie liniowo z poziomem
+    top = lv if lv < 255 else 255
+    lin = [((panel_level(q[v], lv) if lv < 255 else v) / top) ** k for v in range(256)]
+    m = led_matrix()[0]
+    fix = led_fix if COLOR["fix"] else None
+    cache, out = {}, []
+    for row in rows:
+        o = []
+        for c in row:
+            p = cache.get(c)
+            if p is None:
+                ch = [lin[v] for v in (fix(c) if fix else c)]
+                d = [max(0.0, sum(a * x for a, x in zip(r_, ch))) for r_ in m]
+                hi = max(d)
+                d = [x / hi for x in d] if hi > 1 else d
+                p = cache[c] = tuple(round(255 * x ** (1 / 2.2)) for x in d)
+            o.append(p)
+        out.append(o)
+    return out
 
 
 def visible(c, level=6):
@@ -5128,6 +5201,25 @@ class PlainClock(Clock):
         f.text(hms, x, 1, c, BIG)  # wszystko jednym kolorem
 
 
+# ---------------------------------------------------------------- test kolorów (kalibracja podglądu)
+TEST_COLORS = [("czerwony", (255, 0, 0)), ("pomarańczowy", (255, 120, 0)), ("żółty", (255, 220, 0)),
+               ("zielony", (0, 255, 0)), ("błękitny", (0, 200, 255)), ("niebieski", (0, 0, 255)),
+               ("fioletowy", (180, 0, 255)), ("biały", (255, 255, 255))]
+
+
+@reg("kolory")
+class ColorTest(Clock):
+    """Test kolorów: 8 pasów (czerwony, pomarańczowy, żółty, zielony, błękitny, niebieski, fioletowy, biały), u góry
+    pełne, u dołu przygaszone. Do kalibracji: ustawienia „diody: …” dopasowują podgląd do tego, co widać na panelu."""
+
+    def draw(self, f, now, t, dt):
+        n = len(TEST_COLORS)
+        for i, (_, c) in enumerate(TEST_COLORS):
+            x0, x1 = i * W // n, (i + 1) * W // n - 2
+            f.rect(x0, 0, x1, 5, c)
+            f.rect(x0, 7, x1, 11, mul(c, 0.5))
+
+
 # ---------------------------------------------------------------- wiadomości od widzów
 ENVELOPE = ["YYYYYYYYYYY", "DDYYYYYYYDD", "YDDYYYYYDDY", "YYDDYYYDDYY", "YYYDDYDDYYY", "YYYYDDDYYYY",
             "YYYYYYYYYYY", "YYYYYYYYYYY"]
@@ -5258,7 +5350,8 @@ class Engine:
     PREVIEWS = ["włączony", "wyłączony"]
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
-                  "ludzik co ile": "ludzik", "barwa": "zegar", "temperatura": "zegar"}
+                  "ludzik co ile": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
+                  "diody: zielony": "kolory", "diody: niebieski": "kolory"}
 
     def __init__(self, a, cfg):
         self.host = a.host or ""
@@ -5388,6 +5481,12 @@ class Engine:
         def s_lfreq(d):
             LUDZIK["freq"] = max(0, min(len(LUDZIK_FREQ) - 1, LUDZIK["freq"] + d))
 
+        def s_led(ch):
+            return lambda d: COLOR.update({ch: self.step_in(COLOR_STEPS, COLOR[ch], d)})
+
+        def s_fix(d):
+            COLOR["fix"] = not COLOR["fix"]
+
         def s_hue(d):
             CLOCK["hue"] = (CLOCK["hue"] + d) % len(CLOCK_HUES)
 
@@ -5415,7 +5514,12 @@ class Engine:
                 s_width(1)
 
         x = lambda v: f"x{v:g}"
-        self.choices = {  # ustawienia z listą wartości – w panelu WWW suwak albo lista zamiast strzałek
+        led = lambda ch: opt(COLOR_STEPS, lambda: COLOR[ch], lambda v: COLOR.update({ch: v}), x, "range")
+        self.choices = {
+            "popraw kolory": flag(lambda: COLOR["fix"], lambda v: COLOR.update(fix=v)),
+            "diody: czerwony": led("r"),
+            "diody: zielony": led("g"),
+            "diody: niebieski": led("b"),  # ustawienia z listą wartości – w panelu WWW suwak albo lista zamiast strzałek
             "jasność WLED": opt(bris, lambda: PANEL["bri"], put_bri, lambda v: f"{v}/255", "range"),
             "zasilacz": opt(psus, lambda: POWER["psu"], lambda v: POWER.update(psu=v),
                             lambda v: f"{v / 1000:g} A" if v else "bez limitu"),
@@ -5449,6 +5553,8 @@ class Engine:
              "jedna dla wszystkich efektów (jasność w WLED)"),
             ("zasilacz", lambda: f"{POWER['psu'] / 1000:g} A" if POWER["psu"] else "bez limitu", s_psu,
              "budżet prądu (ok. 85% zasilacza)"),
+            ("popraw kolory", lambda: "włączone" if COLOR["fix"] else "wyłączone", s_fix,
+             "przelicza kolory pod diody: pomarańczowy wygląda na pomarańczowy, biel neutralna; wyłączone = surowe barwy"),
             ("auto przyciemnianie", lambda: "włączone" if POWER["auto"] else "wyłączone", s_autodim,
              "gdy efekt chce więcej prądu niż zasilacz; wyłączone = pełna jasność – uważaj na zasilacz"),
             ("ciężkie efekty", lambda: "pomijaj w cyklu" if self.skip_heavy else "pokazuj", s_heavy, "⚡ = nie mieszczą się w budżecie"),
@@ -5468,6 +5574,10 @@ class Engine:
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
             ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
+            ("diody: czerwony", lambda: f"x{COLOR['r']:g}", s_led("r"), "jasność kanału w podglądzie – dopasuj do panelu"),
+            ("diody: zielony", lambda: f"x{COLOR['g']:g}", s_led("g"),
+             "gdy pomarańczowy/żółty na panelu jest czerwieńszy niż w podglądzie – w lewo"),
+            ("diody: niebieski", lambda: f"x{COLOR['b']:g}", s_led("b"), "gdy biel na panelu jest bardziej niebieska – w prawo"),
             ("wysyłanie", lambda: "włączone" if self.sending else "wyłączone", s_send, "s"),
             ("host", lambda: self.host or "(brak)", s_host, "h, Enter = zmień"),
             ("szerokość", lambda: f"{W} kolumn", s_width, "Enter = 60/120 (np. gdy działa połowa panelu), restart"),
@@ -5553,7 +5663,8 @@ class Engine:
                "psu": POWER["psu"], "auto_dim": POWER["auto"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"],
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
-               "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"]}
+               "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
+               "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"]}
         try:
             os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
             with open(CONFIG, "w", encoding="utf-8") as fh:
@@ -6952,6 +7063,10 @@ def main():
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
+    rgb = cfg.get("led_rgb")
+    if isinstance(rgb, list) and len(rgb) == 3 and all(v in COLOR_STEPS for v in rgb):
+        COLOR.update(r=rgb[0], g=rgb[1], b=rgb[2])
+    COLOR["fix"] = bool(cfg.get("color_fix", False))
     POWER["psu"] = a.psu if a.psu is not None else cfg.get("psu", 2000)
     POWER["auto"] = bool(cfg.get("auto_dim", True))
     INBOX.port, INBOX.bind, INBOX.public, INBOX.proxy = a.msg_port, a.msg_bind, a.msg_public.strip(), a.msg_proxy

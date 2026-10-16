@@ -46,7 +46,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ludzik_first(self):
         self.assertEqual(wc.Engine.NAMES[:3], ["ludzik", "zegar", "napisz"])
-        self.assertEqual(len(wc.CLOCKS), 103)
+        self.assertEqual(len(wc.CLOCKS), 104)
 
     def test_ludzik_rides(self):
         old = dict(wc.LUDZIK["lvl"]), wc.LUDZIK["freq"]
@@ -203,6 +203,47 @@ class EngineTest(unittest.TestCase):
             for d, old in zip((wc.PANEL, wc.POWER, wc.CLOCK, wc.LUDZIK), saved):
                 d.clear()
                 d.update(old)
+
+    def test_preview_like_ws2812(self):
+        """Podgląd = barwy diod: czerwony z odrobiną zielonego jest na diodach czerwieńszy niż na ekranie, biel
+        niebieskawa; „popraw kolory” wysyła tak, żeby panel wyglądał jak zamierzony kolor."""
+        import colorsys
+        hue = lambda c: colorsys.rgb_to_hsv(*[v / 255 for v in c])[0] * 360
+        saved = dict(wc.PANEL), dict(wc.COLOR)
+        try:
+            wc.PANEL.update(bri=24, levels=None)
+            orange, white = (255, 120, 0), (255, 255, 255)
+            view = lambda c: wc.panel_view([[c]])[0][0]
+            self.assertLess(hue(view(orange)), hue(orange) - 5)            # na diodach czerwieńszy
+            self.assertEqual(view((255, 0, 0)), (255, 0, 0))
+            w = view(white)
+            self.assertGreater(w[2], w[0])                                  # biel WS2812 – niebieskawa
+            self.assertEqual(view((0, 0, 0)), (0, 0, 0))
+            wc.COLOR["fix"] = True
+            self.assertLess(abs(hue(view(orange)) - hue(orange)), 8)        # po poprawce ≈ zamierzony (24 poziomy)
+            w = view(white)
+            self.assertLess(max(w) - min(w), 25)                            # biel neutralna
+            f = wc.Frame(orange)
+            wc.COLOR["fix"] = False
+            raw = f.to_bytes()
+            wc.COLOR["fix"] = True
+            self.assertNotEqual(f.to_bytes(), raw)                          # wysyłamy co innego
+            wc.COLOR["fix"] = False
+            before = hue(view(orange))
+            wc.COLOR["g"] = 0.5                                             # kalibracja: słabsza zieleń
+            self.assertLess(hue(view(orange)), before)                      # -> pomarańczowy czerwieńszy
+            e = wc.Engine(args(mode="kolory"), {})
+            self.assertIn("diody: zielony", [st[0] for st in e.shown_settings()])
+            e.pick("diody: zielony", 0)
+            e.setting("popraw kolory", 1)
+            e.save()
+            with open(wc.CONFIG, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            self.assertEqual((cfg["led_rgb"][1], cfg["color_fix"]), (0.5, True))
+        finally:
+            for dct, old in zip((wc.PANEL, wc.COLOR), saved):
+                dct.clear()
+                dct.update(old)
 
     def test_view_only_when_watched(self):
         e = wc.Engine(args(), {})

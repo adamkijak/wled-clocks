@@ -1,5 +1,14 @@
 # Zmiany
 
+## 1.3.0
+
+- Podgląd pokazuje kolory jak diody WS2812, nie jak monitor: mieszanki z zielonym są na diodach czerwieńsze
+  (np. pomarańczowy wygląda prawie na czerwony), biel niebieskawa.
+- Nowy efekt **kolory** (ostatni na liście): pasy testowe i ustawienia „diody: czerwony/zielony/niebieski” do
+  dopasowania podglądu do własnego panelu.
+- Przełącznik „popraw kolory” (ustawienia wspólne): skrypt przelicza kolory pod diody, żeby pomarańczowy był
+  pomarańczowy, a biel neutralna. Domyślnie wyłączony.
+
 ## 1.2.0
 
 - Ustawienia w panelu WWW: suwaki (jasność, tempo, fps, przenikanie, cykl co, temperatura) i listy rozwijane
