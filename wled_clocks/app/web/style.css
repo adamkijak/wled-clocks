@@ -127,6 +127,8 @@ main > *, .cols > * { min-width: 0; }
 .list li .heavy { color: var(--warn); }
 
 .settings { display: grid; gap: 2px; }
+.card-head.common { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+#fx-none { margin: 0; }
 .srow {
   display: grid;
   grid-template-columns: minmax(110px, 0.9fr) auto minmax(0, 1.3fr) auto;

@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.1.2
+
+- Ustawienia w panelu (i w TUI): u góry tylko ustawienia efektu, który jest na panelu (ludzik, zegar, cykl),
+  pod nimi wspólne dla wszystkich efektów.
+- Zegar: barwa do wyboru (pora dnia albo stały kolor). Zegar nie przygasza się już sam wieczorem – jasność jest
+  jedna dla wszystkich efektów (ustawienie „jasność WLED”).
+
 ## 1.1.1
 
 - Zegar: dzień tygodnia z polskimi znakami (PIĄTEK, ŚRODA).

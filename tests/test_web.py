@@ -73,16 +73,42 @@ class EngineTest(unittest.TestCase):
         self.assertTrue(plain < pl)                                     # te same litery i coś więcej
         self.assertEqual({y for _, y in pl - plain}, {0, 6})            # kreska nad napisem, ogonek pod nim
 
-    def test_plain_clock_follows_sun(self):
-        noon = wc.grad(wc.DAYLIGHT, 40)
-        evening = wc.grad(wc.DAYLIGHT, -2)
-        night = wc.grad(wc.DAYLIGHT, -30)
+    def test_plain_clock_hue_without_dimming(self):
+        noon, evening, night = (wc.grad(wc.DAYLIGHT, v) for v in (40, -2, -30))
         self.assertEqual(noon, (255, 255, 255))
-        self.assertGreater(evening[0] - evening[2], 100)          # ciepły
-        self.assertLess(sum(night), sum(evening))                   # w nocy przygaszony
-        f = wc.Frame()
-        wc.CLOCKS["zegar"]().draw(f, wc.dtm.datetime.now().astimezone(), 0.0, 0.05)
-        self.assertTrue(any(c != (0, 0, 0) for row in f.px for c in row))
+        self.assertGreater(evening[0] - evening[2], 100)                    # wieczorem ciepły
+        for c in (noon, evening, night):
+            self.assertEqual(max(c), 255)                                   # jasność tylko globalna
+        now = wc.dtm.datetime.now().astimezone()
+        try:
+            wc.CLOCK["hue"] = [n for n, _ in wc.CLOCK_HUES].index("niebieski")
+            f = wc.Frame()
+            wc.CLOCKS["zegar"]().draw(f, now, 0.0, 0.05)
+            self.assertEqual({c for row in f.px for c in row} - {(0, 0, 0)}, {(40, 110, 255)})
+        finally:
+            wc.CLOCK["hue"] = 0
+
+    def test_settings_only_for_current_effect(self):
+        e = wc.Engine(args(mode="zegar"), {})
+        names = lambda: [st[0] for st in e.shown_settings()]
+        self.assertIn("barwa", names())
+        self.assertNotIn("ludzik zajęcia", names())
+        self.assertEqual(names()[0], "jasność WLED")                       # wspólne na górze
+        e.select("ludzik")
+        self.assertIn("ludzik co ile", names())
+        self.assertNotIn("barwa", names())
+        e.select("cykl")
+        self.assertIn("cykl co", names())
+        e.setting("barwa", 1)
+        self.assertEqual(wc.CLOCK_HUES[wc.CLOCK["hue"]][0], "biały")
+        e.save()
+        with open(wc.CONFIG, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["zegar_barwa"], "biały")
+        wc.CLOCK["hue"] = 0
+        e.view_until = time.monotonic() + 1
+        e.tick()
+        self.assertIn("cykl", e.snap["setting_fx"])
+        self.assertEqual({x["name"]: x["fx"] for x in e.snap["settings"]}["barwa"], "zegar")
 
     def test_sending_off_survives_restart(self):
         e = wc.Engine(args(host="127.0.0.1"), {})

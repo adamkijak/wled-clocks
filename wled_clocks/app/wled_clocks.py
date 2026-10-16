@@ -5056,18 +5056,24 @@ LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, *Worker.RIDES, "tr
 
 
 # ---------------------------------------------------------------- zwykły zegar w kolorze pory dnia
-DAYLIGHT = [  # wysokość słońca (stopnie) -> kolor: noc przygaszona bursztynowa, zmierzch ciepły żółty, południe białe
-    (-12, (150, 105, 30)), (-4, (195, 145, 50)), (2, (235, 190, 90)), (12, (250, 232, 185)), (30, (255, 255, 255)),
+DAYLIGHT = [  # wysokość słońca (stopnie) -> odcień: noc bursztynowa, zmierzch ciepły żółty, południe białe;
+    # zawsze pełna jasność – jasność jest jedna dla wszystkich efektów (ustawienie „jasność WLED”)
+    (-12, (255, 170, 45)), (-4, (255, 185, 60)), (2, (255, 205, 100)), (12, (255, 238, 190)), (30, (255, 255, 255)),
 ]
+CLOCK_HUES = [("pora dnia", None), ("biały", (255, 255, 255)), ("ciepły biały", (255, 214, 150)),
+              ("żółty", (255, 200, 0)), ("pomarańczowy", (255, 120, 0)), ("czerwony", (255, 30, 20)),
+              ("różowy", (255, 60, 160)), ("fioletowy", (170, 60, 255)), ("niebieski", (40, 110, 255)),
+              ("błękitny", (0, 200, 255)), ("zielony", (40, 255, 80))]
+CLOCK = {"hue": 0}  # indeks w CLOCK_HUES (ustawienie „barwa”, zapisywane w konfiguracji)
 
 
 @reg("zegar")
 class PlainClock(Clock):
-    """Zwykły, czytelny zegar: godzina z sekundami i data. Kolor idzie za słońcem – w południe jasny biały,
-    wieczorem ciepły żółty i przygaszony, w nocy przyciemniony bursztyn."""
+    """Zwykły, czytelny zegar: godzina z sekundami i data, wszystko jednym kolorem. Barwa do wyboru; „pora dnia”
+    idzie za słońcem – w południe biały, wieczorem ciepły żółty, w nocy bursztyn."""
 
     def draw(self, f, now, t, dt):
-        c = grad(DAYLIGHT, sun_position(now)[0])
+        c = CLOCK_HUES[CLOCK["hue"]][1] or grad(DAYLIGHT, sun_position(now)[0])
         hms = now.strftime("%H:%M:%S")
         tw = text_w(hms)
         wd = PL_DAYS[now.weekday()].upper()
@@ -5217,6 +5223,9 @@ class Engine:
     FPSES = [10, 12, 15, 20, 24, 25, 30, 40, 50, 60]  # panel 120x12 na jednym pinie: max ok. 20-22
     FADES = [0.0, 0.3, 0.6, 1.0, 1.5, 2.0, 3.0]
     PREVIEWS = ["włączony", "wyłączony"]
+    # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
+    SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
+                  "ludzik co ile": "ludzik", "barwa": "zegar"}
 
     def __init__(self, a, cfg):
         self.host = a.host or ""
@@ -5334,13 +5343,16 @@ class Engine:
         def s_lfreq(d):
             LUDZIK["freq"] = max(0, min(len(LUDZIK_FREQ) - 1, LUDZIK["freq"] + d))
 
+        def s_hue(d):
+            CLOCK["hue"] = (CLOCK["hue"] + d) % len(CLOCK_HUES)
+
         def s_width(d):
             self.new_width = 60 if W != 60 else 120
             self.running = False          # main() zapisze i uruchomi skrypt ponownie z nową szerokością
 
         return [  # (nazwa, wartość do wyświetlenia, zmiana, podpowiedź)
             ("jasność WLED", lambda: f"{self.bar(math.log(PANEL['bri']), 0, math.log(255))} {PANEL['bri']}/255", s_wbri,
-             "zmienia jasność w panelu"),
+             "jedna dla wszystkich efektów (jasność w WLED)"),
             ("zasilacz", lambda: f"{POWER['psu'] / 1000:g} A" if POWER["psu"] else "bez limitu", s_psu,
              "budżet prądu (ok. 85% zasilacza)"),
             ("ciężkie efekty", lambda: "pomijaj w cyklu" if self.skip_heavy else "pokazuj", s_heavy, "⚡ = nie mieszczą się w budżecie"),
@@ -5358,12 +5370,23 @@ class Engine:
             ("ludzik zajęcia", lambda: f"{len([a for a in LUDZIK_ACTS if ludzik_lvl(a)])}/{len(LUDZIK_ACTS)} włączone",
              s_lacts, "Enter = co robi z nudów i jak często"),
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
+            ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
             ("wysyłanie", lambda: "włączone" if self.sending else "wyłączone", s_send, "s"),
             ("host", lambda: self.host or "(brak)", s_host, "h, Enter = zmień"),
             ("szerokość", lambda: f"{W} kolumn", s_width, "Enter = 60/120 (np. gdy działa połowa panelu), restart"),
             ("poziomy", lambda: (f"{PANEL['levels']} na kanał (ręcznie)" if panel_manual() else f"auto = {PANEL['bri']}"),
              s_levels, "ile stopni jasności widać (--kalibracja); auto = z jasności WLED"),
         ]
+
+    def setting_fx(self):
+        """Efekty, których ustawienia teraz widać: wybrany, a w cyklu – cykl i to, co właśnie pokazuje."""
+        return {"cykl", self.cycle.current} if self.mode == "cykl" else {self.mode}
+
+    def shown_settings(self):
+        """Ustawienia wspólne, a pod nimi tylko te od efektu na panelu."""
+        fx = self.setting_fx()
+        return [st for st in self.settings if self.SETTING_FX.get(st[0]) is None] + \
+               [st for st in self.settings if self.SETTING_FX.get(st[0]) in fx]
 
     def heavy(self, name):
         pk = self.peak.get(name)
@@ -5394,7 +5417,8 @@ class Engine:
                "panel_levels_bri": PANEL["bri"] if panel_manual() else None, "panel_pe": PANEL["pe"],
                "psu": POWER["psu"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"],
-               "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours}
+               "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
+               "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0]}
         try:
             os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
             with open(CONFIG, "w", encoding="utf-8") as fh:
@@ -5572,8 +5596,9 @@ class Engine:
             "w": W, "h": H, "mode": self.mode, "current": self.cycle.current, "paused": self.paused,
             "sending": self.sending, "host": self.host, "lor": self.lor, "mirror": PANEL["mirror"],
             "time": now.strftime("%H:%M:%S"), "fake_time": bool(self.offset) or self.speed != 1,
-            "settings": [{"name": n, "value": val(), "hint": self.text_step() if n == "tempo tekstu" else hint}
-                         for n, val, _, hint in self.settings],
+            "settings": [{"name": n, "value": val(), "hint": self.text_step() if n == "tempo tekstu" else hint,
+                          "fx": self.SETTING_FX.get(n, "")} for n, val, _, hint in self.settings],
+            "setting_fx": sorted(self.setting_fx()),
             "heavy": [n for n in CLOCKS if self.heavy(n)],
             "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS},
             "inbox": INBOX.snapshot(),
@@ -5715,7 +5740,9 @@ class Tui(Engine):
             self.focus = "set" if self.focus == "list" else "list"
             return
         if self.focus == "set":
-            ns = len(self.settings)
+            shown = self.shown_settings()
+            ns = len(shown)
+            self.scur = min(self.scur, ns - 1)
             if k in ("up", "k"):
                 self.scur = (self.scur - 1) % ns
                 return
@@ -5724,7 +5751,7 @@ class Tui(Engine):
                 return
             if k in ("left", "right", "+", "=", "-", "_", "\r", "\n"):
                 d = 1 if k in ("right", "+", "=", "\r", "\n") else -1
-                self.settings[self.scur][2](d)
+                shown[self.scur][2](d)
                 return
             if k == "esc":
                 self.focus = "list"
@@ -5875,7 +5902,11 @@ class Tui(Engine):
                 right.append(f"{Y + '▸' if sel else ' '}{R} {(B if sel else '')}{act:20s}{R} {lab}")
         else:
             right = [(f"{INV} Ustawienia {R}" if sf else f"{D}Ustawienia{R}") + f" {D}(Tab){R}"]
-            for i, (name, val, _, hint) in enumerate(self.settings):
+            shown = self.shown_settings()
+            self.scur = min(self.scur, len(shown) - 1)
+            for i, (name, val, _, hint) in enumerate(shown):
+                if i and self.SETTING_FX.get(name) and not self.SETTING_FX.get(shown[i - 1][0]):
+                    right.append(f"  {D}— efekt: {', '.join(sorted(self.setting_fx()))} —{R}")
                 sel = sf and i == self.scur
                 hint = self.text_step() if name == "tempo tekstu" else hint
                 right.append(f"{Y + '▸' if sel else ' '}{R} {name:15s} {(B if sel else '')}{val()}{R}  {D}{hint}{R}")
@@ -6701,6 +6732,7 @@ def main():
         if n in LUDZIK_ACTS:
             LUDZIK["lvl"].setdefault(n, 0)
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
+    CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     POWER["psu"] = a.psu if a.psu is not None else cfg.get("psu", 2000)
     INBOX.port, INBOX.bind, INBOX.public, INBOX.proxy = a.msg_port, a.msg_bind, a.msg_public.strip(), a.msg_proxy
     INBOX.tunnel, INBOX.bore = a.msg_tunnel.strip(), a.msg_bore

@@ -168,12 +168,22 @@ function settingRow(s) {
   return row;
 }
 
+// ustawienia efektu (s.fx) widać tylko, gdy ten efekt jest na panelu; wspólne – zawsze
 function renderSettings() {
-  const box = $("#settings");
-  if (!rows.size) state.settings.filter((s) => !HIDDEN_SETTINGS.has(s.name)).forEach((s) => box.append(settingRow(s)));
+  if (!rows.size) {
+    for (const s of state.settings.filter((s) => !HIDDEN_SETTINGS.has(s.name))) {
+      const row = settingRow(s);
+      rows.get(s.name).row = row;
+      (s.fx ? $("#fx-settings") : $("#settings")).append(row);
+    }
+  }
+  const fx = new Set(state.setting_fx);
+  let fxShown = false;
   for (const s of state.settings) {
     const r = rows.get(s.name);
     if (!r) continue;
+    r.row.hidden = Boolean(s.fx) && !fx.has(s.fx);
+    fxShown = fxShown || (Boolean(s.fx) && !r.row.hidden);
     if (r.input) {
       if (document.activeElement !== r.input) r.input.value = state.host;
       continue;
@@ -188,6 +198,9 @@ function renderSettings() {
     // podpowiedzi z TUI będące samymi klawiszami („[ ]”, „l”, „< > r”) – skróty działają też tutaj
     if (r.hint) r.hint.textContent = /^[^\s\w]?[\w\[\]<> ]{0,4}$/.test(s.hint) ? `klawisz: ${s.hint}` : s.hint;
   }
+  $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : state.mode;
+  $("#fx-none").hidden = fxShown;
+  if (!fx.has("ludzik")) $("#acts").hidden = true;
 }
 
 const LVL_CLASS = ["", "", "on", "on"];
