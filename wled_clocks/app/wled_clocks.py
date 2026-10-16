@@ -251,6 +251,29 @@ for _font in (BIG, SMALL, TXT):  # zasada: każda kreska ma co najmniej 2 diody 
 TALL = {k: [r for r in g for _ in (0, 1)] for k, g in SMALL.items()}  # 5x10: SMALL rozciągnięty w pionie
 
 
+_SMALL_MARK = {"Ą": "ogonek", "Ę": "ogonek", "Ć": "kreska", "Ń": "kreska", "Ó": "kreska", "Ś": "kreska", "Ź": "kreska",
+               "Ż": "kropka"}
+
+
+def small_pl(s, x0, y0, sp=1):
+    """Punkty napisu w SMALL z polskimi znakami: SMALL ma tylko 5 wierszy, więc kreska i kropka idą do wiersza nad
+    napisem, a ogonek do wiersza pod nim – napis potrzebuje wolnego wiersza nad sobą i pod sobą."""
+    pts, x = [], int(x0)
+    for c in s:
+        g = glyph(SMALL, c)
+        w = len(g[0])
+        pts += [(x + k, y0 + ry) for ry, row in enumerate(g) for k, b in enumerate(row) if b == "#"]
+        mark = _SMALL_MARK.get(c.upper())
+        if mark == "kreska":
+            pts += [(x + w // 2, y0 - 1), (x + w // 2 + 1, y0 - 1)]
+        elif mark == "kropka":
+            pts += [(x + w // 2 - 1, y0 - 1), (x + w // 2, y0 - 1)]
+        elif mark == "ogonek":
+            pts += [(x + w - 1, y0 + 5), (x + w, y0 + 5)]
+        x += w + sp
+    return pts
+
+
 def glyph(font, c):
     g = font.get(c)
     if g is None:
@@ -5045,14 +5068,14 @@ class PlainClock(Clock):
 
     def draw(self, f, now, t, dt):
         c = grad(DAYLIGHT, sun_position(now)[0])
-        hm, sec = now.strftime("%H:%M"), now.strftime(":%S")
-        tw = text_w(hm + sec)
+        hms = now.strftime("%H:%M:%S")
+        tw = text_w(hms)
         wd = PL_DAYS[now.weekday()].upper()
         date = f"{now.day:02d}.{now.month:02d}.{now.year}"
         if NARROW:  # 60 kolumn: sama godzina, co 10 s na chwilę data
             if page(t, 4, 2.5) == 3:
                 s = f"{wd[:3]} {now.day:02d}.{now.month:02d}"
-                f.text(s, (W - text_w(s, SMALL)) // 2, 3, mul(c, 0.8), SMALL)
+                f.draw(small_pl(s, (W - text_w(s, SMALL)) // 2, 3), c)
                 return
             x = (W - tw) // 2
         else:
@@ -5061,10 +5084,9 @@ class PlainClock(Clock):
             gap = (W - tw - max(text_w(wd, SMALL), text_w(date, SMALL))) // 3  # równe odstępy: brzeg, godzina, data, brzeg
             x = gap
             dx = x + tw + gap
-            f.text(wd, dx, 0, mul(c, 0.8), SMALL)
-            f.text(date, dx, 6, mul(c, 0.8), SMALL)
-        f.text(hm, x, 1, c, BIG)
-        f.text(sec, x + text_w(hm) + 1, 1, mul(c, 0.8), BIG)  # sekundy odrobinę ciemniej – godzina pierwsza
+            f.draw(small_pl(wd, dx, 1), c)       # wiersz 0 na kreskę (Ś), wiersz 6 na ogonek (Ą)
+            f.text(date, dx, 7, c, SMALL)
+        f.text(hms, x, 1, c, BIG)  # wszystko jednym kolorem
 
 
 # ---------------------------------------------------------------- wiadomości od widzów

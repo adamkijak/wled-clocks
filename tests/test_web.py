@@ -67,6 +67,12 @@ class EngineTest(unittest.TestCase):
         finally:
             wc.LUDZIK["lvl"], wc.LUDZIK["freq"] = old
 
+    def test_small_font_polish_marks(self):
+        plain = set(wc.small_pl("PIATEK SRODA", 0, 1))
+        pl = set(wc.small_pl("PIĄTEK ŚRODA", 0, 1))
+        self.assertTrue(plain < pl)                                     # te same litery i coś więcej
+        self.assertEqual({y for _, y in pl - plain}, {0, 6})            # kreska nad napisem, ogonek pod nim
+
     def test_plain_clock_follows_sun(self):
         noon = wc.grad(wc.DAYLIGHT, 40)
         evening = wc.grad(wc.DAYLIGHT, -2)

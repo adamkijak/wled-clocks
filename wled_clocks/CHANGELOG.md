@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.1.1
+
+- Zegar: dzień tygodnia z polskimi znakami (PIĄTEK, ŚRODA).
+- Zegar: godzina, sekundy, dzień i data w jednym kolorze.
+
 ## 1.1.0
 
 - Nowy efekt **zegar** (drugi na liście): zwykła godzina z sekundami i data; kolor idzie za słońcem – w południe
