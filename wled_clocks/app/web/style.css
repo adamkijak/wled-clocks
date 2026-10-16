@@ -141,6 +141,7 @@ main > *, .cols > * { min-width: 0; }
 .srow .val { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .srow .val span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .srow .hint { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin-top: -4px; }
+.srow .hint.warn { color: var(--warn); }
 .srow .wide { grid-column: 2 / 5; display: flex; gap: 6px; }
 .srow .wide input { flex: 1; }
 .meter { flex: 0 0 70px; height: 6px; border-radius: 3px; background: var(--btn); overflow: hidden; }

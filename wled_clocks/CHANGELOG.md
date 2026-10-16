@@ -1,5 +1,15 @@
 # Zmiany
 
+## 1.1.3
+
+- Przełącznik „auto przyciemnianie” (ustawienia wspólne): wyłączony nie przyciemnia efektów ponad budżet
+  zasilacza, tylko ostrzega w statystykach.
+- Zegar: suwak „temperatura” (−2000…+3000 K) przesuwa barwę – przy „pora dnia” względem słońca
+  (teraz liczonej jako prawdziwa temperatura barwowa: 6500 K w południe, ok. 2200 K w nocy), przy stałym
+  kolorze jak balans bieli.
+- Podpowiedź przy „tempo tekstu” pokazuje, jak przesuwają się napisy i transparent ludzika; gdy ruch skacze
+  (przesuw rzadziej niż co klatkę), świeci na pomarańczowo i podaje najmniejsze płynne tempo.
+
 ## 1.1.2
 
 - Ustawienia w panelu (i w TUI): u góry tylko ustawienia efektu, który jest na panelu (ludzik, zegar, cykl),

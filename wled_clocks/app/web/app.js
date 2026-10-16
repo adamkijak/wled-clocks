@@ -197,6 +197,7 @@ function renderSettings() {
     r.val.textContent = m ? m[2] : s.value;
     // podpowiedzi z TUI będące samymi klawiszami („[ ]”, „l”, „< > r”) – skróty działają też tutaj
     if (r.hint) r.hint.textContent = /^[^\s\w]?[\w\[\]<> ]{0,4}$/.test(s.hint) ? `klawisz: ${s.hint}` : s.hint;
+    if (r.hint) r.hint.classList.toggle("warn", s.hint.includes("skacze")); // ruch nie będzie płynny
   }
   $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : state.mode;
   $("#fx-none").hidden = fxShown;
@@ -315,12 +316,14 @@ function render(s) {
   $("#now-doc").textContent = clocks.docs[shown] || "";
 
   const p = s.power;
+  const over = !p.auto && p.psu && p.raw > p.psu;
   const pw = $("#stat-power");
   pw.textContent =
     `prąd ~${(p.est / 1000).toFixed(2)} A` +
     (p.psu ? ` / limit ${p.psu / 1000} A` : "") +
-    (p.k < 0.98 ? `  – przyciemniam do ${Math.round(p.k * 100)}% (efekt chce ${(p.raw / 1000).toFixed(1)} A)` : "");
-  pw.className = p.k < 0.98 ? "warn" : "";
+    (p.k < 0.98 ? `  – przyciemniam do ${Math.round(p.k * 100)}% (efekt chce ${(p.raw / 1000).toFixed(1)} A)` : "") +
+    (over ? "  – ponad budżet zasilacza (przyciemnianie wyłączone)" : "");
+  pw.className = p.k < 0.98 ? "warn" : over ? "bad" : "";
   $("#stat-panel").textContent = `panel: jasność WLED ${s.bri}/255, model: ${s.levels} poziomów na kanał`;
   const fps = $("#stat-fps");
   fps.textContent =

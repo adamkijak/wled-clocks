@@ -96,7 +96,7 @@ ANIM = {"fps": 20.0, "tempo": 0.75, "text": 2.0}
 PANEL = {"bri": 255, "host": "", "levels": None, "levels_bri": None, "pe": 1 / 2.2,
          "mirror": False}  # mirror – obraz odbity w poziomie (np. gdy panel ogląda się przez kamerkę)
 # Prąd: WS2812 ok. 55 mA na diodę przy pełnej bieli (ok. 18 mA na kanał) + ok. 0,6 mA spoczynkowo, nawet zgaszona.
-POWER = {"psu": 2000, "ma": 55.0, "idle": 0.6}  # psu = budżet w mA (0 = bez limitu)
+POWER = {"psu": 2000, "ma": 55.0, "idle": 0.6, "auto": True}  # psu = budżet w mA (0 = bez limitu); auto = przyciemniaj
 
 # ---------------------------------------------------------------- czcionki
 BIG = {  # 6x10, kreska 2 px
@@ -511,7 +511,7 @@ class PowerLimiter:
         data = frame.to_bytes()
         self.raw = frame_current(data)
         budget = POWER["psu"]
-        if not budget:
+        if not budget or not POWER["auto"]:  # bez limitu albo przyciemnianie wyłączone: zawsze pełna jasność
             self.k, self.est = 1.0, self.raw
             return frame, data
         self.k = min(1.0, self.k + dt * 0.25)          # powolny powrót
@@ -5056,24 +5056,57 @@ LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, *Worker.RIDES, "tr
 
 
 # ---------------------------------------------------------------- zwykły zegar w kolorze pory dnia
-DAYLIGHT = [  # wysokość słońca (stopnie) -> odcień: noc bursztynowa, zmierzch ciepły żółty, południe białe;
-    # zawsze pełna jasność – jasność jest jedna dla wszystkich efektów (ustawienie „jasność WLED”)
-    (-12, (255, 170, 45)), (-4, (255, 185, 60)), (2, (255, 205, 100)), (12, (255, 238, 190)), (30, (255, 255, 255)),
+def kelvin_rgb(k):
+    """Barwa światła o temperaturze k kelwinów (przybliżenie Tannera Hellanda); najjaśniejsza składowa = 255,
+    bo jasność jest jedna dla wszystkich efektów (ustawienie „jasność WLED”)."""
+    t = clamp(k, 1000, 40000) / 100
+    r = 255 if t <= 66 else 329.698727446 * (t - 60) ** -0.1332047592
+    g = 99.4708025861 * math.log(t) - 161.1195681661 if t <= 66 else 288.1221695283 * (t - 60) ** -0.0755148492
+    b = 255 if t >= 66 else 0 if t <= 19 else 138.5177312231 * math.log(t - 10) - 305.0447927307
+    c = tuple(clamp(v, 0, 255) for v in (r, g, b))
+    return mul(c, 255 / max(c))
+
+
+DAYLIGHT = [  # wysokość słońca (stopnie) -> temperatura barwowa (K): noc bursztynowa, zmierzch ciepły, południe białe
+    (-12, 2200), (-4, 2500), (2, 3000), (12, 4200), (30, 6500),
 ]
+CLOCK_TEMPS = [-2000, -1500, -1000, -750, -500, -250, 0, 250, 500, 750, 1000, 1500, 2000, 3000]  # przesunięcie (K)
 CLOCK_HUES = [("pora dnia", None), ("biały", (255, 255, 255)), ("ciepły biały", (255, 214, 150)),
               ("żółty", (255, 200, 0)), ("pomarańczowy", (255, 120, 0)), ("czerwony", (255, 30, 20)),
               ("różowy", (255, 60, 160)), ("fioletowy", (170, 60, 255)), ("niebieski", (40, 110, 255)),
               ("błękitny", (0, 200, 255)), ("zielony", (40, 255, 80))]
-CLOCK = {"hue": 0}  # indeks w CLOCK_HUES (ustawienie „barwa”, zapisywane w konfiguracji)
+CLOCK = {"hue": 0, "temp": 0}  # „barwa” (indeks w CLOCK_HUES) i „temperatura” (K); zapisywane w konfiguracji
+
+
+def daylight_k(elev):
+    """Temperatura barwowa (K) dla wysokości słońca – interpolacja między punktami DAYLIGHT."""
+    if elev <= DAYLIGHT[0][0]:
+        return DAYLIGHT[0][1]
+    for (a, ka), (b, kb) in zip(DAYLIGHT, DAYLIGHT[1:]):
+        if elev <= b:
+            return ka + (kb - ka) * (elev - a) / (b - a)
+    return DAYLIGHT[-1][1]
+
+
+def clock_color(now):
+    """Kolor zegara: „pora dnia” = temperatura za słońcem + przesunięcie; stały kolor = przesunięcie jak balans bieli."""
+    base = CLOCK_HUES[CLOCK["hue"]][1]
+    if base is None:
+        return kelvin_rgb(daylight_k(sun_position(now)[0]) + CLOCK["temp"])
+    if not CLOCK["temp"]:
+        return base
+    tint, ref = kelvin_rgb(6500 + CLOCK["temp"]), kelvin_rgb(6500)
+    c = tuple(v * a / b for v, a, b in zip(base, tint, ref))
+    return mul(c, 255 / max(c))
 
 
 @reg("zegar")
 class PlainClock(Clock):
     """Zwykły, czytelny zegar: godzina z sekundami i data, wszystko jednym kolorem. Barwa do wyboru; „pora dnia”
-    idzie za słońcem – w południe biały, wieczorem ciepły żółty, w nocy bursztyn."""
+    idzie za słońcem – w południe biały, wieczorem ciepły żółty, w nocy bursztyn; „temperatura” przesuwa barwę."""
 
     def draw(self, f, now, t, dt):
-        c = CLOCK_HUES[CLOCK["hue"]][1] or grad(DAYLIGHT, sun_position(now)[0])
+        c = clock_color(now)
         hms = now.strftime("%H:%M:%S")
         tw = text_w(hms)
         wd = PL_DAYS[now.weekday()].upper()
@@ -5225,7 +5258,7 @@ class Engine:
     PREVIEWS = ["włączony", "wyłączony"]
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
-                  "ludzik co ile": "ludzik", "barwa": "zegar"}
+                  "ludzik co ile": "ludzik", "barwa": "zegar", "temperatura": "zegar"}
 
     def __init__(self, a, cfg):
         self.host = a.host or ""
@@ -5331,6 +5364,9 @@ class Engine:
             opts = [0, 1000, 1500, 2000, 3000, 4000, 6000, 8500, 12000, 17000, 20000, 35000]
             POWER["psu"] = self.step_in(opts, POWER["psu"], d)
 
+        def s_autodim(d):
+            POWER["auto"] = not POWER["auto"]
+
         def s_heavy(d):
             self.skip_heavy = not self.skip_heavy
 
@@ -5346,6 +5382,14 @@ class Engine:
         def s_hue(d):
             CLOCK["hue"] = (CLOCK["hue"] + d) % len(CLOCK_HUES)
 
+        def s_temp(d):
+            CLOCK["temp"] = self.step_in(CLOCK_TEMPS, CLOCK["temp"], d)
+
+        def v_temp():
+            k = CLOCK["temp"]
+            word = "bez zmian" if not k else "chłodniej" if k > 0 else "cieplej"
+            return f"{self.bar(k, CLOCK_TEMPS[0], CLOCK_TEMPS[-1])} {f'{k:+d}' if k else '0'} K ({word})"
+
         def s_width(d):
             self.new_width = 60 if W != 60 else 120
             self.running = False          # main() zapisze i uruchomi skrypt ponownie z nową szerokością
@@ -5355,6 +5399,8 @@ class Engine:
              "jedna dla wszystkich efektów (jasność w WLED)"),
             ("zasilacz", lambda: f"{POWER['psu'] / 1000:g} A" if POWER["psu"] else "bez limitu", s_psu,
              "budżet prądu (ok. 85% zasilacza)"),
+            ("auto przyciemnianie", lambda: "włączone" if POWER["auto"] else "wyłączone", s_autodim,
+             "gdy efekt chce więcej prądu niż zasilacz; wyłączone = pełna jasność – uważaj na zasilacz"),
             ("ciężkie efekty", lambda: "pomijaj w cyklu" if self.skip_heavy else "pokazuj", s_heavy, "⚡ = nie mieszczą się w budżecie"),
             ("tempo anim.", lambda: f"{self.bar(self.tempo, 0.25, 3)} x{self.tempo:g}", s_tempo, "wszystkie ruchy"),
             ("tempo tekstu", lambda: f"{self.bar(self.text, 0.25, 3)} x{self.text:g}", s_text,
@@ -5371,6 +5417,7 @@ class Engine:
              s_lacts, "Enter = co robi z nudów i jak często"),
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
             ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
+            ("temperatura", v_temp, s_temp, "◂ cieplej, ▸ chłodniej; przy „pora dnia” względem słońca"),
             ("wysyłanie", lambda: "włączone" if self.sending else "wyłączone", s_send, "s"),
             ("host", lambda: self.host or "(brak)", s_host, "h, Enter = zmień"),
             ("szerokość", lambda: f"{W} kolumn", s_width, "Enter = 60/120 (np. gdy działa połowa panelu), restart"),
@@ -5406,8 +5453,20 @@ class Engine:
         self.wled_post({"bri": bri}, "ustawić jasności")
 
     def text_step(self):
-        ppf = 28 * self.text * self.tempo / self.fps
-        return f"{round(ppf)} px/klatkę" if ppf >= 1 else f"1 px co {max(1, round(1 / ppf))} klatki"
+        """Podpowiedź do „tempo tekstu”: jak przesuwają się napisy i (wolniejszy) transparent ludzika. Płynnie jest
+        tylko przy przesuwie co klatkę – wolniej tekst stoi i skacze; wtedy podpowiada najmniejsze płynne tempo."""
+        def step(speed, k):  # (px na krok, co ile klatek krok) – jak w scroll_px
+            ppf = speed * k * self.tempo / self.fps
+            return (round(ppf), 1) if ppf >= 1 else (1, max(1, round(1 / ppf)))
+
+        frames = lambda n: "klatki" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "klatek"
+        fmt = lambda px, n: f"{px} px/klatkę" if n == 1 else f"1 px co {n} {frames(n)}"
+        txt, ban = step(30, self.text), step(Worker.BANNER_SPEED, self.text)
+        out = f"napisy {fmt(*txt)}, transparent ludzika {fmt(*ban)}"
+        if txt[1] == 1 and ban[1] == 1:
+            return out
+        smooth = next((v for v in self.TEMPOS if step(Worker.BANNER_SPEED, v)[1] == 1), None)
+        return out + (f" – skacze; płynnie od x{smooth:g}" if smooth else " – skacze; zwiększ tempo tekstu")
 
     def save(self):
         cfg = {"host": self.host, "tempo": self.tempo,
@@ -5415,10 +5474,10 @@ class Engine:
                "fade": self.fade, "preview": self.preview, "mode": self.mode, "panel_bri": PANEL["bri"],
                "panel_levels": PANEL["levels"] if panel_manual() else None,
                "panel_levels_bri": PANEL["bri"] if panel_manual() else None, "panel_pe": PANEL["pe"],
-               "psu": POWER["psu"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
+               "psu": POWER["psu"], "auto_dim": POWER["auto"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"],
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
-               "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0]}
+               "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"]}
         try:
             os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
             with open(CONFIG, "w", encoding="utf-8") as fh:
@@ -5603,7 +5662,7 @@ class Engine:
             "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS},
             "inbox": INBOX.snapshot(),
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
-                      "psu": POWER["psu"]},
+                      "psu": POWER["psu"], "auto": POWER["auto"]},
             "bri": PANEL["bri"], "levels": panel_levels(),
             "fps": round(self.fps_ema, 1), "fps_set": self.fps, "render_ms": round(self.cost_ema * 1000, 1),
             "pkts": self.pkts, "err": self.err, "net": NET.status(),
@@ -5914,7 +5973,9 @@ class Tui(Engine):
             "",
             f"{D}prąd ~{self.limiter.est / 1000:.2f} A" + (f" / limit {POWER['psu'] / 1000:g} A" if POWER["psu"] else "")
             + (f"{R}  {Y}przyciemniam do {self.limiter.k * 100:.0f}% (efekt chce {self.limiter.raw / 1000:.1f} A){R}"
-               if self.limiter.k < 0.98 else R),
+               if self.limiter.k < 0.98 else
+               f"{R}  {Y}ponad budżet zasilacza (przyciemnianie wyłączone){R}"
+               if POWER["psu"] and self.limiter.raw > POWER["psu"] else R),
             f"{D}panel: jasność WLED {PANEL['bri']}/255, model: {panel_levels()} poziomów na kanał{R}"
             + (f"  {Y}fps > 20: panel nie nadąży{R}" if self.fps > 22 else ""),
             f"{D}fps {self.fps_ema:4.1f}/{self.fps:g}  render {self.cost_ema * 1000:4.1f} ms  pakiety {self.pkts}{R}"
@@ -6733,7 +6794,9 @@ def main():
             LUDZIK["lvl"].setdefault(n, 0)
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
+    CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
     POWER["psu"] = a.psu if a.psu is not None else cfg.get("psu", 2000)
+    POWER["auto"] = bool(cfg.get("auto_dim", True))
     INBOX.port, INBOX.bind, INBOX.public, INBOX.proxy = a.msg_port, a.msg_bind, a.msg_public.strip(), a.msg_proxy
     INBOX.tunnel, INBOX.bore = a.msg_tunnel.strip(), a.msg_bore
     INBOX.auto = bool(cfg.get("msg_auto", False))

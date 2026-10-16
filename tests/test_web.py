@@ -56,7 +56,10 @@ class EngineTest(unittest.TestCase):
             wc.LUDZIK["freq"] = 3
             fx, rides = wc.CLOCKS["ludzik"](), set()
             base = wc.dtm.datetime(2026, 10, 16, 12, 0, 2).astimezone()
-            for i in range(900):
+            wc.random.seed(7)                                           # losowanie zajęć – powtarzalnie
+            for i in range(6000):
+                if rides == {"rower", "auto"}:
+                    break
                 t = i * 0.05
                 fx.draw(wc.Frame(), base + wc.dtm.timedelta(seconds=t), t, 0.05)
                 if fx.ride:
@@ -74,11 +77,11 @@ class EngineTest(unittest.TestCase):
         self.assertEqual({y for _, y in pl - plain}, {0, 6})            # kreska nad napisem, ogonek pod nim
 
     def test_plain_clock_hue_without_dimming(self):
-        noon, evening, night = (wc.grad(wc.DAYLIGHT, v) for v in (40, -2, -30))
-        self.assertEqual(noon, (255, 255, 255))
+        noon, evening, night = (wc.kelvin_rgb(wc.daylight_k(v)) for v in (40, -2, -30))
+        self.assertGreater(min(noon), 245)                                  # w południe biały
         self.assertGreater(evening[0] - evening[2], 100)                    # wieczorem ciepły
         for c in (noon, evening, night):
-            self.assertEqual(max(c), 255)                                   # jasność tylko globalna
+            self.assertAlmostEqual(max(c), 255)                             # jasność tylko globalna
         now = wc.dtm.datetime.now().astimezone()
         try:
             wc.CLOCK["hue"] = [n for n, _ in wc.CLOCK_HUES].index("niebieski")
@@ -87,6 +90,27 @@ class EngineTest(unittest.TestCase):
             self.assertEqual({c for row in f.px for c in row} - {(0, 0, 0)}, {(40, 110, 255)})
         finally:
             wc.CLOCK["hue"] = 0
+
+    def test_clock_temperature_offset(self):
+        now = wc.dtm.datetime(2026, 10, 16, 19, 0).astimezone()
+        try:
+            base = wc.clock_color(now)
+            wc.CLOCK["temp"] = -1000
+            warmer = wc.clock_color(now)
+            wc.CLOCK["temp"] = 1000
+            cooler = wc.clock_color(now)
+            self.assertLess(warmer[2], base[2])                             # mniej niebieskiego = cieplej
+            self.assertGreater(cooler[2], base[2])
+            wc.CLOCK["hue"] = [n for n, _ in wc.CLOCK_HUES].index("biały")  # stały kolor: balans bieli
+            self.assertGreater(wc.clock_color(now)[2], wc.clock_color(now)[0] - 30)
+            wc.CLOCK["temp"] = -2000
+            self.assertLess(wc.clock_color(now)[2], 200)
+            e = wc.Engine(args(mode="zegar"), {})
+            self.assertIn("temperatura", [st[0] for st in e.shown_settings()])
+            e.setting("temperatura", 1)
+            self.assertEqual(wc.CLOCK["temp"], -1500)
+        finally:
+            wc.CLOCK.update(hue=0, temp=0)
 
     def test_settings_only_for_current_effect(self):
         e = wc.Engine(args(mode="zegar"), {})
@@ -119,6 +143,36 @@ class EngineTest(unittest.TestCase):
             cfg = json.load(fh)
         self.assertFalse(wc.Engine(args(host="127.0.0.1"), cfg).sending)
         self.assertTrue(wc.Engine(args(host="127.0.0.1"), {}).sending)  # stary plik bez "sending": wysyła
+
+    def test_text_speed_hint(self):
+        e = wc.Engine(args(fps=15, tempo=1.0, text_speed=0.33), {})
+        self.assertEqual(e.text_step(), "napisy 1 px co 2 klatki, transparent ludzika 1 px co 3 klatki – skacze; "
+                                        "płynnie od x0.67")
+        e.text = 0.67
+        self.assertNotIn("skacze", e.text_step())
+        e.fps, e.text = 60, 0.25
+        self.assertIn("co 8 klatek", e.text_step())
+
+    def test_auto_dim_switch(self):
+        old = dict(wc.POWER)
+        try:
+            wc.POWER.update(psu=1000, auto=True)
+            f = wc.Frame((255, 255, 255))                                       # cały panel na biało: kilkadziesiąt A
+            lim = wc.PowerLimiter()
+            lim.apply(f, 0.05)
+            self.assertLess(lim.k, 0.5)                                          # przyciemnia
+            e = wc.Engine(args(), {})
+            e.setting("auto przyciemnianie", 1)
+            self.assertFalse(wc.POWER["auto"])
+            lim = wc.PowerLimiter()
+            out, _ = lim.apply(f, 0.05)
+            self.assertEqual((lim.k, out), (1.0, f))                             # pełna jasność
+            e.save()
+            with open(wc.CONFIG, encoding="utf-8") as fh:
+                self.assertFalse(json.load(fh)["auto_dim"])
+        finally:
+            wc.POWER.clear()
+            wc.POWER.update(old)
 
     def test_view_only_when_watched(self):
         e = wc.Engine(args(), {})
