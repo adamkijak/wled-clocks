@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.2.0
+
+- Ustawienia w panelu WWW: suwaki (jasność, tempo, fps, przenikanie, cykl co, temperatura) i listy rozwijane
+  (barwa, zasilacz, czas, włącz/wyłącz…) zamiast strzałek ◂ ▸; w TUI strzałki zostają.
+- Na liście efektów także **efekty wbudowane w WLED** (lista pobierana z panelu, z oznaczeniem 2D i ♪ = reaguje
+  na dźwięk). Wybranie takiego efektu wstrzymuje wysyłanie obrazu ze skryptu i włącza efekt w WLED; ← → przechodzą
+  po efektach WLED, wybór efektu skryptu wraca do strumienia. Wybrany efekt WLED zostaje po restarcie.
+
 ## 1.1.3
 
 - Przełącznik „auto przyciemnianie” (ustawienia wspólne): wyłączony nie przyciemnia efektów ponad budżet

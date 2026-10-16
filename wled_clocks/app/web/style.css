@@ -125,6 +125,18 @@ main > *, .cols > * { min-width: 0; }
 .list li.sel .name::before { content: "● "; color: var(--ok); }
 .list li.incycle .name::before { content: "↻ "; color: var(--accent); }
 .list li .heavy { color: var(--warn); }
+.list li.sep {
+  display: block;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: default;
+}
+.list li.sep:hover { background: none; }
+.list li .tags { color: var(--muted); font-size: 12px; }
 
 .settings { display: grid; gap: 2px; }
 .card-head.common { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
@@ -144,6 +156,19 @@ main > *, .cols > * { min-width: 0; }
 .srow .hint.warn { color: var(--warn); }
 .srow .wide { grid-column: 2 / 5; display: flex; gap: 6px; }
 .srow .wide input { flex: 1; }
+.pick { align-items: center; gap: 10px; }
+.pick input[type="range"] { flex: 1; min-width: 0; padding: 0; border: 0; background: none; accent-color: var(--accent); }
+.pick select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+.pick .plabel { min-width: 8ch; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .meter { flex: 0 0 70px; height: 6px; border-radius: 3px; background: var(--btn); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--accent); }
 

@@ -58,6 +58,12 @@ Przycisk **● Wysyłanie** w panelu (albo klawisz `s`) wstrzymuje wysyłanie kl
 własnego efektu. Stan jest zapamiętywany, więc wyłączone wysyłanie zostaje wyłączone także po restarcie dodatku.
 Całkiem wyłączyć można też przez zatrzymanie dodatku.
 
+## Efekty wbudowane w WLED
+
+Pod efektami skryptu lista pokazuje też efekty wbudowane w WLED (2D = dla matrycy, ♪ = reaguje na dźwięk, potrzebny
+mikrofon w WLED). Po wybraniu skrypt przestaje wysyłać obraz, a efekt rysuje sam WLED – podglądu w panelu wtedy nie
+ma. Jasność i limit prądu takich efektów ustawia WLED. Wybranie efektu skryptu wraca do strumienia.
+
 ## Skróty klawiszowe w panelu
 
 ← → poprzedni/następny, spacja pauza, `c` cykl, `s` wysyłanie, `m` odbicie, `l` losowa kolejność,

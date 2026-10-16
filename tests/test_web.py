@@ -174,6 +174,36 @@ class EngineTest(unittest.TestCase):
             wc.POWER.clear()
             wc.POWER.update(old)
 
+    def test_settings_pick_from_list(self):
+        """Suwaki i listy w panelu WWW: każde ustawienie z listą da się ustawić na każdą jej wartość."""
+        saved = dict(wc.PANEL), dict(wc.POWER), dict(wc.CLOCK), dict(wc.LUDZIK)
+        try:
+            e = wc.Engine(args(), {})
+            e.set_wled_bri = lambda v: None                                 # bez hosta – nic nie wysyłamy
+            for name in e.choices:
+                if name in ("szerokość", "wysyłanie"):                     # restart skryptu / wymaga hosta
+                    continue
+                vals, _ = e.choice(name)
+                for i in (len(vals) - 1, 0):
+                    e.pick(name, i)
+                    self.assertEqual(e.choice(name)[1], i, name)
+            e.cmds.put(wc.web_cmd(e, {"op": "setting", "name": "barwa", "i": 8}))
+            e.cmds.put(wc.web_cmd(e, {"op": "setting", "name": "fps", "i": 2}))
+            e.view_until = time.monotonic() + 1
+            e.tick()
+            self.assertEqual((wc.CLOCK_HUES[wc.CLOCK["hue"]][0], e.fps), ("niebieski", 15))
+            row = {x["name"]: x for x in e.snap["settings"]}
+            self.assertEqual((row["fps"]["kind"], row["fps"]["labels"][row["fps"]["index"]]), ("range", "15"))
+            self.assertEqual(row["barwa"]["kind"], "list")
+            self.assertNotIn("kind", row["host"])                           # pole tekstowe, nie lista
+            for bad in ({"op": "setting", "name": "fps", "i": 99}, {"op": "setting", "name": "host", "i": 0}):
+                with self.assertRaises(ValueError, msg=bad):
+                    wc.web_cmd(e, bad)
+        finally:
+            for d, old in zip((wc.PANEL, wc.POWER, wc.CLOCK, wc.LUDZIK), saved):
+                d.clear()
+                d.update(old)
+
     def test_view_only_when_watched(self):
         e = wc.Engine(args(), {})
         e.tick()
@@ -269,6 +299,76 @@ class WebTest(unittest.TestCase):
                 if line.startswith("event: "):
                     seen.add(line[7:].strip())
         self.assertEqual(seen, {"frame", "state"})
+
+
+class WledEffectsTest(unittest.TestCase):
+    """Efekty wbudowane w WLED: udawany WLED (lista efektów, cechy, polecenia POST /json/state)."""
+
+    def setUp(self):
+        self.posted = posted = []
+
+        class Fake(wc.httpd.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                body = {"/json/eff": ["Solid", "Blink", "RSVD", "Fire 2012"],
+                        "/json/fxdata": ["", "!;!;!;01", "", "!;;!;2v"],
+                        "/json/state": {"bri": wc.PANEL["bri"], "mainseg": 0, "lor": 0}}.get(self.path)
+                data = json.dumps(body).encode()
+                self.send_response(200 if body is not None else 404)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_POST(self):
+                posted.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.do_GET()
+
+        self.srv = wc.httpd.ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.host = f"127.0.0.1:{self.srv.server_address[1]}"
+        self.old = dict(wc.PANEL)
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        wc.PANEL.clear()
+        wc.PANEL.update(self.old)
+
+    def wait(self, cond):
+        deadline = time.monotonic() + 5
+        while not cond() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(cond())
+
+    def test_wled_effects(self):
+        e = wc.Engine(args(host=self.host), {})
+        self.wait(lambda: e.wled_fx)
+        self.assertEqual([(x["id"], x["name"], x["tags"]) for x in e.wled_fx],
+                         [(0, "Solid", ""), (1, "Blink", ""), (3, "Fire 2012", "2D ♪")])  # bez RSVD
+        sent = []
+        e.send = sent.append
+        e.cmds.put(wc.web_cmd(e, {"op": "select", "name": "wled:3"}))
+        e.tick()
+        self.assertEqual(e.mode, "wled:3")
+        self.assertEqual(sent, [])                                          # WLED gra sam – nic nie wysyłamy
+        self.wait(lambda: {"on": True, "live": False, "seg": [{"id": 0, "fx": 3}]} in self.posted)
+        self.assertIn("WLED", e.doc("wled:3"))
+        e.skip(1)                                                           # ← → po efektach WLED
+        self.assertEqual(e.mode, "wled:0")
+        with self.assertRaises(ValueError):
+            wc.web_cmd(e, {"op": "select", "name": "wled:2"})               # RSVD – nie ma
+        e.save()
+        with open(wc.CONFIG, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        restart = wc.Engine(args(host=self.host, mode="cykl"), cfg)          # jak main(): bez --mode = domyślny cykl
+        self.assertEqual(restart.mode, "wled:0")                            # zostaje po restarcie
+        self.posted.clear()
+        e.select("zegar")                                                   # z powrotem do naszego strumienia
+        e.tick()
+        self.assertEqual(len(sent), 1)
+        self.wait(lambda: {"lor": 0} in self.posted)
 
 
 class InboxTest(unittest.TestCase):

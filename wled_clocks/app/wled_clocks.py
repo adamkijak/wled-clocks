@@ -5302,6 +5302,10 @@ class Engine:
         self.skip_heavy = cfg.get("skip_heavy", True)
         self.cycle.allowed = lambda n: not (self.skip_heavy and self.heavy(n)) and (n != "napisz" or INBOX.is_open())
         self.settings = self.make_settings()
+        self.wled_fx, self.wled_ver = [], 0   # efekty wbudowane w WLED: [{"id", "name", "tags"}], numer wersji listy
+        self.load_wled_fx()
+        if str(cfg.get("mode", "")).startswith("wled:") and a.mode == "cykl":  # ostatnio był efekt WLED
+            self.select(cfg["mode"])
 
     # ---------------------------------------------------------- ustawienia
     @staticmethod
@@ -5347,22 +5351,27 @@ class Engine:
         def s_host(d):
             self.ask_host()
 
+        levels = [None, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 48, 64]
+        bris = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 160, 192, 224, 255]
+        psus = [0, 1000, 1500, 2000, 3000, 4000, 6000, 8500, 12000, 17000, 20000, 35000]
+
+        def put_levels(v):
+            PANEL["levels"], PANEL["levels_bri"], PANEL["pe"] = v, PANEL["bri"], 1 / 2.2
+
+        def put_bri(v):
+            PANEL["bri"] = v
+            self.set_wled_bri(v)
+
         def s_levels(d):
-            opts = [None, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 48, 64]
             cur = PANEL["levels"] if panel_manual() else None
-            i = opts.index(cur) if cur in opts else 0
-            PANEL["levels"] = opts[(i + d) % len(opts)]
-            PANEL["levels_bri"] = PANEL["bri"]
-            PANEL["pe"] = 1 / 2.2
+            i = levels.index(cur) if cur in levels else 0
+            put_levels(levels[(i + d) % len(levels)])
 
         def s_wbri(d):
-            opts = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 160, 192, 224, 255]
-            PANEL["bri"] = self.step_in(opts, PANEL["bri"], d)
-            self.set_wled_bri(PANEL["bri"])
+            put_bri(self.step_in(bris, PANEL["bri"], d))
 
         def s_psu(d):
-            opts = [0, 1000, 1500, 2000, 3000, 4000, 6000, 8500, 12000, 17000, 20000, 35000]
-            POWER["psu"] = self.step_in(opts, POWER["psu"], d)
+            POWER["psu"] = self.step_in(psus, POWER["psu"], d)
 
         def s_autodim(d):
             POWER["auto"] = not POWER["auto"]
@@ -5394,6 +5403,47 @@ class Engine:
             self.new_width = 60 if W != 60 else 120
             self.running = False          # main() zapisze i uruchomi skrypt ponownie z nową szerokością
 
+        def opt(values, get, put, fmt=str, kind="list"):
+            """Wybór dla panelu WWW: kind „range” = suwak, „list” = lista rozwijana; values może być funkcją."""
+            return {"values": values, "get": get, "put": put, "fmt": fmt, "kind": kind}
+
+        def flag(get, put, on="włączone", off="wyłączone"):
+            return opt([True, False], get, put, lambda v: on if v else off)
+
+        def put_width(v):
+            if v != W:
+                s_width(1)
+
+        x = lambda v: f"x{v:g}"
+        self.choices = {  # ustawienia z listą wartości – w panelu WWW suwak albo lista zamiast strzałek
+            "jasność WLED": opt(bris, lambda: PANEL["bri"], put_bri, lambda v: f"{v}/255", "range"),
+            "zasilacz": opt(psus, lambda: POWER["psu"], lambda v: POWER.update(psu=v),
+                            lambda v: f"{v / 1000:g} A" if v else "bez limitu"),
+            "auto przyciemnianie": flag(lambda: POWER["auto"], lambda v: POWER.update(auto=v)),
+            "ciężkie efekty": flag(lambda: self.skip_heavy, lambda v: setattr(self, "skip_heavy", v),
+                                   "pomijaj w cyklu", "pokazuj"),
+            "tempo anim.": opt(self.TEMPOS, lambda: self.tempo, lambda v: setattr(self, "tempo", v), x, "range"),
+            "tempo tekstu": opt(self.TEMPOS, lambda: self.text, lambda v: setattr(self, "text", v), x, "range"),
+            "fps": opt(self.FPSES, lambda: self.fps, lambda v: setattr(self, "fps", v), lambda v: f"{v:g}", "range"),
+            "cykl co": opt(list(range(10, 601, 10)), lambda: self.cycle.every,
+                           lambda v: setattr(self.cycle, "every", v), lambda v: f"{v} s", "range"),
+            "kolejność": flag(lambda: self.cycle.shuffle, lambda v: setattr(self.cycle, "shuffle", v), "losowo", "po kolei"),
+            "przenikanie": opt(self.FADES, lambda: self.fade, lambda v: (setattr(self, "fade", v),
+                               setattr(self.cycle, "fade", max(v, 0.01))), lambda v: f"{v:g} s", "range"),
+            "czas": opt(lambda: self.SPEEDS, lambda: self.speed, lambda v: setattr(self, "speed_i", self.SPEEDS.index(v)), x),
+            "odbicie lustrz.": flag(lambda: PANEL["mirror"], lambda v: PANEL.update(mirror=v)),
+            "ludzik co ile": opt(list(range(len(LUDZIK_FREQ))), lambda: LUDZIK["freq"], lambda v: LUDZIK.update(freq=v),
+                                 lambda v: LUDZIK_FREQ[v][0]),
+            "barwa": opt(list(range(len(CLOCK_HUES))), lambda: CLOCK["hue"], lambda v: CLOCK.update(hue=v),
+                         lambda v: CLOCK_HUES[v][0]),
+            "temperatura": opt(CLOCK_TEMPS, lambda: CLOCK["temp"], lambda v: CLOCK.update(temp=v),
+                               lambda v: f"{v:+d} K" if v else "0 K", "range"),
+            "wysyłanie": flag(lambda: self.sending, lambda v: v != self.sending and self.toggle_send()),
+            "szerokość": opt([60, 120], lambda: W, put_width, lambda v: f"{v} kolumn"),
+            "poziomy": opt(levels, lambda: PANEL["levels"] if panel_manual() else None, put_levels,
+                           lambda v: f"{v} na kanał (ręcznie)" if v else f"auto = {PANEL['bri']}"),
+        }
+
         return [  # (nazwa, wartość do wyświetlenia, zmiana, podpowiedź)
             ("jasność WLED", lambda: f"{self.bar(math.log(PANEL['bri']), 0, math.log(255))} {PANEL['bri']}/255", s_wbri,
              "jedna dla wszystkich efektów (jasność w WLED)"),
@@ -5417,13 +5467,39 @@ class Engine:
              s_lacts, "Enter = co robi z nudów i jak często"),
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
             ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
-            ("temperatura", v_temp, s_temp, "◂ cieplej, ▸ chłodniej; przy „pora dnia” względem słońca"),
+            ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
             ("wysyłanie", lambda: "włączone" if self.sending else "wyłączone", s_send, "s"),
             ("host", lambda: self.host or "(brak)", s_host, "h, Enter = zmień"),
             ("szerokość", lambda: f"{W} kolumn", s_width, "Enter = 60/120 (np. gdy działa połowa panelu), restart"),
             ("poziomy", lambda: (f"{PANEL['levels']} na kanał (ręcznie)" if panel_manual() else f"auto = {PANEL['bri']}"),
              s_levels, "ile stopni jasności widać (--kalibracja); auto = z jasności WLED"),
         ]
+
+    def choice(self, name):
+        """(wartości, indeks bieżącej) ustawienia z self.choices – bieżąca spoza listy: najbliższa liczbowo."""
+        c = self.choices[name]
+        vals = c["values"]() if callable(c["values"]) else c["values"]
+        cur = c["get"]()
+        if cur in vals and not (isinstance(cur, bool) != isinstance(vals[0], bool)):
+            return vals, vals.index(cur)
+        nums = [i for i, v in enumerate(vals) if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if isinstance(cur, (int, float)) and nums:
+            return vals, min(nums, key=lambda i: abs(vals[i] - cur))
+        return vals, 0
+
+    def choice_json(self, name):
+        if name not in self.choices:
+            return {}
+        vals, i = self.choice(name)
+        fmt = self.choices[name]["fmt"]
+        return {"kind": self.choices[name]["kind"], "labels": [fmt(v) for v in vals], "index": i}
+
+    def pick(self, name, i):
+        """Panel WWW: ustawienie na i-tą wartość z listy."""
+        vals, _ = self.choice(name)
+        if not 0 <= i < len(vals):
+            raise ValueError(f"zła wartość ustawienia {name!r}")
+        self.choices[name]["put"](vals[i])
 
     def setting_fx(self):
         """Efekty, których ustawienia teraz widać: wybrany, a w cyklu – cykl i to, co właśnie pokazuje."""
@@ -5493,16 +5569,75 @@ class Engine:
     def drawer(self, name):
         return self.cycle if name == "cykl" else self.inst[name]
 
+    # ---------------------------------------------------------- efekty wbudowane w WLED
+    def load_wled_fx(self):
+        """W tle: lista efektów WLED (/json/eff) i ich cechy z /json/fxdata (2D, reaguje na dźwięk)."""
+        host = self.host
+        if not host:
+            return
+
+        def go():
+            try:
+                names = http(f"http://{host}/json/eff")
+                try:
+                    data = http(f"http://{host}/json/fxdata")
+                except Exception:  # noqa: BLE001 – starsze WLED nie mają fxdata
+                    data = []
+            except Exception as e:  # noqa: BLE001
+                self.say(f"nie udało się pobrać efektów WLED: {e}")
+                return
+            fx = []
+            for i, n in enumerate(names):
+                if not n or n in ("RSVD", "-"):
+                    continue
+                flags = (data[i].split(";") + [""] * 4)[3] if i < len(data) and isinstance(data[i], str) else ""
+                tags = ("2D" if "2" in flags else "") + (" ♪" if "v" in flags or "f" in flags else "")
+                fx.append({"id": i, "name": n, "tags": tags.strip()})
+            if host == self.host:
+                self.wled_fx, self.wled_ver = fx, self.wled_ver + 1
+        threading.Thread(target=go, daemon=True).start()
+
+    @staticmethod
+    def wled_id(name):
+        """Numer efektu WLED z nazwy trybu „wled:<id>” albo None."""
+        m = re.fullmatch(r"wled:(\d+)", str(name))
+        return int(m[1]) if m else None
+
+    def wled_name(self, i):
+        return next((x["name"] for x in self.wled_fx if x["id"] == i), f"#{i}")
+
+    def select_wled(self, i):
+        """Efekt WLED: przestajemy wysyłać (tick nic nie śle), a WLED od razu wychodzi z trybu realtime i gra efekt."""
+        if not self.host:
+            self.say("najpierw podaj host WLED")
+            return
+        self.fade_from = None
+        self.mode = f"wled:{i}"
+        seg = (NET.get("wled") or {}).get("mainseg", 0)
+        self.wled_post({"on": True, "live": False, "seg": [{"id": seg, "fx": i}]}, "włączyć efektu WLED")
+
     def select(self, name):
+        i = self.wled_id(name)
+        if i is not None:
+            return self.select_wled(i)
+        was_wled = self.wled_id(self.mode) is not None
         self.cursor = self.NAMES.index(name)
         if name == self.mode:
+            return
+        if was_wled:  # z powrotem do naszego strumienia – WLED ma go pokazywać, nie własny efekt
+            self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")
+            self.fade_from, self.mode = None, name
             return
         same = "cykl" in (name, self.mode) and self.cycle.current in (name, self.mode)
         self.fade_from, self.fade_acc = (None if same or self.fade <= 0 else self.mode), 0.0
         self.mode = name
 
     def skip(self, d):
-        if self.mode == "cykl":
+        i = self.wled_id(self.mode)
+        if i is not None and self.wled_fx:  # ← → po efektach WLED
+            ids = [x["id"] for x in self.wled_fx]
+            self.select_wled(ids[((ids.index(i) if i in ids else -1) + d) % len(ids)])
+        elif self.mode == "cykl":
             self.cycle.skip(d)
         else:
             names = list(CLOCKS)
@@ -5510,6 +5645,11 @@ class Engine:
 
     def render(self, now, t, dt):
         f = Frame()
+        i = self.wled_id(self.mode)
+        if i is not None:  # tylko do podglądu (nie wysyłamy) – obrazu efektu WLED skrypt nie widzi
+            scroll_segs(f, [("efekt WLED: ", (120, 120, 140)), (self.wled_name(i), (255, 200, 80)),
+                            ("  (podgląd tylko na panelu)", (90, 90, 110))], t, 30, 0, gap=40)
+            return f
         self.drawer(self.mode).draw(f, now, t, dt)
         if self.fade_from is not None:
             self.fade_acc += dt
@@ -5524,8 +5664,12 @@ class Engine:
     def say(self, msg):
         self.note, self.note_until = msg, time.monotonic() + 3
 
-    @staticmethod
-    def doc(name):
+    def doc(self, name):
+        i = self.wled_id(name)
+        if i is not None:
+            tags = next((x["tags"] for x in self.wled_fx if x["id"] == i), "")
+            return "Efekt wbudowany w WLED" + (" (2D)" if "2D" in tags else "") + \
+                (" – reaguje na dźwięk (potrzebny mikrofon w WLED)" if "♪" in tags else "") + "."
         return ((CLOCKS[name] if name in CLOCKS else Cycle).__doc__ or "").strip()
 
     # ---------------------------------------------------------- akcje (klawisze TUI i polecenia z WWW)
@@ -5547,6 +5691,8 @@ class Engine:
         self.sending = bool(self.host)
         self.err = ""
         self.say(f"host: {self.host or '(brak)'}")
+        self.wled_fx = []
+        self.load_wled_fx()
 
     def toggle_pause(self):
         self.paused = not self.paused
@@ -5634,11 +5780,12 @@ class Engine:
             self.t += dt
             self.frame = self.render(now, self.t, dt)
         out, data = self.limiter.apply(self.frame, 1 / self.fps)
-        name = self.cycle.current if self.mode == "cykl" else self.mode
-        pk = self.peak.get(name)
-        if not pk or pk[1] != PANEL["bri"] or self.limiter.raw > pk[0]:
-            self.peak[name] = [round(self.limiter.raw), PANEL["bri"]]
-        self.send(data)
+        if self.wled_id(self.mode) is None:  # efekt WLED: WLED gra sam, my nic nie wysyłamy
+            name = self.cycle.current if self.mode == "cykl" else self.mode
+            pk = self.peak.get(name)
+            if not pk or pk[1] != PANEL["bri"] or self.limiter.raw > pk[0]:
+                self.peak[name] = [round(self.limiter.raw), PANEL["bri"]]
+            self.send(data)
         self.cost_ema += (time.monotonic() - c0 - self.cost_ema) * 0.1
         if m < self.view_until:      # ktoś ogląda panel WWW
             if m >= self.view_next:
@@ -5653,10 +5800,11 @@ class Engine:
         """Stan do panelu WWW (tylko typy JSON)."""
         return {
             "w": W, "h": H, "mode": self.mode, "current": self.cycle.current, "paused": self.paused,
+            "wled_mode": self.wled_id(self.mode) is not None, "wled_ver": self.wled_ver,
             "sending": self.sending, "host": self.host, "lor": self.lor, "mirror": PANEL["mirror"],
             "time": now.strftime("%H:%M:%S"), "fake_time": bool(self.offset) or self.speed != 1,
-            "settings": [{"name": n, "value": val(), "hint": self.text_step() if n == "tempo tekstu" else hint,
-                          "fx": self.SETTING_FX.get(n, "")} for n, val, _, hint in self.settings],
+            "settings": [dict({"name": n, "value": val(), "hint": self.text_step() if n == "tempo tekstu" else hint,
+                               "fx": self.SETTING_FX.get(n, "")}, **self.choice_json(n)) for n, val, _, hint in self.settings],
             "setting_fx": sorted(self.setting_fx()),
             "heavy": [n for n in CLOCKS if self.heavy(n)],
             "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS},
@@ -6061,7 +6209,8 @@ def web_cmd(e, c):
         return simple[op]
     if op == "select":
         name = c.get("name")
-        if name not in e.NAMES:
+        i = e.wled_id(name)
+        if name not in e.NAMES and (i is None or i not in [x["id"] for x in e.wled_fx]):
             raise ValueError(f"nie ma efektu {name!r}")
         return lambda: e.select(name)
     if op == "skip":
@@ -6074,6 +6223,13 @@ def web_cmd(e, c):
         name = c.get("name")
         if name not in [s[0] for s in e.settings]:
             raise ValueError(f"nie ma ustawienia {name!r}")
+        if "i" in c:  # suwak / lista w panelu WWW: konkretna wartość
+            if name not in e.choices:
+                raise ValueError(f"ustawienie {name!r} nie ma listy wartości")
+            i = int(c["i"])
+            if not 0 <= i < len(e.choice(name)[0]):
+                raise ValueError(f"zła wartość ustawienia {name!r}")
+            return lambda: e.pick(name, i)
         return lambda: e.setting(name, d)
     if op == "host":
         host = str(c.get("host", "")).strip()
@@ -6151,7 +6307,8 @@ class WebHandler(httpd.BaseHTTPRequestHandler):
                 return self.reply(500, {"error": f"brak pliku web/{name}"})
         if name == "clocks":
             return self.reply(200, {"names": e.NAMES, "docs": {n: " ".join(e.doc(n).split()) for n in e.NAMES},
-                                    "ludzik_acts": LUDZIK_ACTS, "ludzik_lvl": LUDZIK_LVL})
+                                    "ludzik_acts": LUDZIK_ACTS, "ludzik_lvl": LUDZIK_LVL,
+                                    "wled": e.wled_fx, "wled_ver": e.wled_ver})
         if name == "state":
             self.watch()
             return self.reply(200, e.snap or {})

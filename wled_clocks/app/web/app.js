@@ -84,7 +84,7 @@ function b64bytes(s) {
 function renderList() {
   const q = fold($("#search").value.trim());
   const heavy = new Set(state ? state.heavy : []);
-  const key = [q, state && state.mode, state && state.current, [...heavy].join()].join("|");
+  const key = [q, state && state.mode, state && state.current, [...heavy].join(), clocks.wled_ver].join("|");
   if (key === listKey) return;
   listKey = key;
   const ol = $("#list");
@@ -101,6 +101,19 @@ function renderList() {
     li.onclick = () => cmd("select", { name });
     ol.append(li);
   });
+  // efekty wbudowane w WLED – pod naszymi; numer to numer efektu w WLED
+  const wled = (clocks.wled || []).filter((fx) => !q || fold(fx.name).includes(q) || fold(fx.tags).includes(q) ||
+    fold("wled").includes(q));
+  if (wled.length) ol.append(el("li", "sep", "Efekty wbudowane w WLED"));
+  for (const fx of wled) {
+    const name = `wled:${fx.id}`;
+    const li = el("li");
+    if (state && state.mode === name) li.classList.add("sel");
+    li.append(el("span", "n", String(fx.id)), el("span", "name", fx.name), el("span", "tags", fx.tags));
+    li.title = fx.tags.includes("♪") ? "reaguje na dźwięk – potrzebny mikrofon w WLED" : "efekt WLED";
+    li.onclick = () => cmd("select", { name });
+    ol.append(li);
+  }
   const sel = ol.querySelector("li.sel, li.incycle");
   if (sel && !q) ol.scrollTop = sel.offsetTop - ol.offsetTop - ol.clientHeight / 2 + sel.offsetHeight / 2;
 }
@@ -146,6 +159,7 @@ function settingRow(s) {
     rows.set(s.name, { val });
     return row;
   }
+  if (s.kind) return pickRow(s, row); // suwak albo lista rozwijana
   const dec = el("button", "small", "◂");
   const inc = el("button", "small", "▸");
   dec.title = "mniej";
@@ -168,6 +182,60 @@ function settingRow(s) {
   return row;
 }
 
+// ustawienie z listą wartości: suwak (kind "range") albo lista rozwijana ("list"); wysyła numer wybranej wartości
+function pickRow(s, row) {
+  const box = el("div", "wide pick");
+  const label = el("span", "plabel");
+  const r = { kind: s.kind, labels: [], label, hint: el("div", "hint"), dragging: false };
+  const send = (i) => {
+    if (s.name === "szerokość" && !confirm("Zmiana szerokości uruchamia skrypt ponownie. Kontynuować?")) {
+      r.ctl.value = String(r.index);
+      return;
+    }
+    cmd("setting", { name: s.name, i });
+  };
+  if (s.kind === "range") {
+    r.ctl = el("input");
+    r.ctl.type = "range";
+    r.ctl.min = "0";
+    r.ctl.step = "1";
+    r.ctl.oninput = () => (label.textContent = r.labels[r.ctl.value]); // podgląd wartości w trakcie przesuwania
+    r.ctl.onpointerdown = () => (r.dragging = true);
+    r.ctl.onchange = () => {
+      r.dragging = false;
+      send(Number(r.ctl.value));
+    };
+    box.append(r.ctl, label);
+  } else {
+    r.ctl = el("select");
+    r.ctl.onchange = () => send(Number(r.ctl.value));
+    box.append(r.ctl);
+  }
+  r.ctl.setAttribute("aria-label", s.name);
+  row.append(box, r.hint);
+  rows.set(s.name, r);
+  return row;
+}
+
+function renderPick(r, s) {
+  if (r.labels.join("\n") !== s.labels.join("\n")) { // lista wartości się zmieniła (np. „poziomy: auto = …”)
+    r.labels = s.labels;
+    if (r.kind === "range") r.ctl.max = String(s.labels.length - 1);
+    else {
+      r.ctl.textContent = "";
+      s.labels.forEach((l, i) => {
+        const o = el("option", "", l);
+        o.value = String(i);
+        r.ctl.append(o);
+      });
+    }
+  }
+  r.index = s.index;
+  if (r.dragging) return; // nie przestawiamy suwaka pod palcem
+  r.ctl.value = String(s.index);
+  r.label.textContent = s.labels[s.index];
+}
+
 // ustawienia efektu (s.fx) widać tylko, gdy ten efekt jest na panelu; wspólne – zawsze
 function renderSettings() {
   if (!rows.size) {
@@ -188,18 +256,19 @@ function renderSettings() {
       if (document.activeElement !== r.input) r.input.value = state.host;
       continue;
     }
+    if (r.ctl) renderPick(r, s);
     // pasek „███░░░ 24” z TUI zamieniamy na wskaźnik + liczbę
     const m = /^([█░]+)\s*(.*)$/.exec(s.value);
+    if (r.val) r.val.textContent = m ? m[2] : s.value;
     if (r.meter) {
       r.meter.hidden = !m;
       if (m) r.fill.style.width = `${(100 * [...m[1]].filter((c) => c === "█").length) / [...m[1]].length}%`;
     }
-    r.val.textContent = m ? m[2] : s.value;
     // podpowiedzi z TUI będące samymi klawiszami („[ ]”, „l”, „< > r”) – skróty działają też tutaj
     if (r.hint) r.hint.textContent = /^[^\s\w]?[\w\[\]<> ]{0,4}$/.test(s.hint) ? `klawisz: ${s.hint}` : s.hint;
     if (r.hint) r.hint.classList.toggle("warn", s.hint.includes("skacze")); // ruch nie będzie płynny
   }
-  $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : state.mode;
+  $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : $("#now-name").textContent;
   $("#fx-none").hidden = fxShown;
   if (!fx.has("ludzik")) $("#acts").hidden = true;
 }
@@ -295,15 +364,24 @@ function renderInbox(ib) {
 }
 
 // ------------------------------------------------------------ stan
+async function reloadClocks() {
+  clocks = await (await fetch("api/clocks")).json();
+  listKey = "";
+}
+
 function render(s) {
   state = s;
+  if (s.wled_ver !== clocks.wled_ver && !render.loading) { // lista efektów WLED doszła albo się zmieniła
+    render.loading = true;
+    reloadClocks().finally(() => (render.loading = false));
+  }
   const send = $("#send-state");
-  send.textContent = s.sending ? "● wysyła" : "○ nie wysyła";
-  send.classList.toggle("ok", s.sending);
+  send.textContent = s.wled_mode ? "◆ efekt WLED" : s.sending ? "● wysyła" : "○ nie wysyła";
+  send.classList.toggle("ok", s.sending && !s.wled_mode);
   $("#host").textContent = s.host ? `host ${s.host}` : "brak hosta – wpisz w ustawieniach";
   $("#clock").textContent = s.time + (s.fake_time ? " (udawany)" : "");
   $("#badges").textContent = (s.paused ? "⏸ pauza  " : "") + (s.mirror ? "⇋ odbicie" : "");
-  $("#override").hidden = !(s.lor && s.sending);
+  $("#override").hidden = !(s.lor && s.sending) || s.wled_mode;
   $("#btn-pause").textContent = s.paused ? "▶ Wznów" : "⏸ Pauza";
   $("#btn-pause").classList.toggle("on", s.paused);
   $("#btn-cycle").classList.toggle("on", s.mode === "cykl");
@@ -311,9 +389,13 @@ function render(s) {
   $("#btn-mirror").classList.toggle("on", s.mirror);
 
   const shown = s.mode === "cykl" ? s.current : s.mode;
-  $("#now-name").textContent = shown;
-  $("#now-cycle").textContent = s.mode === "cykl" ? "(cykl)" : "";
-  $("#now-doc").textContent = clocks.docs[shown] || "";
+  const wfx = s.wled_mode && (clocks.wled || []).find((fx) => `wled:${fx.id}` === s.mode);
+  $("#now-name").textContent = wfx ? wfx.name : shown;
+  $("#now-cycle").textContent = s.mode === "cykl" ? "(cykl)" : s.wled_mode ? "(efekt WLED)" : "";
+  $("#now-doc").textContent = wfx
+    ? "Efekt wbudowany w WLED – skrypt teraz nic nie wysyła, obraz rysuje WLED (podgląd tu niedostępny)." +
+      (wfx.tags.includes("♪") ? " Reaguje na dźwięk – potrzebny mikrofon w WLED." : "")
+    : clocks.docs[shown] || "";
 
   const p = s.power;
   const over = !p.auto && p.psu && p.raw > p.psu;
@@ -324,6 +406,10 @@ function render(s) {
     (p.k < 0.98 ? `  – przyciemniam do ${Math.round(p.k * 100)}% (efekt chce ${(p.raw / 1000).toFixed(1)} A)` : "") +
     (over ? "  – ponad budżet zasilacza (przyciemnianie wyłączone)" : "");
   pw.className = p.k < 0.98 ? "warn" : over ? "bad" : "";
+  if (s.wled_mode) {
+    pw.textContent = "prąd: efekt WLED – limit pilnuje WLED";
+    pw.className = "";
+  }
   $("#stat-panel").textContent = `panel: jasność WLED ${s.bri}/255, model: ${s.levels} poziomów na kanał`;
   const fps = $("#stat-fps");
   fps.textContent =
