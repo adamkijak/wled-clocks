@@ -396,7 +396,8 @@ class Frame:
         return [row[::-1] for row in rows] if PANEL["mirror"] else rows
 
     def to_bytes(self):
-        q = panel_q()
+        q = panel_q() if panel_manual() else None  # ręcznie zmierzone poziomy – stary model; zwykle dokładny WLED 16
+        bri = PANEL["bri"]
         fix = led_fix if COLOR["fix"] else None
         out, lut = bytearray(), {}  # lut: kolor -> 3 bajty (w klatce zwykle mało różnych kolorów)
         for y, row in enumerate(self.rgb_rows()):
@@ -406,7 +407,7 @@ class Frame:
                 px = lut.get(c)
                 if px is None:
                     s = fix(c) if fix else c
-                    px = lut[c] = bytes((q[s[0]], q[s[1]], q[s[2]]))
+                    px = lut[c] = bytes((q[s[0]], q[s[1]], q[s[2]]) if q else send_color(s, bri))
                 out += px
             pad = PANEL.get("ddp_w", W) - W
             if pad > 0:
@@ -514,23 +515,117 @@ def led_fix(c):
     return r
 
 
+# ---------------------------------------------------------------- jasność WLED 16 (color_fade w trybie „video”)
+# WLED skaluje każdy kanał: (v * bri + 127) >> 8, a najniższy bit ustawia (żeby kanał nie zgasł) tylko kanałom
+# powyżej ok. 25% najsilniejszego kanału koloru: v > (max >> 2) + 1. Przy bri = 255 wysyła kolor bez zmian.
+# Słaby kanał może więc zgasnąć, a mocniejszy dostaje +1 – stąd przy małej jasności odcień zależy od jasności.
+_WF, _SEND = {}, {}
+
+
+def _wled_tables(bri):
+    """(bez bitu, z bitem, zakresy v dla każdego wyjścia bez bitu, zakresy z bitem) dla jasności bri."""
+    t = _WF.get(bri)
+    if t is None:
+        a = [0] + [(v * bri + 127) >> 8 for v in range(1, 256)]
+        b = [0] + [x | 1 for x in a[1:]]
+        ra, rb = {}, {}
+        for v in range(256):
+            ra.setdefault(a[v], [v, v])[1] = v
+            rb.setdefault(b[v], [v, v])[1] = v
+        t = _WF[bri] = (a, b, ra, rb)
+    return t
+
+
+def wled_fade(c, bri):
+    """Bajty, które WLED 16 naprawdę wyśle na diody, gdy dostanie kolor c przy jasności bri."""
+    if bri >= 255:
+        return tuple(c)
+    if bri <= 0 or not any(c):
+        return (0, 0, 0)
+    a, b = _wled_tables(bri)[:2]
+    thr = (max(c) >> 2) + 1
+    return tuple(b[v] if v > thr else a[v] for v in c)
+
+
+def wled_top(bri):
+    """Najjaśniejsze wyjście kanału przy jasności bri (pełny kolor)."""
+    return 255 if bri >= 255 else _wled_tables(max(1, bri))[1][255]
+
+
+def _odd_near(x, lo, hi):
+    """Nieparzyste wyjścia (z ustawionym bitem) wokół x, w zakresie lo..hi, oraz końce zakresu."""
+    o = int(x) - 1 + int(x) % 2  # największe nieparzyste <= x (albo x-1)
+    return {v for v in (lo, hi, o, o + 2) if lo <= v <= hi}
+
+
+def _nearest(p, top, outs):
+    """Wyjście z outs najbliższe PERCEPCYJNIE zamierzonej wartości p (0..1): słabe składowe gasną zamiast płowieć."""
+    return min(outs, key=lambda o: (abs((o / top) ** (1 / 2.2) - p), o))
+
+
+def send_color(c, bri):
+    """Co wysłać (DDP), żeby panel przy jasności bri pokazał kolor jak najbliższy c: najpierw najsilniejszy kanał,
+    potem pozostałe – każdy na najbliższy poziom, który WLED przy tym kolorze naprawdę da (próg 25%)."""
+    if bri >= 255:  # WLED wysyła bez zmian, diody świecą liniowo – przeliczamy jak przy każdej innej jasności
+        return tuple(round(255 * (v / 255) ** 2.2) for v in c)
+    key = (c, bri)
+    r = _SEND.get(key)
+    if r is not None:
+        return r
+    a, b, ra, rb = _wled_tables(max(1, bri))
+    top = b[255]
+    m = max(c)
+    if m == 0:
+        return (0, 0, 0)
+    # najsilniejszy kanał ma zawsze ustawiony bit (v > próg), więc jego wyjście jest nieparzyste
+    od = _nearest(m / 255, top, {0} | {o for o in _odd_near((m / 255) ** 2.2 * top, b[2], top) if o in rb})
+    if od == 0:
+        r = (0, 0, 0)
+    else:
+        vd = rb[od][1]  # największe v z tym wyjściem – wyższy próg, więcej poziomów dla słabszych kanałów
+        thr = (vd >> 2) + 1
+        low = a[thr]  # do tego wyjścia kanały bez bitu (v <= próg), wyżej tylko z bitem (v > próg)
+        hi0 = b[thr + 1] if thr + 1 <= vd else od
+        out = []
+        for v in c:
+            if v == m:
+                out.append(vd)
+                continue
+            x = (v / 255) ** 2.2 * top
+            cands = {0, min(low, int(x)), min(low, int(x) + 1)} | {o for o in _odd_near(x, hi0, od) if o in rb}
+            o = _nearest(v / 255, top, cands)
+            if o <= low:
+                out.append(ra[o][0])
+            else:
+                w = max(rb[o][0], thr + 1)
+                out.append(w if w <= vd and b[w] == o else vd)
+        r = tuple(out)
+    if len(_SEND) > 8192:
+        _SEND.clear()
+    _SEND[key] = r
+    return r
+
+
 def panel_view(rows, lv=None):
-    """Co naprawdę zobaczy oko na panelu (do podglądu): poziomy, na jakie panel zapali kanały przy tej jasności WLED,
-    i barwy diod WS2812 przeliczone na barwy monitora (także po „popraw kolory”)."""
-    lv = panel_levels() if lv is None else lv
-    q = panel_model(lv)[0]
-    k = panel_pe() * 2.2  # 1 = światło diody rośnie liniowo z poziomem
-    top = lv if lv < 255 else 255
-    lin = [((panel_level(q[v], lv) if lv < 255 else v) / top) ** k for v in range(256)]
+    """Co naprawdę zobaczy oko na panelu (do podglądu): co WLED 16 wyśle na diody przy tej jasności (te same wartości
+    co wysyłane DDP, z „popraw kolory”), i barwy diod WS2812 przeliczone na barwy monitora."""
     m = led_matrix()[0]
     fix = led_fix if COLOR["fix"] else None
+    bri = PANEL["bri"]
+    manual = panel_manual()  # ręcznie zmierzone poziomy (--kalibracja) – stary model
+    if manual:
+        lv = panel_levels() if lv is None else lv
+        q, k = panel_model(lv)[0], panel_pe() * 2.2
+        lin_m = [(panel_level(q[v], lv) / lv) ** k for v in range(256)]
+    top = wled_top(bri)
     cache, out = {}, []
     for row in rows:
         o = []
         for c in row:
             p = cache.get(c)
             if p is None:
-                ch = [lin[v] for v in (fix(c) if fix else c)]
+                s_ = fix(c) if fix else c
+                ch = [lin_m[v] for v in s_] if manual else [x / top for x in wled_fade(send_color(s_, bri), bri)]
                 d = [max(0.0, sum(a * x for a, x in zip(r_, ch))) for r_ in m]
                 hi = max(d)
                 d = [x / hi for x in d] if hi > 1 else d
@@ -5395,7 +5490,9 @@ class Engine:
         self.skip_heavy = cfg.get("skip_heavy", True)
         self.cycle.allowed = lambda n: not (self.skip_heavy and self.heavy(n)) and (n != "napisz" or INBOX.is_open())
         self.settings = self.make_settings()
-        self.wled_fx, self.wled_ver = [], 0   # efekty wbudowane w WLED: [{"id", "name", "tags"}], numer wersji listy
+        self.wled_fx, self.wled_ver = [], 0   # efekty wbudowane w WLED: [{"id", "name", "tags", "meta"}], wersja listy
+        self.wled_pal, self.wled_seg = [], {}  # palety WLED i bieżące parametry segmentu (sx, ix, …, pal, col)
+        self.wled_saved = {k: v for k, v in (cfg.get("wled_fx_cfg") or {}).items() if isinstance(v, dict)}
         self.load_wled_fx()
         if str(cfg.get("mode", "")).startswith("wled:") and a.mode == "cykl":  # ostatnio był efekt WLED
             self.select(cfg["mode"])
@@ -5664,7 +5761,8 @@ class Engine:
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"],
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
-               "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"]}
+               "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
+               "wled_fx_cfg": self.wled_saved}
         try:
             os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
             with open(CONFIG, "w", encoding="utf-8") as fh:
@@ -5694,6 +5792,10 @@ class Engine:
                     data = http(f"http://{host}/json/fxdata")
                 except Exception:  # noqa: BLE001 – starsze WLED nie mają fxdata
                     data = []
+                try:
+                    pal = http(f"http://{host}/json/pal")
+                except Exception:  # noqa: BLE001
+                    pal = []
             except Exception as e:  # noqa: BLE001
                 self.say(f"nie udało się pobrać efektów WLED: {e}")
                 return
@@ -5701,11 +5803,13 @@ class Engine:
             for i, n in enumerate(names):
                 if not n or n in ("RSVD", "-"):
                     continue
-                flags = (data[i].split(";") + [""] * 4)[3] if i < len(data) and isinstance(data[i], str) else ""
+                meta = data[i] if i < len(data) and isinstance(data[i], str) else ""
+                flags = (meta.split(";") + [""] * 4)[3]
                 tags = ("2D" if "2" in flags else "") + (" ♪" if "v" in flags or "f" in flags else "")
-                fx.append({"id": i, "name": n, "tags": tags.strip()})
+                fx.append({"id": i, "name": n, "tags": tags.strip(), "meta": meta})
             if host == self.host:
-                self.wled_fx, self.wled_ver = fx, self.wled_ver + 1
+                self.wled_fx, self.wled_pal = fx, [str(x) for x in pal]
+                self.wled_ver += 1
         threading.Thread(target=go, daemon=True).start()
 
     @staticmethod
@@ -5717,6 +5821,85 @@ class Engine:
     def wled_name(self, i):
         return next((x["name"] for x in self.wled_fx if x["id"] == i), f"#{i}")
 
+    WLED_SLIDERS = [("sx", "szybkość", 255), ("ix", "intensywność", 255), ("c1", "własny 1", 255),
+                    ("c2", "własny 2", 255), ("c3", "własny 3", 31)]  # c3 w WLED ma 5 bitów
+    WLED_CHECKS = [("o1", "opcja 1"), ("o2", "opcja 2"), ("o3", "opcja 3")]
+    WLED_COLORS = ["kolor efektu", "tło", "kolor 3"]
+
+    def wled_params(self, i):
+        """Ustawienia efektu WLED z jego opisu w /json/fxdata („suwaki;kolory;paleta;cechy;domyślne”, „!” = nazwa
+        domyślna, puste = efekt tego nie używa). -> lista {"key", "label", "kind", "max"}."""
+        meta = next((x["meta"] for x in self.wled_fx if x["id"] == i), "")
+        if not meta:  # bez opisu: Solid – sam kolor, starsze efekty – wszystko jak w aplikacji WLED
+            meta = ";!;" if i == 0 else "!,!;!,!,!;!"
+        parts = (meta.split(";") + [""] * 3)[:3]
+        names, cols, pal = parts[0].split(","), parts[1].split(",") if parts[1] else [], parts[2]
+        out = []
+        for k, (key, default, top) in enumerate(self.WLED_SLIDERS):
+            if k < len(names) and names[k]:
+                out.append({"key": key, "label": default if names[k] == "!" else names[k], "kind": "range", "max": top})
+        for k, (key, default) in enumerate(self.WLED_CHECKS):
+            j = len(self.WLED_SLIDERS) + k
+            if j < len(names) and names[j]:
+                out.append({"key": key, "label": default if names[j] == "!" else names[j], "kind": "check"})
+        if pal:
+            out.append({"key": "pal", "label": "paleta", "kind": "list"})
+        for k, name in enumerate(cols[:3]):
+            if name:
+                out.append({"key": f"col{k}", "label": self.WLED_COLORS[k] if name == "!" else name, "kind": "color"})
+        return out
+
+    def refresh_wled_seg(self, delay=0.5):
+        """W tle: bieżące parametry segmentu WLED (po zmianie efektu WLED może ustawić swoje domyślne)."""
+        host = self.host
+
+        def go():
+            time.sleep(delay)
+            try:
+                st = http(f"http://{host}/json/state")
+                seg = next(g for g in st["seg"] if g.get("id") == st.get("mainseg", 0))
+            except Exception:  # noqa: BLE001
+                return
+            self.wled_seg = {k: seg.get(k) for k in ("fx", "sx", "ix", "c1", "c2", "c3", "o1", "o2", "o3", "pal", "col")}
+        threading.Thread(target=go, daemon=True).start()
+
+    def wled_set(self, key, value):
+        """Zmiana ustawienia efektu WLED z panelu: od razu do WLED i do pamięci tego efektu."""
+        i = self.wled_id(self.mode)
+        if i is None:
+            return
+        seg = (NET.get("wled") or {}).get("mainseg", 0)
+        if key.startswith("col"):
+            col = [list(c) for c in (self.wled_seg.get("col") or [[0, 0, 0]] * 3)] + [[0, 0, 0]] * 3
+            col = col[:3]
+            col[int(key[3])] = list(value)
+            self.wled_seg["col"], payload = col, {"col": col}
+        else:
+            self.wled_seg[key], payload = value, {key: value}
+        self.wled_saved.setdefault(str(i), {}).update(payload)
+        self.wled_post({"seg": [dict({"id": seg}, **payload)]}, "zmienić ustawienia efektu WLED")
+
+    def wled_snapshot(self):
+        """Ustawienia bieżącego efektu WLED z wartościami – do panelu WWW."""
+        i = self.wled_id(self.mode)
+        if i is None:
+            return None
+        seg, items = self.wled_seg if self.wled_seg.get("fx") == i else {}, []
+        mine = self.wled_saved.get(str(i), {})
+        for it in self.wled_params(i):
+            key = it["key"]
+            if key.startswith("col"):
+                cols = mine.get("col") or seg.get("col") or []
+                c = cols[int(key[3])] if int(key[3]) < len(cols) and cols[int(key[3])] else [0, 0, 0]
+                v = "#%02x%02x%02x" % tuple(int(clamp(x, 0, 255)) for x in c[:3])
+            else:
+                v = mine.get(key, seg.get(key))
+            item = dict(it, value=v)
+            if key == "pal":
+                item["labels"] = self.wled_pal
+            items.append(item)
+        return {"id": i, "items": items}
+
     def select_wled(self, i):
         """Efekt WLED: przestajemy wysyłać (tick nic nie śle), a WLED od razu wychodzi z trybu realtime i gra efekt."""
         if not self.host:
@@ -5725,7 +5908,11 @@ class Engine:
         self.fade_from = None
         self.mode = f"wled:{i}"
         seg = (NET.get("wled") or {}).get("mainseg", 0)
-        self.wled_post({"on": True, "live": False, "seg": [{"id": seg, "fx": i}]}, "włączyć efektu WLED")
+        mine = self.wled_saved.get(str(i))  # zapamiętane ustawienia tego efektu, a bez nich domyślne z WLED
+        self.wled_post({"on": True, "live": False, "seg": [dict({"id": seg, "fx": i}, **(mine or {"fxdef": True}))]},
+                       "włączyć efektu WLED")
+        self.wled_seg = {}
+        self.refresh_wled_seg()
 
     def select(self, name):
         i = self.wled_id(name)
@@ -5912,6 +6099,7 @@ class Engine:
         return {
             "w": W, "h": H, "mode": self.mode, "current": self.cycle.current, "paused": self.paused,
             "wled_mode": self.wled_id(self.mode) is not None, "wled_ver": self.wled_ver,
+            "wled_settings": self.wled_snapshot(),
             "sending": self.sending, "host": self.host, "lor": self.lor, "mirror": PANEL["mirror"],
             "time": now.strftime("%H:%M:%S"), "fake_time": bool(self.offset) or self.speed != 1,
             "settings": [dict({"name": n, "value": val(), "hint": self.text_step() if n == "tempo tekstu" else hint,
@@ -6352,6 +6540,29 @@ def web_cmd(e, c):
         if act not in LUDZIK_ACTS or not 0 <= lvl <= 3:
             raise ValueError("złe zajęcie ludzika")
         return lambda: LUDZIK["lvl"].__setitem__(act, lvl)
+    if op == "wled":  # ustawienie bieżącego efektu WLED
+        i = e.wled_id(e.mode)
+        key = c.get("key")
+        item = next((x for x in e.wled_params(i) if x["key"] == key), None) if i is not None else None
+        if item is None:
+            raise ValueError(f"efekt WLED nie ma ustawienia {key!r}")
+        v = c.get("v")
+        if item["kind"] == "range":
+            v = int(v)
+            if not 0 <= v <= item["max"]:
+                raise ValueError("wartość poza zakresem")
+        elif item["kind"] == "check":
+            v = bool(v)
+        elif item["kind"] == "list":
+            v = int(v)
+            if not 0 <= v < max(1, len(e.wled_pal)):
+                raise ValueError("nie ma takiej palety")
+        else:
+            m = re.fullmatch(r"#([0-9a-fA-F]{6})", str(v))
+            if not m:
+                raise ValueError("zły kolor")
+            v = [int(m[1][k:k + 2], 16) for k in (0, 2, 4)]
+        return lambda: e.wled_set(key, v)
     if op == "inbox":
         act = c.get("act")
         if act == "open":

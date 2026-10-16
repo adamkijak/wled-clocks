@@ -1,5 +1,14 @@
 # Zmiany
 
+## 1.4.0
+
+- Kolory na panelu nie zależą już od jasności WLED: skrypt liczy dokładnie tak, jak WLED 16 skaluje jasność
+  (zaokrąglenie i „+1” tylko dla kanałów powyżej ~25% najsilniejszego), i dobiera wysyłane wartości pod to.
+  Podgląd pokazuje to samo, co panel – także przy jasności 255 (wcześniej kolory wychodziły tam inaczej).
+- Efekty wbudowane w WLED mają swoje ustawienia (jak w aplikacji WLED, z nazwami z WLED): suwaki szybkości,
+  intensywności i własne efektu, opcje, paleta, kolory. Zapamiętywane osobno dla każdego efektu; efekt bez
+  zapisanych ustawień startuje z domyślnymi wartościami WLED.
+
 ## 1.3.0
 
 - Podgląd pokazuje kolory jak diody WS2812, nie jak monitor: mieszanki z zielonym są na diodach czerwieńsze

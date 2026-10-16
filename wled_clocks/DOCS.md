@@ -70,13 +70,17 @@ typowych diod WS2812.
 3. Chcesz, żeby na panelu pomarańczowy był pomarańczowy, a biel neutralna? Włącz **popraw kolory** w ustawieniach
    wspólnych – skrypt przeliczy kolory pod diody (podgląd pokazuje wtedy też wynik poprawki).
 
-Przy małej jasności WLED panel ma mało poziomów na kanał, więc odcienie są przybliżone.
+Przy małej jasności WLED panel ma mało poziomów na kanał, więc odcienie są przybliżone. Skrypt liczy dokładnie tak,
+jak WLED 16 przyciemnia kolory, więc odcień nie zmienia się przy zmianie jasności, a podgląd to pokazuje.
 
 ## Efekty wbudowane w WLED
 
 Pod efektami skryptu lista pokazuje też efekty wbudowane w WLED (2D = dla matrycy, ♪ = reaguje na dźwięk, potrzebny
 mikrofon w WLED). Po wybraniu skrypt przestaje wysyłać obraz, a efekt rysuje sam WLED – podglądu w panelu wtedy nie
 ma. Jasność i limit prądu takich efektów ustawia WLED. Wybranie efektu skryptu wraca do strumienia.
+
+Ustawienia efektu WLED (szybkość, intensywność, własne suwaki, opcje, paleta, kolory) są w „Ustawienia efektu” –
+tylko te, których dany efekt używa, z nazwami z WLED. Każdy efekt pamięta swoje ustawienia.
 
 ## Skróty klawiszowe w panelu
 

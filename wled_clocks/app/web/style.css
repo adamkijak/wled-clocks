@@ -168,6 +168,8 @@ main > *, .cols > * { min-width: 0; }
   border-radius: 8px;
   padding: 5px 8px;
 }
+.pick input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.pick input[type="color"] { width: 56px; height: 30px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .pick .plabel { min-width: 8ch; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .meter { flex: 0 0 70px; height: 6px; border-radius: 3px; background: var(--btn); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--accent); }

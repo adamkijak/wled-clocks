@@ -236,6 +236,76 @@ function renderPick(r, s) {
   r.label.textContent = s.labels[s.index];
 }
 
+// ustawienia bieżącego efektu WLED (z jego opisu w WLED): suwaki, opcje, paleta, kolory – każda zmiana od razu do WLED
+let wledKey = "";
+const wledRows = new Map(); // klucz (sx, ix, …, pal, col0…) -> {ctl, label, kind}
+
+function renderWled(ws) {
+  const box = $("#wled-settings");
+  const pal = ws ? (ws.items.find((it) => it.labels) || { labels: [] }).labels.length : 0;
+  const key = ws ? `${ws.id}|${ws.items.map((it) => it.key + it.label).join()}|${pal}` : "";
+  if (key !== wledKey) { // inny efekt – budujemy wiersze od nowa
+    wledKey = key;
+    box.textContent = "";
+    wledRows.clear();
+    for (const it of ws ? ws.items : []) {
+      const row = el("div", "srow");
+      row.append(el("span", "", it.label));
+      const pick = el("div", "wide pick");
+      const r = { kind: it.kind, dragging: false };
+      const send = (v) => cmd("wled", { key: it.key, v });
+      if (it.kind === "range") {
+        r.ctl = el("input");
+        r.ctl.type = "range";
+        r.ctl.min = "0";
+        r.ctl.max = String(it.max);
+        r.label = el("span", "plabel");
+        r.ctl.oninput = () => (r.label.textContent = r.ctl.value);
+        r.ctl.onpointerdown = () => (r.dragging = true);
+        r.ctl.onchange = () => {
+          r.dragging = false;
+          send(Number(r.ctl.value));
+        };
+        pick.append(r.ctl, r.label);
+      } else if (it.kind === "check") {
+        r.ctl = el("input");
+        r.ctl.type = "checkbox";
+        r.ctl.onchange = () => send(r.ctl.checked);
+        pick.append(r.ctl);
+      } else if (it.kind === "list") {
+        r.ctl = el("select");
+        it.labels.forEach((l, i) => {
+          const o = el("option", "", l);
+          o.value = String(i);
+          r.ctl.append(o);
+        });
+        r.ctl.onchange = () => send(Number(r.ctl.value));
+        pick.append(r.ctl);
+      } else {
+        r.ctl = el("input");
+        r.ctl.type = "color";
+        r.ctl.onchange = () => send(r.ctl.value);
+        pick.append(r.ctl);
+      }
+      r.ctl.setAttribute("aria-label", it.label);
+      row.append(pick);
+      box.append(row);
+      wledRows.set(it.key, r);
+    }
+  }
+  for (const it of ws ? ws.items : []) {
+    const r = wledRows.get(it.key);
+    if (!r || r.dragging || document.activeElement === r.ctl) continue; // nie przestawiamy pod palcem
+    const loading = it.value === null || it.value === undefined; // WLED jeszcze nie podał wartości
+    r.ctl.disabled = loading;
+    if (loading) continue;
+    if (r.kind === "check") r.ctl.checked = Boolean(it.value);
+    else r.ctl.value = String(it.value);
+    if (r.label) r.label.textContent = String(it.value);
+  }
+  return Boolean(ws && ws.items.length);
+}
+
 // ustawienia efektu (s.fx) widać tylko, gdy ten efekt jest na panelu; wspólne – zawsze
 function renderSettings() {
   if (!rows.size) {
@@ -269,7 +339,7 @@ function renderSettings() {
     if (r.hint) r.hint.classList.toggle("warn", s.hint.includes("skacze")); // ruch nie będzie płynny
   }
   $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : $("#now-name").textContent;
-  $("#fx-none").hidden = fxShown;
+  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown;
   if (!fx.has("ludzik")) $("#acts").hidden = true;
 }
 

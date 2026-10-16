@@ -245,6 +245,20 @@ class EngineTest(unittest.TestCase):
                 dct.clear()
                 dct.update(old)
 
+    def test_wled16_brightness_model(self):
+        """Arytmetyka color_fade(video) z WLED 16 i stały odcień na panelu przy różnych jasnościach."""
+        import colorsys
+        self.assertEqual(wc.wled_fade((255, 120, 0), 4), (5, 3, 0))           # +1 tylko > 25% najsilniejszego
+        self.assertEqual(wc.wled_fade((255, 40, 0), 24), (25, 4, 0))
+        self.assertEqual(wc.wled_fade((255, 120, 0), 255), (255, 120, 0))
+        hue = lambda c: colorsys.rgb_to_hsv(*c)[0] * 360
+        for c in ((255, 120, 0), (255, 200, 0), (0, 200, 255)):
+            hues = []
+            for bri in (4, 8, 16, 24, 64, 128, 255):
+                o = wc.wled_fade(wc.send_color(c, bri), bri)
+                hues.append(hue([(x / wc.wled_top(bri)) ** (1 / 2.2) for x in o]))
+            self.assertLess(max(hues) - min(hues), 10, (c, hues))                # kolor nie zależy od jasności
+
     def test_view_only_when_watched(self):
         e = wc.Engine(args(), {})
         e.tick()
@@ -354,8 +368,12 @@ class WledEffectsTest(unittest.TestCase):
 
             def do_GET(self):
                 body = {"/json/eff": ["Solid", "Blink", "RSVD", "Fire 2012"],
-                        "/json/fxdata": ["", "!;!;!;01", "", "!;;!;2v"],
-                        "/json/state": {"bri": wc.PANEL["bri"], "mainseg": 0, "lor": 0}}.get(self.path)
+                        "/json/fxdata": ["", "!,Duty cycle;!,!;!;01", "", "Cooling,Spark rate,,2D Blur,,Boost;;!;2v"],
+                        "/json/pal": ["Default", "Party", "Lava"],
+                        "/json/state": {"bri": wc.PANEL["bri"], "mainseg": 0, "lor": 0,
+                                        "seg": [{"id": 0, "fx": 3, "sx": 64, "ix": 160, "c1": 128, "c2": 128,
+                                                 "c3": 16, "o1": False, "o2": False, "o3": False, "pal": 2,
+                                                 "col": [[255, 0, 0], [0, 0, 0], [0, 0, 0]]}]}}.get(self.path)
                 data = json.dumps(body).encode()
                 self.send_response(200 if body is not None else 404)
                 self.send_header("Content-Length", str(len(data)))
@@ -394,7 +412,27 @@ class WledEffectsTest(unittest.TestCase):
         e.tick()
         self.assertEqual(e.mode, "wled:3")
         self.assertEqual(sent, [])                                          # WLED gra sam – nic nie wysyłamy
-        self.wait(lambda: {"on": True, "live": False, "seg": [{"id": 0, "fx": 3}]} in self.posted)
+        self.wait(lambda: {"on": True, "live": False, "seg": [{"id": 0, "fx": 3, "fxdef": True}]} in self.posted)
+        self.wait(lambda: e.wled_seg.get("fx") == 3)                       # parametry segmentu z WLED
+        ws = e.wled_snapshot()
+        self.assertEqual([(it["key"], it["label"], it["value"]) for it in ws["items"]],
+                         [("sx", "Cooling", 64), ("ix", "Spark rate", 160), ("c2", "2D Blur", 128),
+                          ("o1", "Boost", False), ("pal", "paleta", 2)])        # c1 i kolory – efekt ich nie używa
+        self.posted.clear()
+        e.cmds.put(wc.web_cmd(e, {"op": "wled", "key": "sx", "v": 200}))
+        e.cmds.put(wc.web_cmd(e, {"op": "wled", "key": "o1", "v": True}))
+        e.tick()
+        self.wait(lambda: {"seg": [{"id": 0, "sx": 200}]} in self.posted and {"seg": [{"id": 0, "o1": True}]} in self.posted)
+        for bad in ({"op": "wled", "key": "sx", "v": 300}, {"op": "wled", "key": "c1", "v": 1},
+                    {"op": "wled", "key": "pal", "v": 9}):
+            with self.assertRaises(ValueError, msg=bad):
+                wc.web_cmd(e, bad)
+        e.select("wled:1")
+        e.select("wled:3")                                                  # powrót: zapamiętane, bez fxdef
+        self.wait(lambda: {"on": True, "live": False, "seg": [{"id": 0, "fx": 3, "sx": 200, "o1": True}]} in self.posted)
+        e.select("wled:1")
+        self.assertEqual([it["key"] for it in e.wled_snapshot()["items"]], ["sx", "ix", "pal", "col0", "col1"])
+        e.select("wled:3")
         self.assertIn("WLED", e.doc("wled:3"))
         e.skip(1)                                                           # ← → po efektach WLED
         self.assertEqual(e.mode, "wled:0")
