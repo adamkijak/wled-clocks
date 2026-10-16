@@ -18,6 +18,12 @@ Config → Sync Interfaces → zaznacz **Receive UDP realtime** (DDP, port 4048)
 Pozostałe ustawienia (jasność, fps, cykl, szerokość 60/120, zasilacz, ludzik…) zmienia się w panelu;
 zapisują się w `/data/wled_clocks.json` i przetrwają restart oraz aktualizację.
 
+## Wyłączenie wysyłania na panel
+
+Przycisk **● Wysyłanie** w panelu (albo klawisz `s`) wstrzymuje wysyłanie klatek DDP – po chwili WLED wraca do
+własnego efektu. Stan jest zapamiętywany, więc wyłączone wysyłanie zostaje wyłączone także po restarcie dodatku.
+Całkiem wyłączyć można też przez zatrzymanie dodatku.
+
 ## Skróty klawiszowe w panelu
 
 ← → poprzedni/następny, spacja pauza, `c` cykl, `s` wysyłanie, `m` odbicie, `l` losowa kolejność,

@@ -43,6 +43,20 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(e.mode, "ogien")
         self.assertEqual(e.fps, 15)
 
+    def test_ludzik_first(self):
+        self.assertEqual(wc.Engine.NAMES[0], "ludzik")
+        self.assertEqual(len(wc.CLOCKS), 101)
+
+    def test_sending_off_survives_restart(self):
+        e = wc.Engine(args(host="127.0.0.1"), {})
+        self.assertTrue(e.sending)
+        e.toggle_send()
+        e.save()
+        with open(wc.CONFIG, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        self.assertFalse(wc.Engine(args(host="127.0.0.1"), cfg).sending)
+        self.assertTrue(wc.Engine(args(host="127.0.0.1"), {}).sending)  # stary plik bez "sending": wysyła
+
     def test_view_only_when_watched(self):
         e = wc.Engine(args(), {})
         e.tick()

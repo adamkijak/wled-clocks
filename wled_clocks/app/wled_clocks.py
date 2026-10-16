@@ -6,17 +6,18 @@ Tylko biblioteka standardowa Pythona 3.8+ – bez żadnych dodatkowych pakietów
   python3 wled_clocks.py --list     – pełna lista ze opisami
 
 Kategorie:
-  * klasyka (1-12): licznik, roj, ogien, matrix, niebo, doba, skaner, tecza, hiperskok, zycie, akwarium, pong
-  * dane z internetu (13-34), bez kluczy API, pobierane w tle tylko dla widocznego efektu:
+  * ludzik (1) – na początku listy
+  * klasyka (2-13): licznik, roj, ogien, matrix, niebo, doba, skaner, tecza, hiperskok, zycie, akwarium, pong
+  * dane z internetu (14-35), bez kluczy API, pobierane w tle tylko dla widocznego efektu:
       pogoda, prognoza, opady, wiatr, termometr, smog (Open-Meteo), kursy, zloto (NBP), krypto (Binance),
       iss, kosmonauci, trzesienia (USGS), zorza (NOAA Kp), bloki (mempool.space), hackernews,
       wiadomosci (TVN24 RSS), imieniny, rakieta (The Space Devs), zart, slonce, uv, barometr
-  * style zegarów (35-66): binarny, analogowy, slownie, rzymski, morse, klepsydra, postep, kalendarz,
+  * style zegarów (36-67): binarny, analogowy, slownie, rzymski, morse, klepsydra, postep, kalendarz,
       odliczanie, nixie, segmenty, klapki, lustro, cien, tetris, hex, kolor, dziesietny, beaty, unix,
       strefy, obwod, wahadlo, fala, glitch, neon, pismo, kreskowy, maszyna, radar, domino, ksiezyc
-  * sceny, symulacje i gry (67-101): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
+  * sceny, symulacje i gry (68-101): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
       dym, kalejdoskop, labirynt, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, pociag, miasto,
-      las, gory, dna, oscyloskop, equalizer, ekg, mrowka, piasek, kule, kregi, wir, synthwave, pory, planety, ludzik
+      las, gory, dna, oscyloskop, equalizer, ekg, mrowka, piasek, kule, kregi, wir, synthwave, pory, planety
   * cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
 
 Pogoda i słońce liczone dla Warszawy; inne miejsce: --lat 50.06 --lon 19.94
@@ -4961,6 +4962,7 @@ LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, "transparent z pog
 
 
 CLOCKS = {
+    "ludzik": REG["ludzik"],  # pierwszy na liście (i w cyklu)
     "licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "niebo": Sky, "doba": DayRibbon,
     "skaner": Scanner, "tecza": Rainbow, "hiperskok": Warp, "zycie": Life, "akwarium": Aquarium, "pong": Pong,
     **REG,
@@ -5039,7 +5041,7 @@ class Engine:
 
     def __init__(self, a, cfg):
         self.host = a.host or ""
-        self.sending = bool(a.host)
+        self.sending = bool(a.host) and cfg.get("sending", True)  # wyłączone wysyłanie przetrwa restart
         self.tempo, self.text = a.tempo, a.text_speed
         self.fps = a.fps
         self.inst = {n: CLOCKS[n]() for n in CLOCKS}
@@ -5212,7 +5214,8 @@ class Engine:
                "panel_levels": PANEL["levels"] if panel_manual() else None,
                "panel_levels_bri": PANEL["bri"] if panel_manual() else None, "panel_pe": PANEL["pe"],
                "psu": POWER["psu"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
-               "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"]}
+               "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"],
+               "sending": self.sending}
         try:
             os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
             with open(CONFIG, "w", encoding="utf-8") as fh:
