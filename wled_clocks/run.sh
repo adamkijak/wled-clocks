@@ -25,5 +25,18 @@ if [[ -n "${lat}" && "${lat}" != "null" && -n "${lon}" && "${lon}" != "null" ]];
     args+=(--lat "${lat}" --lon "${lon}")
 fi
 
+# wiadomości od widzów (efekt „napisz”): tylko gdy skrzynka jest otwarta w panelu; domyślnie przez tunel bore.pub,
+# z pustym msg_tunnel – na porcie 8098 (adres publiczny trzeba załatwić samemu)
+args+=(--msg-port 8098)
+if bashio::config.has_value 'msg_tunnel'; then
+    args+=(--msg-tunnel "$(bashio::config 'msg_tunnel')" --msg-bore /usr/local/bin/bore)
+fi
+if bashio::config.has_value 'msg_public'; then
+    args+=(--msg-public "$(bashio::config 'msg_public')")
+fi
+if bashio::config.true 'msg_proxy'; then
+    args+=(--msg-proxy)
+fi
+
 bashio::log.info "Start: python3 /app/wled_clocks.py ${args[*]}"
 exec python3 -u /app/wled_clocks.py "${args[@]}"

@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-101 kreatywnych zegarów i efektów dla panelu WLED 120x12 (wysyłanie klatek protokołem DDP).
+103 kreatywne zegary i efekty dla panelu WLED 120x12 (wysyłanie klatek protokołem DDP).
 Tylko biblioteka standardowa Pythona 3.8+ – bez żadnych dodatkowych pakietów (podgląd GIF/PNG też).
 
   python3 wled_clocks.py --list     – pełna lista ze opisami
 
 Kategorie:
-  * ludzik (1) – na początku listy
-  * klasyka (2-13): licznik, roj, ogien, matrix, niebo, doba, skaner, tecza, hiperskok, zycie, akwarium, pong
-  * dane z internetu (14-35), bez kluczy API, pobierane w tle tylko dla widocznego efektu:
+  * na początku listy: ludzik (1), zegar (2, zwykła godzina i data w kolorze pory dnia),
+      napisz (3, wiadomości od widzów, np. na callu)
+  * klasyka (4-15): licznik, roj, ogien, matrix, niebo, doba, skaner, tecza, hiperskok, zycie, akwarium, pong
+  * dane z internetu (16-37), bez kluczy API, pobierane w tle tylko dla widocznego efektu:
       pogoda, prognoza, opady, wiatr, termometr, smog (Open-Meteo), kursy, zloto (NBP), krypto (Binance),
       iss, kosmonauci, trzesienia (USGS), zorza (NOAA Kp), bloki (mempool.space), hackernews,
       wiadomosci (TVN24 RSS), imieniny, rakieta (The Space Devs), zart, slonce, uv, barometr
-  * style zegarów (36-67): binarny, analogowy, slownie, rzymski, morse, klepsydra, postep, kalendarz,
+  * style zegarów (38-69): binarny, analogowy, slownie, rzymski, morse, klepsydra, postep, kalendarz,
       odliczanie, nixie, segmenty, klapki, lustro, cien, tetris, hex, kolor, dziesietny, beaty, unix,
       strefy, obwod, wahadlo, fala, glitch, neon, pismo, kreskowy, maszyna, radar, domino, ksiezyc
-  * sceny, symulacje i gry (68-101): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
+  * sceny, symulacje i gry (70-103): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
       dym, kalejdoskop, labirynt, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, pociag, miasto,
       las, gory, dna, oscyloskop, equalizer, ekg, mrowka, piasek, kule, kregi, wir, synthwave, pory, planety
   * cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
@@ -46,15 +47,18 @@ import os
 import queue
 import random
 import re
+import secrets
 import select
 import shutil
 import signal
 import socket
+import subprocess
 import sys
 import termios
 import textwrap
 import time
 import tty
+import hmac
 import html
 import http.server as httpd  # „http” to w tym pliku funkcja pobierająca dane
 import json
@@ -4522,7 +4526,8 @@ def ludzik_lvl(name):
 class Worker(Clock):
     """Robotnik w kasku sam przestawia cyfry: przed nową minutą wyciąga stare za panel, a o pełnej wpycha nowe;
     z nudów spaceruje po obu stronach zegara, czyta, śpi, je, pije kawę, żongluje, zamiata, robi pajacyki i pompki,
-    strzela przez zegar do tarczy z łuku, pistoletu albo bazooki; co kilka minut przeciąga transparent z pogodą."""
+    strzela przez zegar do tarczy z łuku, pistoletu albo bazooki, jeździ rowerem i autem (wyjeżdża za krawędź
+    i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą."""
 
     POSES = {k: [r.ljust(max(map(len, v)), ".") for r in v] for k, v in {  # twarzą w lewo; kolumna 0 = dłonie
         "stoi": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", ".BBBBBBB", ".SBBBBBS",
@@ -4583,6 +4588,15 @@ class Worker(Clock):
                  "...SBBBBBS.", "....PPPPP..", "....PP.PP..", "...OOO.OOO."],
         "baz2": ["....YYYYY..", "...YYYYYYY.", "....SESES..", "....SSSSS..", "....SSMSS..", "DVVVVVVVVVV", "DVVVVVVVVVV",
                  "...SBBBBBS.", "....PPPPP..", "....PP.PP..", "...OOO.OOO."],
+        "rower1": ["........YYYYY....", ".......YYYYYYY...", "........SESES....", "........SSSSS....", "........SMMMS....",
+                   "..FSSSSSBBBBB....", ".QFQ...BBBBBBQQQ.", "Q.F.QFFFFPPPQ...Q", "Q.H.Q.FF.PP.Q.H.Q",
+                   "Q...Q..FHPFFQ...Q", ".QQQ....OO...QQQ."],
+        "rower2": ["........YYYYY....", ".......YYYYYYY...", "........SESES....", "........SSSSS....", "........SMMMS....",
+                   "..FSSSSSBBBBB....", ".QFQ...BBBBBBQQQ.", "Q.F.QFFFFPPPQ...Q", "Q.H.Q.FF..PPQ.H.Q",
+                   "Q...Q..FHFPPQ...Q", ".QQQ......OO.QQQ."],
+        "auto": ["....................", "....................", "......NNNNNNNN......", ".....NXXYYYYYXN.....",
+                 "....NXXXSESESXXN....", "...NXXXXSSSSSXXXN...", ".NNNNNNNNNNNNNNNNNN.", "LNNNNNNNNNNNNNNNNNNN",
+                 "NNNQQQNNNNNNNNQQQNNR", "..QQHQQ......QQHQQ..", "...QQQ........QQQ..."],
     }.items()}
     POSES["kawa1"] = [r.replace("A", "W") for r in POSES["je1"]]  # kubek zamiast jabłka
     POSES["kawa2"] = [r.replace("A", "W") for r in POSES["je2"]]
@@ -4603,6 +4617,8 @@ class Worker(Clock):
         "pistolet": (4.6, ("pist1",) * 5 + ("pist2", "pist1", "pist1", "pist1") * 3 + ("pist1",) * 5, 0.2, False),
         "bazooka": (5.4, ("baz1",) * 4 + ("baz2",) * 2 + ("baz1",) * 12, 0.3, False),
     }
+    RIDES = {"rower": (("rower1", "rower2"), 24), "auto": (("auto",), 45)}  # pozy i prędkość (px/s)
+    RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony
     # strzelanie przez zegar do tarczy po drugiej stronie: kiedy strzał (s od początku) i prędkość pocisku (px/s)
     SHOTS = {"łuk": ((1.2,), 45), "pistolet": ((1.0, 1.8, 2.6), 120), "bazooka": ((1.2,), 50)}
     TARGET = [".R.", "RWR", "WRW", "RYR", "WRW", "RWR", ".R.", "T.T", "T.T"]
@@ -4610,8 +4626,10 @@ class Worker(Clock):
     PAL = {"Y": (255, 200, 0), "S": (255, 180, 130), "E": (0, 0, 0), "M": (0, 0, 0), "R": (170, 0, 25),
            "B": (230, 40, 40), "P": (40, 90, 230), "O": (210, 210, 210), "C": (150, 90, 60), "W": (235, 235, 235),
            "K": (40, 170, 90), "A": (110, 220, 40), "T": (150, 90, 40), "G": (230, 180, 60), "D": (130, 130, 145),
-           "V": (100, 125, 40)}  # D broń/grot, V rura bazooki
-    # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech, W kartki/kubek, K okładka, A jabłko, T kij, G miotła
+           "V": (100, 125, 40), "F": (0, 200, 255), "Q": (110, 110, 120), "H": (220, 220, 230), "N": (30, 160, 60),
+           "X": (110, 170, 230), "L": (255, 255, 170)}  # D broń/grot, V rura bazooki
+    # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech (w aucie: tylne światło), W kartki/kubek, K okładka,
+    # A jabłko, T kij, G miotła, F rama roweru, Q opony, H piasty/kołpaki, N karoseria, X szyby, L reflektor
     WALK, MOVE = 10, 9  # px/s: chód i przesuwanie cyfr
 
     def __init__(self):
@@ -4620,6 +4638,7 @@ class Worker(Clock):
         self.trick, self.next_trick, self.pending = None, None, None
         self.banner, self.banner_at = None, None
         self.rate, self.prev = None, None
+        self.ride, self.left = None, 60.0
 
     @staticmethod
     def layout(s):
@@ -4817,6 +4836,45 @@ class Worker(Clock):
         self.man(f, pose, bl - 9)
         return True
 
+    def start_ride(self, name, t, xs, xr, here_only):
+        """Wsiada i jedzie: za krawędź panelu i z powrotem z drugiej strony (za cyframi) do nowego miejsca."""
+        zs = self.zones(xs, xr)
+        if here_only:
+            zs = [z for z in zs if z[0] - 1 <= self.x <= z[1] + 1] or zs
+        z = random.choice(zs)
+        goal, o = random.randint(z[0], z[1]), self.RIDE_OFF
+        d = -1 if goal >= self.x else 1  # odjeżdża od celu i wraca zza drugiej krawędzi: trasa najwyżej W + 2*o
+        out = W + o - self.x if d > 0 else self.x + o
+        back = goal + o if d > 0 else W + o - goal
+        self.ride = {"n": name, "t0": t, "x0": self.x, "d": d, "goal": goal, "out": out, "len": out + back}
+
+    def ride_time(self, name):
+        return (W + 2 * self.RIDE_OFF) / self.RIDES[name][1]
+
+    def draw_ride(self, f, t, blink):
+        """-> False, gdy dojechał."""
+        r = self.ride
+        poses, v = self.RIDES[r["n"]]
+        k = min(r["len"], (t - r["t0"]) * v)
+        if k >= r["len"]:
+            self.x, self.goal, self.ride = r["goal"], None, None
+            return False
+        d = r["d"]
+        x = r["x0"] + d * k if k < r["out"] else (-self.RIDE_OFF if d > 0 else W + self.RIDE_OFF) + d * (k - r["out"])
+        self.x = clamp(x, -10, W)  # gdyby przerwało przestawianie cyfr – idzie do roboty stąd
+        pose, flip = poses[int(k / 3) % len(poses)], d > 0
+        sx = x + self.place(pose, flip)
+        self.man(f, pose, sx, flip, blink)
+        if r["n"] == "auto":
+            w = len(self.POSES[pose][0])
+            front, back = (sx + w, sx - 1) if flip else (sx - 1, sx + w)
+            for q in range(6):  # snop światła przed maską
+                f.add(front + d * q, 7 + (q > 2), mul((90, 85, 50), 1 - q / 6))
+            for q in range(3):  # spaliny z rury
+                ph = (t * 2 + q / 3) % 1
+                f.add(back - d * (1 + ph * 6), 9 - ph * 2, mul(visible((90, 90, 95), 4), 1 - ph))
+        return True
+
     def idle(self, f, t, dt, xs, xr, blink):
         """Bez roboty: spaceruje po obu stronach zegara (przechodzi za cyframi), a z nudów coś robi."""
         pause = LUDZIK_FREQ[LUDZIK["freq"]][1]
@@ -4847,12 +4905,22 @@ class Worker(Clock):
                     self.wait, self.next_trick = t, t
                     standing = False
                     opts = []
+            if self.pending is None:  # przejażdżki – tylko gdy zdąży przed przestawianiem cyfr
+                opts += [(n, None) for n in self.RIDES if n not in off and self.left > self.ride_time(n) + 15]
             self.pending = None if opts else self.pending
             self.next_trick = t + 3 if self.pending is None else t
             if opts:  # częstsze zajęcia losują się częściej
                 n, fl = random.choices(opts, [weight(n) for n, _ in opts])[0]
-                self.trick = (n, t, fl)
-                self.next_trick = t + self.TRICKS[n][0] + random.uniform(*pause)
+                if n in self.RIDES:
+                    self.start_ride(n, t, xs, xr, "na drugą stronę" in off)
+                    self.next_trick = t + self.ride_time(n) + random.uniform(*pause)
+                else:
+                    self.trick = (n, t, fl)
+                    self.next_trick = t + self.TRICKS[n][0] + random.uniform(*pause)
+        if self.ride and self.ride["n"] in off:  # właśnie wyłączone w ustawieniach
+            self.ride = None
+        if self.ride and self.draw_ride(f, t, blink):
+            return
         if self.trick:
             name, t0, fl = self.trick
             dur, poses, step, mirror = self.TRICKS[name]
@@ -4889,6 +4957,7 @@ class Worker(Clock):
         cur = now.strftime("%H:%M")
         nxt_t = (now + dtm.timedelta(minutes=1)).replace(second=0, microsecond=0)
         nxt = nxt_t.strftime("%H:%M")
+        self.left = (nxt_t - now).total_seconds() / (self.rate or 1 / ANIM["tempo"])  # s animacji do pełnej minuty
         if self.shown is None:
             self.shown = cur
         xs, xr = self.layout(self.shown)
@@ -4897,7 +4966,7 @@ class Worker(Clock):
             self.x = home
         if LUDZIK["freq"] and ludzik_lvl("transparent z pogodą"):
             NET.get("baner")  # dane do transparentu pobierają się w tle
-        if self.banner is None and self.job is None and self.trick is None and self.shown == cur:
+        if self.banner is None and self.job is None and self.trick is None and self.ride is None and self.shown == cur:
             job = self.plan(self.shown, nxt, t)
             self.banner = self.banner_due(now, t, nxt_t, sum(job["d"][:4]))
             if self.banner:
@@ -4916,6 +4985,8 @@ class Worker(Clock):
                 job = self.plan(self.shown, nxt, t)
                 if (nxt_t - now).total_seconds() <= sum(job["d"][:4]) * (self.rate or 1 / ANIM["tempo"]):
                     self.job = job
+        if self.job is not None:
+            self.ride = None  # do roboty – pojazd znika, ludzik idzie od miejsca, gdzie był
         ground = visible((40, 26, 12))
         for x in range(W):
             f.set(x, 11, ground)
@@ -4958,11 +5029,97 @@ class Worker(Clock):
             self.man(f, "stoi" if p < 0.4 else "macha", home, flip=p >= 0.4, blink=blink)
 
 
-LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, "transparent z pogodą"]  # co można włączyć/wyłączyć
+LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, *Worker.RIDES, "transparent z pogodą"]  # co można włączyć/wyłączyć
+
+
+# ---------------------------------------------------------------- zwykły zegar w kolorze pory dnia
+DAYLIGHT = [  # wysokość słońca (stopnie) -> kolor: noc przygaszona bursztynowa, zmierzch ciepły żółty, południe białe
+    (-12, (150, 105, 30)), (-4, (195, 145, 50)), (2, (235, 190, 90)), (12, (250, 232, 185)), (30, (255, 255, 255)),
+]
+
+
+@reg("zegar")
+class PlainClock(Clock):
+    """Zwykły, czytelny zegar: godzina z sekundami i data. Kolor idzie za słońcem – w południe jasny biały,
+    wieczorem ciepły żółty i przygaszony, w nocy przyciemniony bursztyn."""
+
+    def draw(self, f, now, t, dt):
+        c = grad(DAYLIGHT, sun_position(now)[0])
+        hm, sec = now.strftime("%H:%M"), now.strftime(":%S")
+        tw = text_w(hm + sec)
+        wd = PL_DAYS[now.weekday()].upper()
+        date = f"{now.day:02d}.{now.month:02d}.{now.year}"
+        if NARROW:  # 60 kolumn: sama godzina, co 10 s na chwilę data
+            if page(t, 4, 2.5) == 3:
+                s = f"{wd[:3]} {now.day:02d}.{now.month:02d}"
+                f.text(s, (W - text_w(s, SMALL)) // 2, 3, mul(c, 0.8), SMALL)
+                return
+            x = (W - tw) // 2
+        else:
+            if text_w(wd, SMALL) > W - tw - 10:
+                wd = wd[:3]
+            gap = (W - tw - max(text_w(wd, SMALL), text_w(date, SMALL))) // 3  # równe odstępy: brzeg, godzina, data, brzeg
+            x = gap
+            dx = x + tw + gap
+            f.text(wd, dx, 0, mul(c, 0.8), SMALL)
+            f.text(date, dx, 6, mul(c, 0.8), SMALL)
+        f.text(hm, x, 1, c, BIG)
+        f.text(sec, x + text_w(hm) + 1, 1, mul(c, 0.8), BIG)  # sekundy odrobinę ciemniej – godzina pierwsza
+
+
+# ---------------------------------------------------------------- wiadomości od widzów
+ENVELOPE = ["YYYYYYYYYYY", "DDYYYYYYYDD", "YDDYYYYYDDY", "YYDDYYYDDYY", "YYYDDYDDYYY", "YYYYDDDYYYY",
+            "YYYYYYYYYYY", "YYYYYYYYYYY"]
+
+
+@reg("napisz")
+class Inbound(Clock):
+    """Wiadomości od widzów (np. uczestników calla): zachęta po angielsku z adresem (tunel bore.pub albo własny),
+    pod który wysyła się tekst – echo do /dev/tcp, curl albo przeglądarka – a potem po kolei to, co przyszło.
+    Skrzynkę otwiera się w panelu WWW – tylko wtedy coś przyjmuje."""
+
+    X0 = 13  # tekst zaczyna się za kopertą
+
+    def __init__(self):
+        self.cur, self.t0, self.dur = None, 0.0, 0.0
+
+    def draw(self, f, now, t, dt):
+        if self.cur is not None and t - self.t0 > self.dur:
+            self.cur = None
+        if self.cur is None:
+            self.cur = INBOX.take()
+            if self.cur is not None:
+                self.t0 = t
+                tw = text_w(self.cur, TXT)
+                self.dur = 6.0 if tw <= W - self.X0 else scroll_time(tw + W - self.X0, 30) + 0.5
+        if self.cur is not None:  # wiadomość: krótka stoi na środku, długa przejeżdża raz
+            k = t - self.t0
+            flash = k < 0.6 and int(k * 6) % 2 == 0
+            sprite(f, ENVELOPE, 0, 2, {"Y": (255, 255, 255) if flash else (255, 200, 0), "D": (40, 25, 0)})
+            tw = text_w(self.cur, TXT)
+            x = self.X0 + (W - self.X0 - tw) // 2 if tw <= W - self.X0 else W - scroll_px(k, 30)
+            f.draw([(px, py) for px, py in text_px(self.cur, x, 0, TXT) if px >= self.X0], (255, 255, 255))
+            return
+        addr = INBOX.address() if INBOX.is_open() else ""
+        if not addr:  # zamknięta albo tunel jeszcze się łączy
+            sprite(f, ENVELOPE, 0, 2, {"Y": (90, 60, 0), "D": (20, 12, 0)})
+            msg = "connecting" + "." * (int(t * 2) % 4) if INBOX.is_open() else "inbox closed"
+            f.text(msg, self.X0 + 2, 0, (120, 120, 140))
+            return
+        sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
+        cmd, gray = (80, 255, 80), (160, 160, 170)
+        segs = [("write something on this panel:  ", (255, 255, 255)), ("$ ", (0, 200, 0))]
+        if INBOX.tunnel:  # bez kodu w ścieżce – działa też gołe TCP
+            host, port = addr.rsplit(":", 1)
+            segs += [(f"echo hi > /dev/tcp/{host}/{port}", cmd), ("   or  ", gray), ("$ ", (0, 200, 0))]
+        segs += [(f"curl -d hi {addr}", cmd), ("   or open in a browser:  ", gray), (addr, (80, 200, 255))]
+        scroll_segs(f, segs, t, 30, 0, self.X0, gap=40)
 
 
 CLOCKS = {
     "ludzik": REG["ludzik"],  # pierwszy na liście (i w cyklu)
+    "zegar": REG["zegar"],    # zwykła godzina i data
+    "napisz": REG["napisz"],  # zaraz pod ręką na callu
     "licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "niebo": Sky, "doba": DayRibbon,
     "skaner": Scanner, "tecza": Rainbow, "hiperskok": Warp, "zycie": Life, "akwarium": Aquarium, "pong": Pong,
     **REG,
@@ -5079,7 +5236,7 @@ class Engine:
             self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")   # WLED ma pokazywać nasz strumień
         self.peak = cfg.get("peaks", {})            # najwyższy szacowany prąd każdego efektu (mA przy danej jasności)
         self.skip_heavy = cfg.get("skip_heavy", True)
-        self.cycle.allowed = lambda n: not (self.skip_heavy and self.heavy(n))
+        self.cycle.allowed = lambda n: not (self.skip_heavy and self.heavy(n)) and (n != "napisz" or INBOX.is_open())
         self.settings = self.make_settings()
 
     # ---------------------------------------------------------- ustawienia
@@ -5215,7 +5372,7 @@ class Engine:
                "panel_levels_bri": PANEL["bri"] if panel_manual() else None, "panel_pe": PANEL["pe"],
                "psu": POWER["psu"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"],
-               "sending": self.sending}
+               "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours}
         try:
             os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
             with open(CONFIG, "w", encoding="utf-8") as fh:
@@ -5347,6 +5504,8 @@ class Engine:
     def tick(self):
         """Jedna klatka: polecenia, czas, stan WLED, render, ogranicznik prądu, wysłanie. -> (klatka po ograniczniku, czas)"""
         self.run_cmds()
+        if INBOX.check():
+            self.say("skrzynka „napisz” zamknęła się sama")
         m = time.monotonic()
         rdt, self.last = m - self.last, m
         self.fps_ema += ((1 / rdt if rdt > 0 else self.fps) - self.fps_ema) * 0.1
@@ -5395,6 +5554,7 @@ class Engine:
                          for n, val, _, hint in self.settings],
             "heavy": [n for n in CLOCKS if self.heavy(n)],
             "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS},
+            "inbox": INBOX.snapshot(),
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
                       "psu": POWER["psu"]},
             "bri": PANEL["bri"], "levels": panel_levels(),
@@ -5811,6 +5971,20 @@ def web_cmd(e, c):
         if act not in LUDZIK_ACTS or not 0 <= lvl <= 3:
             raise ValueError("złe zajęcie ludzika")
         return lambda: LUDZIK["lvl"].__setitem__(act, lvl)
+    if op == "inbox":
+        act = c.get("act")
+        if act == "open":
+            return INBOX.open
+        if act == "close":
+            return INBOX.close
+        if act == "auto":
+            return lambda: setattr(INBOX, "auto", not INBOX.auto)
+        if act == "hours":
+            return lambda: INBOX.hours_step(d)
+        if act in ("approve", "reject", "block", "again", "clear"):
+            mid = int(c.get("id", 0))
+            return lambda: INBOX.act(act, mid)
+        raise ValueError(f"złe polecenie skrzynki {act!r}")
     raise ValueError(f"nieznane polecenie {op!r}")
 
 
@@ -5927,6 +6101,404 @@ def start_web(engine, port, bind="127.0.0.1"):
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
+
+
+# ================================================================ skrzynka na wiadomości z internetu (efekt „napisz”)
+MSG_MAX = 80                 # znaków w wiadomości
+MSG_BODY = 2048              # bajtów w zapytaniu
+MSG_WAIT = 20                # zaległych (do akceptacji i w kolejce); więcej = „kolejka pełna”
+MSG_GAP, MSG_PER, MSG_WINDOW = 20, 5, 600   # z jednego adresu: co najmniej 20 s przerwy, najwyżej 5 na 10 minut
+MSG_ALL = (12, 60)           # gdy adresu nadawcy nie widać (tunel): wszystkich razem najwyżej 12 na minutę
+MSG_MISSES = 10              # tyle prób pod zły adres (zły kod) i adres IP jest blokowany do następnego otwarcia
+MSG_CONNS = 16               # równoczesnych połączeń; nadmiarowe są od razu zamykane
+MSG_HOURS = [0.5, 1, 2, 4]   # na ile otwiera się skrzynka
+MSG_CODE = "abcdefghjkmnpqrstuvwxyz23456789"  # bez 0/o i 1/l/i – kod odczytuje się z kamerki
+HTTP_METHOD = re.compile(rb"(GET|POST|HEAD|PUT|DELETE|OPTIONS|PATCH|CONNECT|TRACE) ")
+# filtr celowo prosty (rdzenie słów po zdjęciu ogonków i „leetspeaku”); resztę łapie akceptacja ręczna
+MSG_BAD = ["kurw", "chuj", "huj", "pierdol", "jeba", "jebi", "jebn", "pizd", "cwel", "dziwk", "szmat", "pedal",
+           "fuck", "shit", "cunt", "bitch", "nigg", "fag"]
+MSG_URL = re.compile(r"https?:|www\.|\b[a-z0-9-]+\.(pl|com|net|org|io|ru|xyz|info|me|eu|ly|gg|tk|co)\b", re.I)
+_LEET = str.maketrans("013457@$!", "oieastasi")
+MSG_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Write on the panel</title>
+<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:480px;margin:40px auto;padding:0 16px;background:#111;color:#eee}}
+form{{display:flex;gap:8px}}input,button{{font:inherit;padding:10px;border-radius:8px;border:1px solid #444;
+background:#222;color:#eee}}input{{flex:1;min-width:0}}p{{color:#9a9ca3}}.m{{color:#ffd54f}}</style></head><body>
+<h1>Write something on the panel</h1><p class="m">{msg}</p>
+<form method="post" accept-charset="utf-8"><input name="message" maxlength="{max}" required autofocus
+placeholder="Your message" aria-label="Your message"><button>Send</button></form>
+<p>Up to {max} characters, no links. Messages show up on the panel one by one.</p></body></html>"""
+
+
+def msg_clean(raw):
+    """Tekst do pokazania: jedna linia, bez znaków sterujących i takich, których nie ma w czcionce (np. emoji)."""
+    out = []
+    for c in unicodedata.normalize("NFC", raw):
+        if c.isspace() or unicodedata.category(c)[0] == "C":
+            out.append(" ")
+        elif c in TXT or unicodedata.normalize("NFD", c)[0] in TXT:
+            out.append(c)
+    return " ".join("".join(out).split())
+
+
+def msg_bad(s):
+    """Powód odrzucenia (link albo wulgaryzm) albo "" – „k.u.r.w.a” i „kuuurwa” też wpadają."""
+    if MSG_URL.search(s):
+        return "no links, please"
+    folded = "".join(c for c in unicodedata.normalize("NFD", s.lower().replace("ł", "l").translate(_LEET))
+                     if not unicodedata.combining(c))
+    for tok in folded.split():
+        w = re.sub(r"[^a-z]", "", tok)
+        once = re.sub(r"(.)\1+", r"\1", w)
+        if any(b in w or b in once for b in MSG_BAD):
+            return "message rejected by the filter"
+    return ""
+
+
+class MsgServer(httpd.ThreadingHTTPServer):
+    """Serwer z limitem równoczesnych połączeń (zwykły ThreadingHTTPServer tworzy wątek dla każdego)."""
+
+    daemon_threads = True
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.slots = threading.BoundedSemaphore(MSG_CONNS)
+
+    def process_request(self, request, client_address):
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        super().process_request(request, client_address)
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
+
+
+class MsgHandler(httpd.BaseHTTPRequestHandler):
+    """Z internetu da się tu zrobić tylko trzy rzeczy: GET /<kod> = formularz, POST /<kod> = wiadomość, a za tunelem
+    (bez kodu) także gołe TCP: pierwszy wiersz to wiadomość (echo hi > /dev/tcp/host/port, nc)."""
+
+    server_version, sys_version = "wled-clocks", ""
+    timeout = 5  # powolni klienci są rozłączani
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def handle(self):
+        try:
+            head = self.connection.recv(8, socket.MSG_PEEK)
+        except OSError:
+            return
+        if not head or HTTP_METHOD.match(head):
+            return super().handle()
+        self.raw()
+
+    def raw(self):
+        ip = self.ip()
+        if not INBOX.check_code("", ip):  # kod w adresie da się podać tylko w HTTP
+            INBOX.miss(ip)
+            return
+        try:
+            text = self.rfile.readline(MSG_BODY + 1).decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return  # binarne śmieci (np. skanery portów) – bez odpowiedzi
+        if any(unicodedata.category(c) == "Cc" and c not in "\r\n\t" for c in text):
+            return
+        code, reply = INBOX.submit(text, ip)
+        print(f"napisz: tcp {code} {msg_clean(text)[:MSG_MAX]!r}", flush=True)
+        try:
+            self.wfile.write((reply + "\n").encode("utf-8"))
+        except OSError:
+            pass
+
+    def ip(self):
+        """Adres nadawcy; "" = nie wiadomo (za tunelem bore wszyscy przychodzą z 127.0.0.1)."""
+        if INBOX.tunnel:
+            return ""
+        if INBOX.proxy:  # za tunelem (np. Cloudflare) prawdziwy adres jest w nagłówku – inaczej nagłówkom nie ufamy
+            h = self.headers.get("CF-Connecting-IP") or (self.headers.get("X-Forwarded-For") or "").split(",")[0]
+            if h.strip():
+                return h.strip()[:64]
+        return self.client_address[0]
+
+    def answer(self, code, text, page=False):
+        if page:
+            body = MSG_PAGE.format(msg=html.escape(text), max=MSG_MAX).encode("utf-8")
+            ctype = "text/html; charset=utf-8"
+        else:
+            body, ctype = (text + "\n").encode("utf-8"), "text/plain; charset=utf-8"
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; "
+                         "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def allowed(self):
+        """Czy adres jest dobry: skrzynka otwarta, kod się zgadza, nadawca niezablokowany."""
+        path = urllib.parse.urlsplit(self.path).path.strip("/")
+        if path in ("favicon.ico", "robots.txt"):  # przeglądarki pytają same – to nie zgadywanie kodu
+            return False
+        ip = self.ip()
+        return INBOX.check_code(path, ip) or INBOX.miss(ip)
+
+    def do_GET(self):
+        if not self.allowed():
+            return self.answer(404, "not found")
+        self.answer(200, "", page=True)
+
+    def do_POST(self):
+        if not self.allowed():
+            return self.answer(404, "not found")
+        if self.headers.get("Transfer-Encoding"):
+            return self.answer(411, "Content-Length required")
+        try:
+            n = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            return self.answer(411, "Content-Length required")
+        if not 0 <= n <= MSG_BODY:
+            return self.answer(413, f"too long – max {MSG_MAX} characters")
+        raw = self.rfile.read(n)
+        form = (self.headers.get("Content-Type", "").startswith("application/x-www-form-urlencoded")
+                and raw.startswith(b"message="))
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1250", "replace")  # curl z polskiego cmd w Windows
+        if form:
+            text = urllib.parse.parse_qs(text, max_num_fields=2).get("message", [""])[0]
+        code, reply = INBOX.submit(text, self.ip())
+        print(f"napisz: {self.ip() or 'http'} {code} {msg_clean(text)[:MSG_MAX]!r}", flush=True)
+        self.answer(code, reply, page=form)
+
+
+class Inbox:
+    """Wiadomości z internetu. Serwer działa tylko, gdy skrzynka jest otwarta (zamyka się sama po czasie). Dwa tryby:
+    - tunel bore (domyślny w add-onie): `bore local` wystawia serwer na publicznym bore.pub pod losowym portem –
+      działa za NAT-em, bez domeny i przekierowań; port zmienia się przy każdym otwarciu i to on jest „kodem”,
+      więc działa też gołe TCP; adresu nadawcy nie widać, więc limit jest wspólny dla wszystkich,
+    - własny port: adres publiczny załatwia się samemu (tunel, przekierowanie), w ścieżce jest losowy kod.
+    Wątki serwera dokładają wiadomości, wątek klatek je zabiera, panel WWW moderuje – stąd zamek."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.port, self.bind, self.public, self.proxy = None, "0.0.0.0", "", False
+        self.tunnel, self.bore = "", "bore"   # serwer bore (np. bore.pub; pusty = własny port) i program bore
+        self.taddr, self.proc, self.gen, self.err = "", None, 0, ""  # adres z tunelu, proces, numer otwarcia
+        self.all = []                         # czasy wiadomości od nieznanych nadawców (limit wspólny)
+        self.auto, self.hours = False, 2
+        self.until, self.code, self.srv = 0.0, "", None
+        self.pending, self.queue, self.shown = [], [], []
+        self.hits, self.misses, self.blocked = {}, {}, set()
+        self.next_id = 1
+
+    def is_open(self):
+        return self.until > time.time()
+
+    def address(self):
+        """Adres dla widzów; "" = tunel jeszcze się łączy."""
+        if self.tunnel:
+            return self.taddr
+        return f"{self.public.rstrip('/') or f'adres:{self.port}'}/{self.code}"
+
+    def enabled(self):
+        return bool(self.tunnel or self.port)
+
+    # ---------------------------------------------------------- sterowanie (wątek klatek)
+    def open(self):
+        """Otwiera skrzynkę na self.hours godzin z nowym kodem; gdy już otwarta – nowy kod i czas od teraz."""
+        if not self.enabled():
+            raise ValueError("skrzynka wyłączona – uruchom z --msg-tunnel bore.pub albo --msg-port")
+        if self.srv is None:  # za tunelem tylko lokalnie – z internetu wchodzi się przez bore
+            self.srv = MsgServer(("127.0.0.1", self.port or 0) if self.tunnel else (self.bind, self.port), MsgHandler)
+            threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.stop_tunnel()
+        with self.lock:
+            self.code = "" if self.tunnel else "".join(secrets.choice(MSG_CODE) for _ in range(4))
+            self.misses.clear()
+            self.blocked.clear()
+            self.until = time.time() + self.hours * 3600
+        if self.tunnel:
+            threading.Thread(target=self.run_tunnel, args=(self.gen, self.srv.server_address[1]), daemon=True).start()
+        print(f"napisz: skrzynka otwarta na {self.hours} h" + ("" if self.tunnel else f", adres {self.address()}"),
+              flush=True)
+
+    def stop_tunnel(self):
+        """Nowy numer otwarcia (stary wątek tunelu się kończy) i koniec procesu bore."""
+        self.gen += 1
+        self.taddr = ""
+        p, self.proc = self.proc, None
+        if p is not None and p.poll() is None:
+            p.terminate()
+
+    def run_tunnel(self, gen, local):
+        """Wątek: `bore local` i odczyt przydzielonego adresu; gdy tunel padnie – od nowa, najpierw o ten sam port."""
+        want, delay = 0, 2
+        while self.gen == gen and self.is_open():
+            cmd = [self.bore, "local", str(local), "--local-host", "127.0.0.1", "--to", self.tunnel]
+            try:
+                p = subprocess.Popen(cmd + (["--port", str(want)] if want else []), stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True, errors="replace")
+            except OSError as e:
+                self.err = f"nie mogę uruchomić bore: {e}"
+                print(f"napisz: {self.err}", flush=True)
+                return
+            self.proc, got = p, False
+            if self.gen != gen:  # zamknięta w międzyczasie
+                p.terminate()
+                return
+            for line in p.stdout:
+                line = strip_ansi(line).strip()
+                m = re.search(r"listening at ([\w.\-]+):(\d+)", line)
+                if m:
+                    self.taddr, want, got, delay, self.err = f"{m[1]}:{m[2]}", int(m[2]), True, 2, ""
+                    print(f"napisz: tunel {self.taddr}", flush=True)
+                elif "ERROR" in line or "error" in line:
+                    self.err = "bore: " + line[-160:]
+            p.wait()
+            if self.gen != gen:
+                return
+            self.taddr = ""
+            print(f"napisz: tunel zerwany ({self.err or 'kod ' + str(p.returncode)}), łączę ponownie", flush=True)
+            if not got:
+                want = 0  # nie dostał portu (np. zajęty) – następnym razem dowolny
+            time.sleep(delay)
+            delay = min(60, delay * 2)
+
+    def close(self):
+        with self.lock:
+            self.until = 0.0
+        self.stop_tunnel()
+        srv, self.srv = self.srv, None
+        if srv:  # shutdown() czeka na pętlę serwera – nie w wątku klatek
+            threading.Thread(target=lambda: (srv.shutdown(), srv.server_close()), daemon=True).start()
+            print("napisz: skrzynka zamknięta", flush=True)
+
+    def check(self):
+        """Co klatkę: czas minął -> zamknij. -> True, gdy właśnie zamknięta."""
+        if self.srv is not None and not self.is_open():
+            self.close()
+            return True
+        return False
+
+    def hours_step(self, d):
+        i = MSG_HOURS.index(self.hours) if self.hours in MSG_HOURS else 2
+        self.hours = MSG_HOURS[max(0, min(len(MSG_HOURS) - 1, i + d))]
+
+    def act(self, action, mid=0):
+        """Moderacja z panelu WWW."""
+        with self.lock:
+            find = lambda *lists: next(((l, m) for l in lists for m in l if m["id"] == mid), (None, None))
+            if action == "approve":
+                lst, m = find(self.pending)
+                if m:
+                    lst.remove(m)
+                    self.queue.append(m)
+            elif action in ("reject", "block"):
+                lst, m = find(self.pending, self.queue)
+                if m:
+                    lst.remove(m)
+                    if action == "block" and m["ip"]:  # nadawca nieznany (tunel) – samo odrzucenie
+                        self.blocked.add(m["ip"])
+                        self.pending = [x for x in self.pending if x["ip"] != m["ip"]]
+                        self.queue = [x for x in self.queue if x["ip"] != m["ip"]]
+            elif action == "again":
+                _, m = find(self.shown)
+                if m and not any(x["id"] == mid for x in self.queue):
+                    self.queue.append(m)
+            elif action == "clear":
+                self.pending.clear()
+                self.queue.clear()
+            else:
+                raise ValueError(f"złe polecenie skrzynki {action!r}")
+
+    def take(self):
+        """Następna wiadomość do pokazania (efekt „napisz”) albo None."""
+        with self.lock:
+            if not self.queue:
+                return None
+            m = self.queue.pop(0)
+            self.shown = [x for x in self.shown if x["id"] != m["id"]][-19:] + [m]
+            return m["text"]
+
+    # ---------------------------------------------------------- z internetu (wątki serwera)
+    def check_code(self, code, ip):
+        with self.lock:
+            ok = self.until > time.time() and ip not in self.blocked
+            return ok and hmac.compare_digest(code.encode("utf-8", "replace"), self.code.encode())
+
+    def miss(self, ip):
+        """Zły adres: liczymy próby zgadnięcia kodu. -> False (żeby dało się pisać „ok or miss()”)."""
+        if not ip:
+            return False
+        with self.lock:
+            if len(self.misses) > 5000:
+                self.misses.clear()
+            self.misses[ip] = self.misses.get(ip, 0) + 1
+            if self.misses[ip] >= MSG_MISSES:
+                self.blocked.add(ip)
+        return False
+
+    def submit(self, raw, ip):
+        """-> (kod HTTP, odpowiedź dla nadawcy)."""
+        text, now = msg_clean(raw), time.time()
+        if not text:
+            return 400, "empty message (letters, digits and plain symbols – no emoji)"
+        if len(text) > MSG_MAX:
+            return 413, f"too long – max {MSG_MAX} characters"
+        with self.lock:
+            if self.until <= now or ip in self.blocked:
+                return 404, "not found"
+            if not ip:  # nadawcy nie widać: limit wspólny dla wszystkich
+                self.all = [h for h in self.all if now - h < MSG_ALL[1]]
+                if len(self.all) >= MSG_ALL[0]:
+                    return 429, "too many messages right now – try again in a minute"
+                self.all.append(now)
+            hits = [h for h in self.hits.get(ip, []) if now - h < MSG_WINDOW] if ip else []
+            if hits and now - hits[-1] < MSG_GAP:
+                return 429, f"too fast – try again in {int(MSG_GAP - (now - hits[-1])) + 1} s"
+            if len(hits) >= MSG_PER:
+                return 429, "too many messages from your address – try again later"
+            if len(self.hits) > 5000:
+                self.hits = {k: v for k, v in self.hits.items() if now - v[-1] < MSG_WINDOW}
+            if ip:
+                self.hits[ip] = hits + [now]  # liczą się też odrzucone przez filtr – bez zgadywania słów do skutku
+            why = msg_bad(text)
+            if why:
+                return 422, why
+            if any(m["text"].casefold() == text.casefold() for m in self.pending + self.queue + self.shown[-5:]):
+                return 409, "this message was already sent"
+            if len(self.pending) + len(self.queue) >= MSG_WAIT:
+                return 503, "queue is full – try again in a moment"
+            m = {"id": self.next_id, "text": text, "ip": ip, "at": now}
+            self.next_id += 1
+            if self.auto:
+                self.queue.append(m)
+                return 200, f"thanks! queued: {len(self.queue)}"
+            self.pending.append(m)
+            return 202, "thanks! your message is waiting for approval"
+
+    def snapshot(self):
+        """Stan do panelu WWW (tylko typy JSON)."""
+        hm = lambda ts: dtm.datetime.fromtimestamp(ts).strftime("%H:%M")
+        row = lambda m: {"id": m["id"], "text": m["text"], "ip": m["ip"], "at": hm(m["at"])}
+        with self.lock:
+            op = self.until > time.time()
+            return {"enabled": self.enabled(), "open": op, "until": hm(self.until) if op else "",
+                    "address": self.address() if op else "", "auto": self.auto, "hours": self.hours,
+                    "tunnel": self.tunnel, "public": self.public, "blocked": len(self.blocked), "err": self.err,
+                    "pending": [row(m) for m in self.pending], "queue": [row(m) for m in self.queue],
+                    "shown": [row(m) for m in reversed(self.shown)]}
+
+
+INBOX = Inbox()
 
 
 # ================================================================ zapis podglądu (bez Pillow)
@@ -6060,6 +6632,16 @@ def main():
     ap.add_argument("--odbicie", action="store_true", help="obraz odbity w poziomie, np. gdy panel ogląda się przez kamerkę")
     ap.add_argument("--bez-odbicia", dest="odbicie", action="store_false", help="wyłącz odbicie zapamiętane w ustawieniach")
     ap.set_defaults(odbicie=None)
+    ap.add_argument("--msg-tunnel", metavar="SERWER", default="",
+                    help="wiadomości od widzów (efekt „napisz”) przez tunel bore, np. bore.pub – za NAT-em, bez domeny")
+    ap.add_argument("--msg-bore", default="bore", help="program bore (domyślnie z PATH)")
+    ap.add_argument("--msg-port", type=int, metavar="PORT",
+                    help="port na wiadomości od widzów; słucha tylko, gdy skrzynka jest otwarta w panelu WWW")
+    ap.add_argument("--msg-bind", default="0.0.0.0", help="adres nasłuchu skrzynki (domyślnie cała sieć)")
+    ap.add_argument("--msg-public", default="",
+                    help="adres publiczny pokazywany na panelu, np. moj.duckdns.org:8098 (bez kodu na końcu)")
+    ap.add_argument("--msg-proxy", action="store_true",
+                    help="skrzynka za tunelem/proxy (np. Cloudflare): adres nadawcy z nagłówka CF-Connecting-IP / X-Forwarded-For")
     ap.add_argument("--lat", type=float, default=LAT, help="szerokość geogr. do pogody i słońca (domyślnie Warszawa)")
     ap.add_argument("--lon", type=float, default=LON, help="długość geogr.")
     ap.add_argument("--list", action="store_true", help="wypisz wszystkie efekty z opisami")
@@ -6098,6 +6680,10 @@ def main():
             LUDZIK["lvl"].setdefault(n, 0)
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
     POWER["psu"] = a.psu if a.psu is not None else cfg.get("psu", 2000)
+    INBOX.port, INBOX.bind, INBOX.public, INBOX.proxy = a.msg_port, a.msg_bind, a.msg_public.strip(), a.msg_proxy
+    INBOX.tunnel, INBOX.bore = a.msg_tunnel.strip(), a.msg_bore
+    INBOX.auto = bool(cfg.get("msg_auto", False))
+    INBOX.hours = cfg.get("msg_hours") if cfg.get("msg_hours") in MSG_HOURS else 2
     PANEL["ddp_w"] = W
     if a.host:
         try:

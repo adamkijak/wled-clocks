@@ -215,6 +215,71 @@ function renderActs() {
 }
 $("#acts-close").onclick = () => ($("#acts").hidden = true);
 
+// ------------------------------------------------------------ wiadomości od widzów (efekt „napisz”)
+const inboxCmd = (act, extra = {}) => cmd("inbox", { act, ...extra });
+$("#inbox-open").onclick = () => inboxCmd("open");
+$("#inbox-close").onclick = () => inboxCmd("close");
+$("#inbox-hours").onclick = () => inboxCmd("hours", { d: 1 });
+$("#inbox-hours").oncontextmenu = (e) => (e.preventDefault(), inboxCmd("hours", { d: -1 }));
+$("#inbox-auto").onclick = () => inboxCmd("auto");
+$("#inbox-clear").onclick = () => confirm("Usunąć wszystkie czekające wiadomości?") && inboxCmd("clear");
+
+// teksty od obcych ludzi – tylko przez textContent (el), nigdy innerHTML
+function msgList(id, items, buttons) {
+  const ul = $(id);
+  ul.textContent = "";
+  if (!items.length) ul.append(el("li", "empty", "—"));
+  for (const m of items) {
+    const li = el("li");
+    const box = el("span", "btns");
+    for (const [label, act, title] of buttons) {
+      if (act === "block" && !m.ip) continue; // nadawca nieznany (tunel) – nie ma kogo blokować
+      const b = el("button", "small", label);
+      b.title = title;
+      b.onclick = () => inboxCmd(act, { id: m.id });
+      box.append(b);
+    }
+    li.append(el("span", "at", m.at), el("span", "txt", m.text), el("span", "ip", m.ip), box);
+    ul.append(li);
+  }
+}
+
+let inboxKey = "";
+function renderInbox(ib) {
+  if (!ib) return;
+  const st = $("#inbox-state");
+  st.textContent = !ib.enabled ? "wyłączona" : ib.open ? `otwarta do ${ib.until}` : "zamknięta";
+  st.classList.toggle("ok", ib.open);
+  const [host, port] = (ib.address || "").split(":");
+  $("#inbox-info").textContent = !ib.enabled
+    ? "Uruchom skrypt z --msg-tunnel bore.pub albo --msg-port PORT."
+    : !ib.open
+      ? (ib.tunnel
+        ? `Zamknięta skrzynka nic nie wystawia. Otwarcie zestawia tunel ${ib.tunnel} z nowym losowym portem – znają go tylko ci, którzy widzą panel.`
+        : "Zamknięta skrzynka nie słucha na porcie. Otwarcie losuje nowy kod w adresie – znają go tylko ci, którzy widzą panel.")
+      : ib.tunnel
+        ? (ib.address
+          ? `Adres: ${ib.address}  –  echo hi > /dev/tcp/${host}/${port}  albo  curl -d hi ${ib.address}  albo przeglądarka.` +
+            "  Przez tunel nie widać, kto pisze: limit jest wspólny, ⛔ niedostępne."
+          : `Łączę z ${ib.tunnel}…`) + (ib.err ? `  ${ib.err}` : "")
+        : `Na panelu: curl -d hi ${ib.address}  –  albo ten adres w przeglądarce.` +
+          (ib.public ? "" : "  Ustaw adres publiczny (msg_public), żeby zamiast „adres” było widać prawdziwy.") +
+          (ib.blocked ? `  Zablokowane adresy: ${ib.blocked}.` : "");
+  $("#inbox-open").textContent = ib.open ? "Nowy kod i czas od teraz" : `Otwórz skrzynkę`;
+  $("#inbox-open").disabled = !ib.enabled;
+  $("#inbox-close").disabled = !ib.open;
+  $("#inbox-hours").textContent = `na ${String(ib.hours).replace(".", ",")} h`;
+  $("#inbox-auto").textContent = `Akceptacja: ${ib.auto ? "automatyczna" : "ręczna"}`;
+  $("#inbox-auto").classList.toggle("on", !ib.auto);
+  const key = JSON.stringify([ib.pending, ib.queue, ib.shown]);
+  if (key === inboxKey) return; // listy przebudowujemy tylko po zmianie – inaczej klik mógłby trafić w znikający przycisk
+  inboxKey = key;
+  msgList("#inbox-pending", ib.pending, [["✓ Pokaż", "approve", "Do kolejki na panel"], ["✕", "reject", "Odrzuć"],
+    ["⛔", "block", "Odrzuć i zablokuj ten adres do następnego otwarcia"]]);
+  msgList("#inbox-queue", ib.queue, [["✕", "reject", "Usuń z kolejki"], ["⛔", "block", "Usuń i zablokuj ten adres"]]);
+  msgList("#inbox-shown", ib.shown, [["↻ Jeszcze raz", "again", "Pokaż ponownie"]]);
+}
+
 // ------------------------------------------------------------ stan
 function render(s) {
   state = s;
@@ -255,6 +320,7 @@ function render(s) {
   renderList();
   renderSettings();
   renderActs();
+  renderInbox(s.inbox);
 }
 
 // ------------------------------------------------------------ przyciski i klawisze (jak w TUI)

@@ -151,9 +151,33 @@ main > *, .cols > * { min-width: 0; }
 .seg button:first-child { border-radius: 6px 0 0 6px; }
 .seg button:last-child { border-radius: 0 6px 6px 0; }
 
-.stats { display: grid; gap: 4px; font-size: 13px; }
+/* prąd, panel, fps – zaraz pod podglądem */
+.stats { display: flex; flex-wrap: wrap; gap: 2px 20px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.net { font-size: 13px; }
 .stats .warn { color: var(--warn); }
 .stats .bad { color: var(--bad); }
+
+.inbox h3 { margin: 14px 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.inbox p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.inbox-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.msgs { list-style: none; margin: 0; padding: 0; }
+.msgs li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+}
+.msgs li:last-child { border-bottom: 0; }
+.msgs li.empty { display: block; color: var(--muted); }
+.msgs .txt { overflow-wrap: anywhere; }
+.msgs .at, .msgs .ip { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.msgs .btns { display: flex; gap: 4px; }
+@media (max-width: 560px) {
+  .msgs li { grid-template-columns: auto minmax(0, 1fr); }
+  .msgs .ip, .msgs .btns { grid-column: 2; }
+}
 
 .toast {
   position: fixed;

@@ -25,6 +25,12 @@
     <canvas id="panel" aria-label="Podgląd panelu na żywo"></canvas>
   </section>
 
+  <section class="stats">
+    <div id="stat-power"></div>
+    <div id="stat-panel"></div>
+    <div id="stat-fps"></div>
+  </section>
+
   <section class="controls">
     <button data-op="skip" data-d="-1" title="Poprzedni (←)">◀ Poprzedni</button>
     <button id="btn-pause" data-op="pause" title="Pauza (spacja)">⏸ Pauza</button>
@@ -61,10 +67,29 @@
     </section>
   </div>
 
-  <section class="card stats">
-    <div id="stat-power"></div>
-    <div id="stat-panel"></div>
-    <div id="stat-fps"></div>
+  <section class="card inbox">
+    <div class="card-head">
+      <h2>Wiadomości od widzów <span class="muted">– efekt „napisz”</span></h2>
+      <span id="inbox-state" class="pill">…</span>
+    </div>
+    <p id="inbox-info" class="muted"></p>
+    <div class="inbox-btns">
+      <button id="inbox-open">Otwórz skrzynkę</button>
+      <button id="inbox-close">Zamknij</button>
+      <button id="inbox-hours" title="Na ile otworzyć (kliknij, żeby zmienić)">na 2 h</button>
+      <button id="inbox-auto" title="Ręczna: każda wiadomość czeka na Twoje ✓. Automatyczna: tylko filtry.">Akceptacja: ręczna</button>
+      <button data-select="napisz">Pokaż „napisz” na panelu</button>
+      <button id="inbox-clear">Wyczyść kolejkę</button>
+    </div>
+    <h3>Czekają na akceptację</h3>
+    <ul id="inbox-pending" class="msgs"></ul>
+    <h3>W kolejce na panel</h3>
+    <ul id="inbox-queue" class="msgs"></ul>
+    <h3>Pokazane</h3>
+    <ul id="inbox-shown" class="msgs"></ul>
+  </section>
+
+  <section class="card net">
     <div id="stat-net" class="muted"></div>
   </section>
 </main>
