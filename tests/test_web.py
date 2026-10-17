@@ -139,6 +139,29 @@ class EngineTest(unittest.TestCase):
             wc.LUDZIK.clear()
             wc.LUDZIK.update(old)
 
+    def test_ludzik_hows(self):
+        """Każdy sposób przestawiania: nowe cyfry wchodzą równo z pełną minutą, na końcu stoi nowa godzina."""
+        old = wc.LUDZIK["how"], wc.LUDZIK["freq"]
+        try:
+            wc.LUDZIK["freq"] = 0
+            for hi, how in enumerate(wc.LUDZIK_HOWS, 1):
+                wc.LUDZIK["how"] = hi
+                for start in ((12, 59, 30), (9, 59, 30)):
+                    fx, entered = wc.CLOCKS["ludzik"](), None
+                    base = wc.dtm.datetime(2026, 10, 16, *start).astimezone()
+                    for i in range(int(60 / 0.05)):
+                        t = i * 0.05
+                        now = base + wc.dtm.timedelta(seconds=t)
+                        fx.draw(wc.Frame(), now, t, 0.05)
+                        j = fx.job
+                        if j and entered is None and t - j["t0"] >= sum(j["d"][:4]):
+                            entered = now.second + now.microsecond / 1e6
+                    self.assertEqual(fx.shown, "13:00" if start[0] == 12 else "10:00", how)
+                    self.assertIsNotNone(entered, how)
+                    self.assertTrue(entered < 0.2 or entered > 59.8, (how, entered))
+        finally:
+            wc.LUDZIK["how"], wc.LUDZIK["freq"] = old
+
     def test_small_font_polish_marks(self):
         plain = set(wc.small_pl("PIATEK SRODA", 0, 1))
         pl = set(wc.small_pl("PIĄTEK ŚRODA", 0, 1))

@@ -340,6 +340,18 @@ def mul(c, k):
     return (c[0] * k, c[1] * k, c[2] * k)
 
 
+def lerp_n(a, b, t):
+    return a + (b - a) * t
+
+
+def bounce(a):
+    """0..1 -> 0..1: spada i odbija się coraz niżej."""
+    for edge, mid, top in ((1 / 2.75, 0, 0), (2 / 2.75, 1.5 / 2.75, 0.75), (2.5 / 2.75, 2.25 / 2.75, 0.9375)):
+        if a < edge:
+            return 7.5625 * (a - mid) ** 2 + top
+    return 7.5625 * (a - 2.625 / 2.75) ** 2 + 0.984375
+
+
 class Frame:
     def __init__(self, fill=(0, 0, 0)):
         self.px = [[fill] * W for _ in range(H)]
@@ -4701,9 +4713,12 @@ class Planets(Clock):
 
 
 # co ludzik robi z nudów: wyłączone zajęcia i jak często (ustawiane w TUI, zapisywane w konfiguracji)
-LUDZIK = {"lvl": {}, "len": {}, "freq": 2, "char": 0, "next": None}  # lvl: częstość każdego zajęcia (0–3, brak =
-# normalnie); len: długość zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami; char: postać (LUDZIK_CHARS);
+LUDZIK = {"lvl": {}, "len": {}, "freq": 2, "char": 0, "how": 0, "next": None}  # lvl: częstość każdego zajęcia (0–3,
+# brak = normalnie); len: długość zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami; char: postać
+# (LUDZIK_CHARS); how: sposób przestawiania godziny (0 = losowo, potem LUDZIK_HOWS);
 # next: zajęcie wymuszone jako następne (przycisk ▶, nie zapisywane)
+LUDZIK_HOWS = ["przepychanie", "malarz", "zapadnia", "bazooka", "kopniak", "zamiatanie", "magik", "spawacz", "lina",
+               "holowanie", "obrót"]
 LUDZIK_FREQ = [("nigdy", None), ("rzadko", (20, 40)), ("normalnie", (4, 10)), ("często", (1, 4)), ("bez przerwy", (0, 0.5))]
 LUDZIK_LVL = ["wył.", "rzadko", "normalnie", "często"]
 LVL_WEIGHT = [0, 1, 3, 9]                     # zajęcia: waga losowania
@@ -4740,8 +4755,9 @@ def ludzik_len(name):
 
 @reg("ludzik")
 class Worker(Clock):
-    """Robotnik w kasku sam przestawia cyfry: przed nową minutą wyciąga stare za panel, a o pełnej wpycha nowe;
-    z nudów spaceruje po obu stronach zegara, czyta, śpi, je, pije kawę, żongluje, zamiata, robi pajacyki i pompki,
+    """Robotnik w kasku sam przestawia cyfry, na jeden z 11 sposobów (przepycha, maluje wałkiem, zapadnia, bazooka,
+    kopniak, zamiatanie, czary, spawanie laserem, lina, holowanie autem, obrót korbą) – nowe cyfry wchodzą równo z pełną
+    minutą; z nudów spaceruje po obu stronach zegara, czyta, śpi, je, pije kawę, żongluje, zamiata, robi pajacyki i pompki,
     strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem i autem (kilka okrążeń:
     wyjeżdża za krawędź i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą.
     Zajęcia trwają tyle, ile zostało do przestawiania cyfr (najwyżej górna granica z TRICKS)."""
@@ -4861,6 +4877,7 @@ class Worker(Clock):
         self.banner, self.banner_at = None, None
         self.rate, self.prev = None, None
         self.ride, self.left, self.free = None, 60.0, 0.0  # free: s animacji do przestawiania cyfr
+        self.how_seed = random.random()  # losowy sposób przestawiania: inny w każdym uruchomieniu
 
     @staticmethod
     def layout(s):
@@ -4875,11 +4892,318 @@ class Worker(Clock):
         """Przestawianie cyfr; x = skąd idzie do roboty (domyślnie: tam, gdzie stoi)."""
         x = self.x if x is None else x
         xs, xr = self.layout(new)
-        k = next(i for i, (a, b) in enumerate(zip(old, new)) if a != b)  # od tej cyfry w prawo wszystko jedzie
+        ch = [i for i, (a, b) in enumerate(zip(old, new)) if a != b]
+        k = ch[0]  # przy przepychaniu od tej cyfry w prawo jedzie wszystko
+        how = self.pick_how(new)
+        stand, end, d = self.how_plan(how, old, new, xs, xr, k, ch)
+        return {"old": old, "new": new, "k": k, "ch": ch, "dist": W - xs[k], "t0": t, "x0": x, "how": how,
+                "xs": xs, "xr": xr, "home": xr + 1, "stand": stand, "end": end,
+                "d": [abs(x - stand) / self.WALK, *d, 1.8]}
+
+    # ---------------------------------------------------------- przestawianie godziny: 11 sposobów
+    # fazy roboty: 0 dojście, 1 przygotowanie, 2 stare cyfry znikają, 3 przerwa, 4 nowe się pojawiają (zaczyna się
+    # równo z pełną minutą), 5 macha. Faza 0 i 5 są wspólne, 1–4 rysuje how_<sposób>.
+    def how_plan(self, how, old, new, xs, xr, k, ch):
+        """-> (gdzie stoi w fazie 1, gdzie kończy, czasy faz 1–4)."""
+        home, c0 = xr + 1, xs[ch[0]]
         dist = W - xs[k]
         mv = dist / max(self.MOVE, dist / 4.5)  # długi blok cyfr: szybciej, żeby zegar nie stał długo pusty
-        return {"old": old, "new": new, "k": k, "dist": dist, "t0": t, "x0": x,
-                "d": [abs(x - xr - 1) / self.WALK, 0.5, mv, 0.8, mv, 1.8]}
+        sweep = (xr + 2 - c0) / 12
+        if how == "bazooka":
+            stand = clamp(xr + 16, home, W - 10)
+            return stand, stand, [1.0, (stand - 1 - (c0 + xr) / 2) / 50 + 1.4, 0.5, 0.8]
+        return home, home, {"przepychanie": [0.5, mv, 0.8, mv], "holowanie": [0.7, mv, 0.8, mv],
+                            "malarz": [0.6, sweep, 0.5, sweep], "zapadnia": [0.8, 1.4, 0.6, 1.6],
+                            "kopniak": [0.8, 1.4, 0.5, 1.2 + 0.4 * (len(ch) - 1)], "magik": [0.9, 1.6, 0.4, 1.6],
+                            "zamiatanie": [0.5, 1.6, 2.2, 1.6],
+                            "spawacz": [0.6, 1.8, 0.6, 2.0], "lina": [0.6, 1.6, 0.5, 2.0],
+                            "obrót": [0.6, 0.8, 0.1, 0.8]}[how]
+
+    def pick_how(self, new):
+        """Sposób przestawiania: ustawiony albo losowy – ten sam przez całą minutę (plan liczy się co klatkę)."""
+        if LUDZIK["how"]:
+            return LUDZIK_HOWS[LUDZIK["how"] - 1]
+        return random.Random(f"{self.how_seed}{new}").choice(LUDZIK_HOWS)
+
+    @staticmethod
+    def put(f, pts, c):
+        """Piksele cyfr – nad ziemią (wiersz 11 to ziemia)."""
+        for x, y in pts:
+            if y <= 10:
+                f.set(x, y, c)
+
+    def digits(self, f, s, xs, col, skip=()):
+        for i, ch in enumerate(s):
+            if i not in skip:
+                f.draw(text_px(ch, xs[i], 1), col)
+
+    def pose_at(self, f, pose, x, flip=False, blink=False):
+        """Poza ustawiona po twarzy (środek twarzy w x + 4)."""
+        self.man(f, pose, x + self.place(pose, flip), flip, blink)
+
+    def how_przepychanie(self, f, j, ph, p, t, col, blink):
+        """Wyciąga stare cyfry za prawą krawędź i wpycha nowe (od pierwszej zmienionej w prawo jedzie wszystko)."""
+        xs, k, dist, d, home = j["xs"], j["k"], j["dist"], j["d"], j["home"]
+        s = j["new"] if ph >= 4 else j["old"]
+        off = dist * p / d[2] if ph == 2 else dist if ph == 3 else dist * (1 - p / d[4]) if ph == 4 else 0
+        for i, ch in enumerate(s):
+            f.draw(text_px(ch, xs[i] + (off if i >= k else 0), 1), col)
+        if ph in (2, 4) and xs[k] + off < W:  # kurz spod przesuwanych cyfr
+            for q in range(3):
+                f.add(xs[k] + off - 1 - q, 11, mul((140, 110, 70), hash1(int(t * 20) + q) * (1 - q / 3)))
+        if ph == 1:
+            self.man(f, "ciagnie2", home)
+        elif ph in (2, 4):
+            push = ph == 4
+            self.man(f, ("pcha" if push else "ciagnie") + ("1" if int(off / 2) % 2 else "2"), home + off)
+            if push:  # kropla potu
+                f.set(home + off + 8, 3 + int(t * 8) % 4, (120, 190, 255))
+
+    def how_holowanie(self, f, j, ph, p, t, col, blink):
+        """Podjeżdża autem: wywozi stare cyfry na holu za prawą krawędź, wraca i wpycha nowe zderzakiem."""
+        xs, k, dist, d, home = j["xs"], j["k"], j["dist"], j["d"], j["home"]
+        s = j["new"] if ph >= 4 else j["old"]
+        off = dist * p / d[2] if ph == 2 else dist if ph == 3 else dist * (1 - p / d[4]) if ph == 4 else 0
+        for i, ch in enumerate(s):
+            f.draw(text_px(ch, xs[i] + (off if i >= k else 0), 1), col)
+        if ph in (1, 2):  # przodem w prawo, hol od tyłu auta do cyfr
+            self.man(f, "auto", home + 2 + off, True, blink)
+            f.rect(home - 1 + off, 8, home + 1 + off, 8, (150, 150, 160))
+        elif ph == 4:     # przodem w lewo, zderzak przy cyfrach
+            self.man(f, "auto", home + off, False, blink)
+        if ph in (2, 4):  # spaliny
+            back = home + off + (-1 if ph == 2 else 20)
+            for q in range(3):
+                e = (t * 2 + q / 3) % 1
+                f.add(back + (-1 if ph == 2 else 1) * e * 6 * (-1 if ph == 2 else 1), 9 - e * 2,
+                      mul(visible((90, 90, 95), 4), 1 - e))
+
+    def how_malarz(self, f, j, ph, p, t, col, blink):
+        """Zamalowuje stare cyfry wałkiem (od prawej do lewej) i maluje nowe świeżą, żółtawą farbą, która schnie."""
+        xs, ch, d = j["xs"], set(j["ch"]), j["d"]
+        lo, hi = xs[j["ch"][0]] - 1, j["xr"] + 1
+        a = clamp(p / d[ph]) if d[ph] else 1
+        rx = hi if ph == 1 else hi - (hi - lo) * a if ph == 2 else lo if ph == 3 else lo + (hi - lo) * a
+        s = j["new"] if ph == 4 else j["old"]
+        pose = ("ciagnie" if ph == 4 else "pcha") + ("1" if int(rx / 2) % 2 else "2")
+        self.man(f, pose, rx + 1)
+        self.digits(f, s, xs, col, ch)
+        for i in ch:
+            for x, y in text_px(s[i], xs[i], 1):
+                if ph < 3 and x < rx:              # jeszcze nie zamalowane
+                    f.set(x, y, col)
+                elif ph == 4 and x < rx:           # świeża farba
+                    f.set(x, y, lerp((255, 210, 80), col, clamp((rx - x) / 5)))
+        f.rect(rx, 1, rx, 10, (80, 190, 255))      # wałek
+        f.set(rx + 1, 6, (150, 90, 40))
+
+    def how_zapadnia(self, f, j, ph, p, t, col, blink):
+        """Ciągnie za dźwignię: stare cyfry zapadają się pod ziemię, nowe spadają z góry i odbijają się."""
+        xs, ch, d, home = j["xs"], j["ch"], j["d"], j["home"]
+        a = clamp(p / d[ph])
+        tilt = -2 + 3 * a if ph == 1 else 1
+        f.line(home, 10, home + tilt, 5, (150, 90, 40))
+        f.set(home + tilt, 4, (230, 40, 40))
+        self.man(f, "ciagnie2" if ph == 1 else "stoi", home + 1, blink=blink)
+        s = j["new"] if ph == 4 else j["old"]
+        self.digits(f, s, xs, col, ch)
+        dy = 10 * a * a if ph == 2 else 11 if ph == 3 else -11 * (1 - bounce(a)) if ph == 4 else 0
+        for i in ch:
+            self.put(f, text_px(s[i], xs[i], 1 + dy), col)
+        if (ph == 2 and a > 0.1) or (ph == 4 and a > 0.4):  # kurz przy ziemi
+            for i in ch:
+                for q in range(4):
+                    f.add(xs[i] - 1 + hash1(q * 7 + i + int(t * 15)) * 8, 10, mul((140, 110, 70), 0.5))
+
+    def how_bazooka(self, f, j, ph, p, t, col, blink):
+        """Strzał z bazooki: stare cyfry wylatują w powietrze na kawałki, nowe wyskakują z ziemi."""
+        xs, ch, d, x = j["xs"], j["ch"], j["d"], j["stand"]
+        tx, mx = (xs[ch[0]] + j["xr"]) / 2, x - 1
+        ft = (mx - tx) / 50
+        fired = ph >= 2
+        self.man(f, ("baz2" if ph == 1 and p > d[1] - 0.15 or ph == 2 and p < 0.3 else "baz1") if ph <= 2 else "stoi",
+                 x, blink=blink)
+        s = j["new"] if ph == 4 else j["old"]
+        self.digits(f, s, xs, col, ch)
+        if not fired or (ph == 2 and p < ft):
+            for i in ch:
+                f.draw(text_px(s[i], xs[i], 1), col)
+        if ph == 2 and p < ft:                    # rakieta w locie
+            px = mx - 50 * p
+            for q in range(3, 12):
+                f.add(px + q, 5.5 + math.sin(q * 1.7 + t * 9) * 0.6, mul(visible((90, 90, 95), 4), 1 - q / 12))
+            f.set(px, 5, (220, 40, 30))
+            f.set(px + 1, 5, (100, 125, 40))
+            f.set(px + 2, 5, (255, 150 + 100 * (int(t * 20) % 2), 0))
+        elif ph == 2:                             # wybuch: piksele cyfr rozlatują się
+            e = p - ft
+            if e < 0.15:
+                disc(f, tx, 5, 3, (255, 255, 220))
+            n = 0
+            for i in ch:
+                for px_, py in text_px(s[i], xs[i], 1):
+                    n += 1
+                    vx = (px_ - tx) * 2.5 + (hash1(n * 3) - 0.5) * 20
+                    vy = -6 - hash1(n * 5) * 10
+                    c = lerp(col, (255, 120, 20), clamp(e * 3))
+                    if e < 1.3:
+                        self.put(f, [(px_ + vx * e, py + vy * e + 14 * e * e)], mul(c, 1 - e / 1.3))
+        elif ph == 4:                             # nowe wyskakują z ziemi
+            a = clamp(p / d[4])
+            dy = 10 * (1 - a) ** 2 - math.sin(a * math.pi) * 1.5
+            for i in ch:
+                self.put(f, text_px(s[i], xs[i], 1 + dy), col)
+
+    def how_kopniak(self, f, j, ph, p, t, col, blink):
+        """Kopie stare cyfry, aż odlatują za górną krawędź; nowe wtaczają się z prawej, podskakując jak piłka."""
+        xs, ch, d, home = j["xs"], j["ch"], j["d"], j["home"]
+        kick = ph == 1 and p > d[1] * 0.6 or ph == 2 and p < 0.3
+        self.man(f, "idzie1" if kick else "stoi", home + 1, blink=blink)
+        s = j["new"] if ph == 4 else j["old"]
+        self.digits(f, s, xs, col, ch)
+        n = len(ch)
+        for r, i in enumerate(reversed(ch)):      # od prawej – ta najbliżej buta pierwsza
+            if ph == 1:
+                f.draw(text_px(s[i], xs[i], 1), col)
+            elif ph == 2:                         # prosto w górę, z lekkim zakręceniem
+                e = max(0.0, p - 0.12 * r)
+                self.put(f, text_px(s[i], xs[i] + math.sin(e * 9) * (1 - e), 1 - 26 * e), col)
+            elif ph == 4:                         # od prawej krawędzi, za ludzikiem, coraz niższe podskoki
+                a = clamp((p - 0.4 * r) / max(0.3, d[4] - 0.4 * (n - 1)))
+                x = lerp_n(W + 2, xs[i], 1 - (1 - a) ** 2)
+                self.put(f, text_px(s[i], x, 1 - abs(math.sin(math.pi * a * 3)) * 5 * (1 - a)), col)
+
+    def how_zamiatanie(self, f, j, ph, p, t, col, blink):
+        """Stare cyfry rozsypują się w kupkę piasku, ludzik zmiata ją do siebie, a nowe wyrastają z ziemi."""
+        xs, ch, d, home = j["xs"], j["ch"], j["d"], j["home"]
+        s = j["new"] if ph == 4 else j["old"]
+        a = clamp(p / d[ph])
+        pose = "zamiata1" if ph != 3 or int(t * 5) % 2 else "zamiata2"
+        self.pose_at(f, pose, home + 1, blink=blink)
+        self.digits(f, s, xs, col, ch)
+        if ph == 4:                               # wyrastają od ziemi
+            top = 10 - a * 10
+            for i in ch:
+                for px_, py in text_px(s[i], xs[i], 1):
+                    if py >= top:
+                        f.set(px_, py, (120, 230, 110) if py < top + 1.5 else col)
+            return
+        stack, n = {}, 0
+        sand = (210, 175, 110)
+        for i in ch:
+            for px_, py in sorted(text_px(s[i], xs[i], 1), key=lambda q: -q[1]):
+                n += 1
+                if ph == 1:
+                    f.set(px_, py, col)
+                    continue
+                lx = px_ + round((hash1(n * 11) - 0.5) * 3)
+                rest = 10 - stack.get(lx, 0) // 2   # kupka: dwa ziarenka na wysokość
+                stack[lx] = stack.get(lx, 0) + 1
+                e = max(0.0, (p if ph == 2 else 9) - hash1(n * 7) * 0.7)
+                y = min(rest, py + 20 * e * e)
+                x = lx if y >= rest else px_
+                if ph == 3:                       # zmiatane do miotły; przy niej znika (na szufelkę)
+                    k = clamp(a * 1.6 - hash1(n * 3) * 0.6)
+                    if k >= 1:
+                        continue
+                    x, y = lerp_n(x, home - 1, k), lerp_n(y, 10, k)
+                f.set(x, y, lerp(col, sand, clamp(e * 2)))
+
+    def how_magik(self, f, j, ph, p, t, col, blink):
+        """Czary: stare cyfry znikają piksel po pikselu w iskrach, nowe pojawiają się tak samo."""
+        xs, ch, d, home = j["xs"], j["ch"], j["d"], j["home"]
+        self.man(f, "pcha1", home + 1, blink=blink)
+        f.line(home + 1, 5, home - 1, 3, (150, 90, 40))          # różdżka
+        f.set(home - 2, 2, hsv(t * 2, 0.6, 1))
+        s = j["new"] if ph == 4 else j["old"]
+        self.digits(f, s, xs, col, ch)
+        n = 0
+        for i in ch:
+            for px_, py in text_px(s[i], xs[i], 1):
+                n += 1
+                when = hash1(n * 13) * 1.3
+                if ph == 1 or (ph == 2 and p < when) or (ph == 4 and p > when + 0.15):
+                    f.set(px_, py, col)
+                elif (ph == 2 and p < when + 0.2) or (ph == 4 and p > when):
+                    f.set(px_, py, hsv(0.75 + hash1(n) * 0.2, 0.4, 1))   # błysk
+        if ph in (2, 3, 4):
+            lo, hi = xs[ch[0]], j["xr"]
+            for q in range(6):
+                f.add(lo + hash1(q * 17 + int(t * 12)) * (hi - lo + 1), 1 + hash1(q * 29 + int(t * 12)) * 10,
+                      hsv(0.8 + q * 0.04, 0.5, 0.8))
+
+    def how_spawacz(self, f, j, ph, p, t, col, blink):
+        """Laserem topi stare cyfry (spływają kałużą), nowe wypala punkt po punkcie."""
+        xs, ch, d, home = j["xs"], j["ch"], j["d"], j["home"]
+        self.man(f, "pcha1", home + 1, blink=blink)
+        s = j["new"] if ph == 4 else j["old"]
+        self.digits(f, s, xs, col, ch)
+        hand = (home, 5)
+        if ph == 1:
+            for i in ch:
+                f.draw(text_px(s[i], xs[i], 1), col)
+        elif ph in (2, 3):
+            fade = 1 - clamp(p / d[3]) if ph == 3 else 1
+            for i in ch:
+                for px_, py in text_px(s[i], xs[i], 1):
+                    e = max(0.0, (p if ph == 2 else 9) - hash1(px_ * 7) * 0.8)
+                    y = min(10, py + 8 * e * e)
+                    c = lerp(col, (255, 110, 20), clamp(e * 1.5))
+                    f.set(px_, y, mul(c, fade))
+            if ph == 2:
+                tx, ty = xs[ch[0]] + hash1(int(t * 10)) * (j["xr"] - xs[ch[0]]), 2 + hash1(int(t * 10) + 5) * 7
+                f.line(hand[0], hand[1], tx, ty, (120, 20, 10), add=True)
+        else:
+            pts = sorted(((x, y) for i in ch for x, y in text_px(s[i], xs[i], 1)))
+            done = clamp(p / d[4]) * len(pts)
+            for q, (px_, py) in enumerate(pts):
+                if q < done:
+                    age = (done - q) / max(1, len(pts)) * d[4]
+                    f.set(px_, py, lerp((255, 140, 40), col, clamp(age / 0.8)) if age > 0.1 else (255, 255, 210))
+            if done < len(pts):                   # promień i iskry przy wypalanym punkcie
+                px_, py = pts[int(done)]
+                f.line(hand[0], hand[1], px_, py, (120, 20, 10), add=True)
+                for q in range(4):
+                    a = hash1(q * 3 + int(t * 30)) * 6.3
+                    f.add(px_ + math.cos(a) * 1.5, py + math.sin(a) * 1.5, (200, 120, 30))
+
+    def how_lina(self, f, j, ph, p, t, col, blink):
+        """Wciąga stare cyfry na linie do góry, nowe opuszcza na linie."""
+        xs, ch, d, home = j["xs"], j["ch"], j["d"], j["home"]
+        a = clamp(p / d[ph])
+        pose = "ciagnie2" if ph in (1, 3) else "ciagnie" + ("1" if int(t * 4) % 2 else "2")
+        self.man(f, pose, home + 1, blink=blink)
+        s = j["new"] if ph == 4 else j["old"]
+        self.digits(f, s, xs, col, ch)
+        dy = -11 * a * a if ph == 2 else -11 if ph == 3 else -11 * (1 - a) ** 2 if ph == 4 else 0
+        rope = (190, 150, 90)
+        f.rect(xs[ch[0]] + 2, 0, home + 1, 0, rope)  # lina pod sufitem do rąk ludzika
+        f.rect(home + 1, 0, home + 1, 5, rope)
+        for i in ch:
+            top = 1 + dy
+            cx = xs[i] + 2
+            if ph == 1:
+                f.rect(cx, 0, cx, a * 1, rope)
+            elif top > 0:
+                f.rect(cx, 0, cx, top - 1, rope)
+            self.put(f, text_px(s[i], xs[i], top), col)
+
+    def how_obrót(self, f, j, ph, p, t, col, blink):
+        """Kręci korbą: cyfry obracają się jak w zegarze klapkowym – stara zwęża się do kreski, nowa się rozwija."""
+        xs, ch, d, home = j["xs"], j["ch"], j["d"], j["home"]
+        crank = t * 6
+        self.man(f, "pcha1", home + 1, blink=blink)
+        f.set(home, 6, (150, 150, 160))
+        f.set(home - 1 + round(math.cos(crank)), 6 + round(math.sin(crank)), (230, 40, 40))  # korba
+        s = j["new"] if ph == 4 else j["old"]
+        self.digits(f, s, xs, col, ch)
+        a = clamp(p / d[ph])
+        k = 1 if ph == 1 else math.cos(a * math.pi / 2) if ph == 2 else 0.05 if ph == 3 else math.sin(a * math.pi / 2)
+        for i in ch:
+            cx = xs[i] + 2.5
+            shade = mul(col, 0.5 + 0.5 * k)
+            for px_, py in text_px(s[i], xs[i], 1):
+                f.set(round(cx + (px_ - cx) * k), py, shade)
 
     def man(self, f, pose, x, flip=False, blink=False):
         pal = dict(self.PAL, **LUDZIK_CHARS[LUDZIK["char"]][1])
@@ -5319,31 +5643,20 @@ class Worker(Clock):
         while ph < len(d) and p >= d[ph]:
             p -= d[ph]
             ph += 1
-        k, dist = j["k"], j["dist"]
         if ph == len(d):
-            self.shown, self.job, self.x, self.goal, self.wait = j["new"], None, home, None, t + 3
+            self.shown, self.job, self.x, self.goal, self.wait = j["new"], None, j["end"], None, t + 3
             self.next_trick = max(self.next_trick or 0, t + 4)
             return self.draw(f, now, t, 0)
-        s = j["new"] if ph >= 4 else j["old"]
-        off = dist * p / d[2] if ph == 2 else dist if ph == 3 else dist * (1 - p / d[4]) if ph == 4 else 0
-        if ph == 0:  # idzie do roboty (z lewej strony – za cyframi)
-            x = j["x0"] + (home - j["x0"]) * (p / d[0] if d[0] else 1)
-            pose, flip = "idzie1" if int(t * 6) % 2 else "idzie2", home > j["x0"]
+        if ph == 0:  # idzie do roboty (za cyframi)
+            x = j["x0"] + (j["stand"] - j["x0"]) * (p / d[0] if d[0] else 1)
+            pose, flip = "idzie1" if int(t * 6) % 2 else "idzie2", j["stand"] > j["x0"]
             self.man(f, pose, x + self.place(pose, flip), flip)
-        for i, (ch, x) in enumerate(zip(s, xs)):
-            f.draw(text_px(ch, x + (off if i >= k else 0), 1), col)
-        if ph in (2, 4) and xs[k] + off < W:  # kurz spod przesuwanych cyfr
-            for q in range(3):
-                f.add(xs[k] + off - 1 - q, 11, mul((140, 110, 70), hash1(int(t * 20) + q) * (1 - q / 3)))
-        if ph == 1:
-            self.man(f, "ciagnie2", home)
-        elif ph in (2, 4):
-            push = ph == 4
-            self.man(f, ("pcha" if push else "ciagnie") + ("1" if int(off / 2) % 2 else "2"), home + off)
-            if push:  # kropla potu
-                f.set(home + off + 8, 3 + int(t * 8) % 4, (120, 190, 255))
+            self.digits(f, j["old"], j["xs"], col)
         elif ph == 5:
-            self.man(f, "stoi" if p < 0.4 else "macha", home, flip=p >= 0.4, blink=blink)
+            self.digits(f, j["new"], j["xs"], col)
+            self.man(f, "stoi" if p < 0.4 else "macha", j["end"], flip=p >= 0.4, blink=blink)
+        else:
+            getattr(self, "how_" + j["how"])(f, j, ph, p, t, col, blink)
 
 
 LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, *Worker.RIDES, "transparent z pogodą"]  # co można włączyć/wyłączyć
@@ -5585,7 +5898,7 @@ class Engine:
     PREVIEWS = ["włączony", "wyłączony"]
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
-                  "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
+                  "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
                   "diody: zielony": "kolory", "diody: niebieski": "kolory"}
 
     def __init__(self, a, cfg):
@@ -5722,6 +6035,9 @@ class Engine:
         def s_lfreq(d):
             LUDZIK["freq"] = max(0, min(len(LUDZIK_FREQ) - 1, LUDZIK["freq"] + d))
 
+        def s_lhow(d):
+            LUDZIK["how"] = (LUDZIK["how"] + d) % (len(LUDZIK_HOWS) + 1)
+
         def s_lchar(d):
             LUDZIK["char"] = (LUDZIK["char"] + d) % len(LUDZIK_CHARS)
 
@@ -5782,6 +6098,8 @@ class Engine:
             "odbicie lustrz.": flag(lambda: PANEL["mirror"], lambda v: PANEL.update(mirror=v)),
             "ludzik co ile": opt(list(range(len(LUDZIK_FREQ))), lambda: LUDZIK["freq"], lambda v: LUDZIK.update(freq=v),
                                  lambda v: LUDZIK_FREQ[v][0]),
+            "ludzik przestawia": opt(list(range(len(LUDZIK_HOWS) + 1)), lambda: LUDZIK["how"],
+                                     lambda v: LUDZIK.update(how=v), lambda v: (["losowo"] + LUDZIK_HOWS)[v]),
             "ludzik postać": opt(list(range(len(LUDZIK_CHARS))), lambda: LUDZIK["char"], lambda v: LUDZIK.update(char=v),
                                  lambda v: LUDZIK_CHARS[v][0]),
             "barwa": opt(list(range(len(CLOCK_HUES))), lambda: CLOCK["hue"], lambda v: CLOCK.update(hue=v),
@@ -5819,6 +6137,7 @@ class Engine:
              s_lacts, "Enter = co robi z nudów i jak często"),
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
             ("ludzik postać", lambda: LUDZIK_CHARS[LUDZIK["char"]][0], s_lchar, "wygląd ludzika"),
+            ("ludzik przestawia", lambda: (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]], s_lhow, "jak zmienia godzinę"),
             ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
             ("diody: czerwony", lambda: f"x{COLOR['r']:g}", s_led("r"), "jasność kanału w podglądzie – dopasuj do panelu"),
@@ -5947,6 +6266,7 @@ class Engine:
                "psu": POWER["psu"], "auto_dim": POWER["auto"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_len": LUDZIK["len"],
                "ludzik_freq": LUDZIK["freq"], "ludzik_postac": LUDZIK_CHARS[LUDZIK["char"]][0],
+               "ludzik_zmiana": (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]],
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
@@ -7509,6 +7829,8 @@ def main():
                      if n in LUDZIK_TIMED}
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
     LUDZIK["char"] = next((i for i, (n, _) in enumerate(LUDZIK_CHARS) if n == cfg.get("ludzik_postac")), 0)
+    hows = ["losowo"] + LUDZIK_HOWS
+    LUDZIK["how"] = hows.index(cfg["ludzik_zmiana"]) if cfg.get("ludzik_zmiana") in hows else 0
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
     rgb = cfg.get("led_rgb")

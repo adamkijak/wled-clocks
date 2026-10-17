@@ -1,5 +1,15 @@
 # Zmiany
 
+## 1.10.0
+
+- Ludzik przestawia godzinę na 11 sposobów (ustawienie „ludzik przestawia”: losowo albo jeden wybrany):
+  przepychanie (jak dotąd), malarz (zamalowuje wałkiem, maluje świeżą farbą), zapadnia (dźwignia – stare cyfry
+  zapadają się, nowe spadają z odbiciem), bazooka (wybuch, nowe wyskakują z ziemi), kopniak (stare odlatują w górę,
+  nowe wtaczają się podskakując), zamiatanie (rozsypują się w piasek, nowe wyrastają), magik (znikają i pojawiają się
+  w iskrach), spawacz (topi laserem, wypala nowe punkt po punkcie), lina (wciąga do góry, opuszcza nowe), holowanie
+  (wywozi autem na holu, wpycha zderzakiem), obrót (korba, cyfry obracają się jak w zegarze klapkowym).
+  Nowe cyfry zawsze wchodzą równo z pełną minutą.
+
 ## 1.9.0
 
 - Ludzik: przycisk ▶ przy każdym zajęciu w „Zajęcia ludzika” (w TUI klawisz `!`) – ludzik zrobi to zaraz po
