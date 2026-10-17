@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.11.0
+
+- Lista efektów w panelu WWW ma przy każdym efekcie podgląd (jak wygląda na panelu, w barwach diod). Podglądy liczą
+  się na boku dopiero, gdy wiersz jest widoczny, po jednym naraz, i odświeżają się co minutę. Efekty WLED podglądu
+  nie mają (rysuje je sam WLED).
+- Postać ludzika wybiera się obrazkami (stoi, macha, idzie) zamiast listy.
+
 ## 1.10.0
 
 - Ludzik przestawia godzinę na 11 sposobów (ustawienie „ludzik przestawia”: losowo albo jeden wybrany):

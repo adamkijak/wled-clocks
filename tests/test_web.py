@@ -432,6 +432,27 @@ class WebTest(unittest.TestCase):
         self.assertIn("settings", state)
         self.assertEqual(len(self.get("api/frame")[2]), wc.W * wc.H * 3)
 
+    def test_thumbs(self):
+        """Podglądy na liście: każdy efekt coś pokazuje; podgląd „napisz” nie zabiera wiadomości z kolejki."""
+        for name in wc.CLOCKS:
+            body = self.get(f"api/thumb?fx={urllib.parse.quote(name)}")[2]
+            self.assertEqual(len(body), wc.W * wc.H * 3, name)
+            self.assertTrue(any(body), name)                                # nie czarny
+        for i in range(len(wc.LUDZIK_CHARS)):
+            self.assertTrue(any(self.get(f"api/thumb?char={i}")[2]))
+        for bad in ("fx=nie_ma", "char=99", ""):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.get(f"api/thumb?{bad}")
+        wc.THUMBS.cache.clear()
+        with wc.INBOX.lock:
+            wc.INBOX.queue.append({"id": 999, "text": "zostań", "ip": "x"})
+        try:
+            self.get("api/thumb?fx=napisz")
+            self.assertTrue(any(m["id"] == 999 for m in wc.INBOX.queue))
+        finally:
+            with wc.INBOX.lock:
+                wc.INBOX.queue[:] = [m for m in wc.INBOX.queue if m["id"] != 999]
+
     def test_command_changes_state(self):
         self.assertEqual(self.post({"op": "select", "name": "matrix"}), (200, {"ok": True}))
         deadline = time.monotonic() + 3

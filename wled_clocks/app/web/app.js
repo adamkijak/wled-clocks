@@ -42,36 +42,67 @@ function toast(msg) {
 
 // ------------------------------------------------------------ podgląd panelu
 const canvas = $("#panel");
-const ctx = canvas.getContext("2d");
 let lastFrame = null;
+
+// diody jak kropki: bytes = RGB klatki W x H, rysujemy pierwsze cols kolumn, cssW = szerokość na stronie
+function drawLeds(cv, bytes, W, H, cols, cssW) {
+  const c2 = cv.getContext("2d");
+  const cell = (cssW / cols) * (window.devicePixelRatio || 1);
+  const cw = Math.round(cell * cols);
+  const ch = Math.round(cell * H);
+  if (cv.width !== cw || cv.height !== ch) {
+    cv.width = cw;
+    cv.height = ch;
+  }
+  c2.fillStyle = "#0b0b0e";
+  c2.fillRect(0, 0, cw, ch);
+  const r = cell * 0.4;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = (y * W + x) * 3;
+      const R = bytes[i], G = bytes[i + 1], B = bytes[i + 2];
+      c2.fillStyle = R || G || B ? `rgb(${R},${G},${B})` : "#222226";
+      c2.beginPath();
+      c2.arc((x + 0.5) * cell, (y + 0.5) * cell, R || G || B ? r : r * 0.45, 0, 6.2832);
+      c2.fill();
+    }
+  }
+}
 
 function drawFrame(bytes) {
   lastFrame = bytes;
   const W = state ? state.w : bytes.length / 36;
-  const H = state ? state.h : 12;
-  const cssW = canvas.clientWidth || 600;
-  const cell = (cssW / W) * (window.devicePixelRatio || 1);
-  const cw = Math.round(cell * W);
-  const ch = Math.round(cell * H);
-  if (canvas.width !== cw || canvas.height !== ch) {
-    canvas.width = cw;
-    canvas.height = ch;
-  }
-  ctx.fillStyle = "#0b0b0e";
-  ctx.fillRect(0, 0, cw, ch);
-  const r = cell * 0.4;
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 3;
-      const R = bytes[i], G = bytes[i + 1], B = bytes[i + 2];
-      ctx.fillStyle = R || G || B ? `rgb(${R},${G},${B})` : "#222226";
-      ctx.beginPath();
-      ctx.arc((x + 0.5) * cell, (y + 0.5) * cell, R || G || B ? r : r * 0.45, 0, 6.2832);
-      ctx.fill();
-    }
-  }
+  drawLeds(canvas, bytes, W, state ? state.h : 12, W, canvas.clientWidth || 600);
 }
 window.addEventListener("resize", () => lastFrame && drawFrame(lastFrame));
+
+// podglądy efektów i postaci ludzika (api/thumb): po jednym naraz, odświeżane najwyżej co minutę
+const thumbs = new Map(); // zapytanie -> {t, p: Promise<Uint8Array>}
+let thumbChain = Promise.resolve();
+function thumb(query) {
+  const hit = thumbs.get(query);
+  if (!hit || Date.now() - hit.t > 60000) {
+    const p = thumbChain.then(async () => new Uint8Array(await (await fetch(`api/thumb?${query}`)).arrayBuffer()));
+    thumbChain = p.catch(() => {});
+    thumbs.set(query, { t: Date.now(), p });
+    p.catch(() => thumbs.delete(query)); // skrypt się restartuje – spróbujemy przy następnym pokazaniu
+  }
+  return thumbs.get(query).p;
+}
+function showThumb(cv, query, cols, cssW) {
+  thumb(query).then((b) => {
+    const W = state ? state.w : b.length / 36;
+    if (b.length === W * 12 * 3) drawLeds(cv, b, W, 12, cols || W, cssW);
+  }).catch(() => {});
+}
+// podgląd efektu liczy się dopiero, gdy wiersz listy jest widoczny
+const thumbSeen = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    thumbSeen.unobserve(en.target);
+    showThumb(en.target, `fx=${encodeURIComponent(en.target.dataset.fx)}`, 0, en.target.clientWidth || 240);
+  }
+}, { root: null, rootMargin: "200px" });
 
 function b64bytes(s) {
   const bin = atob(s);
@@ -122,6 +153,7 @@ function renderList() {
   if (key === listKey) return;
   listKey = key;
   const ol = $("#list");
+  thumbSeen.disconnect(); // stare wiersze znikają – nowe zgłoszą się same
   ol.textContent = "";
   for (const g of groups()) {
     const items = g.items.filter((it) => !q || it.text.some((t) => fold(t).includes(q)));
@@ -148,7 +180,15 @@ function renderList() {
         li.title = it.tags.includes("♪") ? "reaguje na dźwięk – potrzebny mikrofon w WLED" : "efekt WLED";
       } else {
         const mail = it.mode === "napisz" && waiting ? `✉ ${waiting}` : "";
-        li.append(el("span", "heavy", (mail + " " + (heavy.has(it.mode) ? "⚡" : "")).trim()), el("span", "d", it.doc));
+        li.append(el("span", "heavy", (mail + " " + (heavy.has(it.mode) ? "⚡" : "")).trim()));
+        if (it.mode !== "cykl") { // podgląd efektu
+          const cv = el("canvas", "thumb");
+          cv.dataset.fx = it.mode;
+          if (state) cv.style.aspectRatio = `${state.w} / 12`;
+          li.append(cv);
+          thumbSeen.observe(cv);
+        }
+        li.append(el("span", "d", it.doc));
         if (mail) li.title = `${waiting} wiadomości czeka na akceptację – wybierz „napisz”`;
         li.title = li.title || it.doc;
       }
@@ -199,6 +239,22 @@ function settingRow(s) {
     box.append(val, open);
     row.append(box);
     rows.set(s.name, { val });
+    return row;
+  }
+  if (s.name === "ludzik postać") { // postacie z obrazkiem zamiast listy
+    const box = el("div", "wide chars");
+    const chars = s.labels.map((label, i) => {
+      const b = el("button", "char");
+      const cv = el("canvas");
+      b.append(cv, el("span", "", label));
+      b.title = label;
+      b.onclick = () => cmd("setting", { name: s.name, i });
+      box.append(b);
+      showThumb(cv, `char=${i}`, 30, 90);
+      return b;
+    });
+    row.append(box);
+    rows.set(s.name, { chars });
     return row;
   }
   if (s.kind) return pickRow(s, row); // suwak albo lista rozwijana
@@ -369,6 +425,7 @@ function renderSettings() {
       continue;
     }
     if (r.ctl) renderPick(r, s);
+    if (r.chars) r.chars.forEach((b, i) => b.classList.toggle("on", i === s.index));
     // pasek „███░░░ 24” z TUI zamieniamy na wskaźnik + liczbę
     const m = /^([█░]+)\s*(.*)$/.exec(s.value);
     if (r.val) r.val.textContent = m ? m[2] : s.value;

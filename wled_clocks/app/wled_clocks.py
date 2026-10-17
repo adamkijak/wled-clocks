@@ -4745,6 +4745,14 @@ LUDZIK_CHARS = [
 ]
 
 
+THUMB = threading.local()  # .on = rysujemy podgląd na listę efektów: bez skutków ubocznych (wiadomości, ▶)
+
+
+def ludzik_next():
+    """Zajęcie wymuszone przyciskiem ▶ – ale nie dla podglądu na liście (zabrałby je ludzikowi na panelu)."""
+    return None if getattr(THUMB, "on", False) else LUDZIK["next"]
+
+
 def ludzik_lvl(name):
     return LUDZIK["lvl"].get(name, 2)
 
@@ -4878,6 +4886,7 @@ class Worker(Clock):
         self.rate, self.prev = None, None
         self.ride, self.left, self.free = None, 60.0, 0.0  # free: s animacji do przestawiania cyfr
         self.how_seed = random.random()  # losowy sposób przestawiania: inny w każdym uruchomieniu
+        self.char = None  # postać na sztywno (podgląd postaci); None = z ustawień
 
     @staticmethod
     def layout(s):
@@ -5206,7 +5215,7 @@ class Worker(Clock):
                 f.set(round(cx + (px_ - cx) * k), py, shade)
 
     def man(self, f, pose, x, flip=False, blink=False):
-        pal = dict(self.PAL, **LUDZIK_CHARS[LUDZIK["char"]][1])
+        pal = dict(self.PAL, **LUDZIK_CHARS[LUDZIK["char"] if self.char is None else self.char][1])
         if blink:
             pal["E"] = pal["S"]
         sprite(f, self.POSES[pose], x, 0, pal, flip)
@@ -5356,7 +5365,7 @@ class Worker(Clock):
     def banner_due(self, now, t, nxt_t, lead):
         """Czy pora na transparent: co kilka minut (albo wymuszony przyciskiem ▶), i tylko gdy zdąży przed następnym
         przestawianiem cyfr."""
-        forced = LUDZIK["next"] == "transparent z pogodą"
+        forced = ludzik_next() == "transparent z pogodą"
         every = BANNER_EVERY[ludzik_lvl("transparent z pogodą")] if LUDZIK["freq"] else None
         if not every and not forced:
             return None
@@ -5517,7 +5526,7 @@ class Worker(Clock):
             self.trick = None
         if self.pending in off or not pause:
             self.pending = None
-        forced = LUDZIK["next"]
+        forced = ludzik_next()
         if forced and self.trick is None and self.ride is None and standing:
             self.pending = None
             self.start_forced(forced, t, xs, xr, pause)
@@ -5606,7 +5615,7 @@ class Worker(Clock):
             self.banner = self.banner_due(now, t, nxt_t, sum(job["d"][:4]))
             if self.banner:
                 self.banner_at = now
-                if LUDZIK["next"] == "transparent z pogodą":
+                if ludzik_next() == "transparent z pogodą":
                     LUDZIK["next"] = None
         if self.banner:
             for x in range(W):
@@ -7127,6 +7136,55 @@ def web_cmd(e, c):
     raise ValueError(f"nieznane polecenie {op!r}")
 
 
+class Thumbs:
+    """Podglądy na liście efektów w panelu WWW: kilka sekund efektu policzone na boku (ostatnia klatka, w barwach
+    diod), trzymane w pamięci minutę (godzina, dane z sieci, które dopiero doszły). Liczone po jednym, żeby nie
+    zabierać czasu klatkom na panelu."""
+
+    SECONDS, FPS, KEEP = 3.0, 12, 60
+
+    def __init__(self):
+        self.cache, self.lock = {}, threading.Lock()
+
+    def get(self, key, make):
+        hit = self.cache.get(key)
+        if hit and time.monotonic() - hit[0] < self.KEEP:
+            return hit[1]
+        with self.lock:
+            hit = self.cache.get(key)
+            if not (hit and time.monotonic() - hit[0] < self.KEEP):
+                THUMB.on = True
+                try:
+                    f = make()
+                finally:
+                    THUMB.on = False
+                hit = self.cache[key] = (time.monotonic(), bytes(v for row in panel_view(f.rgb_rows()) for c in row for v in c))
+        return hit[1]
+
+    def effect(self, name):
+        def make():
+            fx, n, dt = CLOCKS[name](), int(self.SECONDS * self.FPS), 1 / self.FPS
+            start = dtm.datetime.now().astimezone() - dtm.timedelta(seconds=self.SECONDS)  # kończy się na „teraz”
+            for i in range(n):
+                f = Frame()
+                fx.draw(f, start + dtm.timedelta(seconds=i * dt), i * dt, dt)
+            return f
+        return self.get(("fx", name), make)
+
+    def char(self, i):
+        """Postać ludzika: stoi, macha i idzie (pierwsze 30 kolumn klatki)."""
+        def make():
+            w, f = Worker(), Frame()
+            w.char = i
+            for x, pose, flip in ((1, "stoi", False), (11, "macha", True), (21, "idzie1", False)):
+                w.man(f, pose, x, flip)
+            return f
+        return self.get(("char", i), make)
+
+
+THUMBS = Thumbs()
+
+
 class WebHandler(httpd.BaseHTTPRequestHandler):
     """Ścieżki dopasowujemy po końcówce, bo Ingress HA (i inne proxy) mogą dokładać prefiks – strona używa
     wyłącznie względnych adresów."""
@@ -7187,6 +7245,14 @@ class WebHandler(httpd.BaseHTTPRequestHandler):
         if name == "frame":
             self.watch()
             return self.reply(200, e.view or b"", "application/octet-stream")
+        if name == "thumb":  # ?fx=nazwa – podgląd efektu, ?char=numer – postać ludzika (surowe RGB, W x H x 3)
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            fx, ch = q.get("fx", [""])[0], q.get("char", [""])[0]
+            if fx in CLOCKS:
+                return self.reply(200, THUMBS.effect(fx), "application/octet-stream")
+            if ch.isdigit() and int(ch) < len(LUDZIK_CHARS):
+                return self.reply(200, THUMBS.char(int(ch)), "application/octet-stream")
+            return self.reply(404, {"error": "nie ma"})
         if name == "stream":
             return self.stream()
         self.reply(404, {"error": "nie ma"})
@@ -7568,6 +7634,8 @@ class Inbox:
 
     def take(self):
         """Następna wiadomość do pokazania (efekt „napisz”) albo None."""
+        if getattr(THUMB, "on", False):  # podgląd na liście nie zabiera wiadomości
+            return None
         with self.lock:
             if not self.queue:
                 return None
