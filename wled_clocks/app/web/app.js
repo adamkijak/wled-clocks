@@ -398,14 +398,26 @@ function renderActs() {
         b.onclick = () => cmd("ludzik", { act, lvl });
         seg.append(b);
       });
-      row.append(el("span", "", act), seg);
+      const ctl = el("div", "actl");
+      ctl.append(seg);
+      if (clocks.ludzik_timed.includes(act)) { // długość zajęcia
+        const len = el("select", "len");
+        len.title = "Jak długo";
+        clocks.ludzik_len.forEach((label, i) => len.append(new Option(label, i)));
+        len.onchange = () => cmd("ludzik", { act, len: Number(len.value) });
+        ctl.append(len);
+      }
+      row.append(el("span", "", act), ctl);
       row.dataset.act = act;
       box.append(row);
     });
   }
   for (const row of box.children) {
-    const lvl = state.ludzik[row.dataset.act];
+    const act = row.dataset.act, lvl = state.ludzik[act];
     for (const b of row.querySelectorAll("button")) b.classList.toggle("on", Number(b.dataset.lvl) === lvl);
+    const len = row.querySelector("select");
+    if (len && document.activeElement !== len) len.value = String(state.ludzik_len[act]);
+    if (len) len.disabled = !lvl;
   }
 }
 $("#acts-close").onclick = () => ($("#acts").hidden = true);

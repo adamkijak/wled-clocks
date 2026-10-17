@@ -1,5 +1,11 @@
 # Zmiany
 
+## 1.8.0
+
+- Ludzik: długość każdego zajęcia ustawia się osobno (krótko / normalnie / długo / bardzo długo) – w panelu WWW
+  lista obok częstości w „Zajęcia ludzika”, w TUI klawisze `-` `+`. Rowerem i autem zmienia się liczba okrążeń.
+  Zajęcie trwa najwyżej do przestawiania cyfr (ok. 40 s na minutę). Zapisywane w konfiguracji.
+
 ## 1.7.0
 
 - Ludzik: zajęcia trwają dużo dłużej (np. czytanie i spanie do pół minuty), strzelanie to seria (kilka strzał

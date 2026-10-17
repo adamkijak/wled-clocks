@@ -70,6 +70,34 @@ class EngineTest(unittest.TestCase):
         finally:
             wc.LUDZIK["lvl"], wc.LUDZIK["freq"] = old
 
+    def test_ludzik_length(self):
+        """Długość każdego zajęcia osobno: krótko / bardzo długo zmienia czas zajęcia i liczbę okrążeń."""
+        old = dict(wc.LUDZIK["lvl"]), dict(wc.LUDZIK["len"]), wc.LUDZIK["freq"]
+        try:
+            wc.LUDZIK["lvl"] = {a: 0 for a in wc.LUDZIK_ACTS}
+            wc.LUDZIK["lvl"].update({"czytanie": 3, "auto": 3})
+            wc.LUDZIK["freq"] = 3
+            e = wc.Engine(args(), {})
+            for act, n in (("czytanie", 0), ("auto", 3)):
+                e.cmds.put(wc.web_cmd(e, {"op": "ludzik", "act": act, "len": n}))
+            e.tick()
+            self.assertEqual(wc.LUDZIK["len"], {"czytanie": 0, "auto": 3})
+            self.assertEqual(e.snapshot(e.tick()[1])["ludzik_len"]["czytanie"], 0)
+            fx, reads, laps = wc.CLOCKS["ludzik"](), set(), set()
+            base = wc.dtm.datetime(2026, 10, 16, 12, 0, 2).astimezone()
+            wc.random.seed(3)
+            for i in range(int(300 / 0.05)):
+                t = i * 0.05
+                fx.draw(wc.Frame(), base + wc.dtm.timedelta(seconds=t), t, 0.05)
+                if fx.trick:
+                    reads.add(fx.trick[3])
+                if fx.ride:
+                    laps.add(round(fx.ride["len"] / (wc.W + 2 * fx.RIDE_OFF)))
+            self.assertTrue(reads and max(reads) <= 35 * 0.4)              # krótko: najwyżej 0,4 zwykłego czasu
+            self.assertGreaterEqual(max(laps), 7)                          # bardzo długo: tyle, ile zmieści minuta
+        finally:
+            wc.LUDZIK["lvl"], wc.LUDZIK["len"], wc.LUDZIK["freq"] = old
+
     def test_small_font_polish_marks(self):
         plain = set(wc.small_pl("PIATEK SRODA", 0, 1))
         pl = set(wc.small_pl("PIĄTEK ŚRODA", 0, 1))
@@ -272,7 +300,8 @@ class EngineTest(unittest.TestCase):
     def test_bad_commands_rejected(self):
         e = wc.Engine(args(), {})
         for c in ({"op": "select", "name": "nie_ma"}, {"op": "setting", "name": "x"}, {"op": "host", "host": "a; rm"},
-                  {"op": "ludzik", "act": "spacer", "lvl": 7}, {"op": "boom"}):
+                  {"op": "ludzik", "act": "spacer", "lvl": 7}, {"op": "ludzik", "act": "spacer", "len": 1},
+                  {"op": "ludzik", "act": "spanie", "len": 9}, {"op": "boom"}):
             with self.assertRaises(ValueError, msg=c):
                 wc.web_cmd(e, c)
 

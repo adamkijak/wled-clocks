@@ -191,6 +191,17 @@ main > *, .cols > * { min-width: 0; }
 .acts { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
 .arow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0; }
 .seg { display: inline-flex; }
+.actl { display: inline-flex; align-items: center; gap: 6px; }
+.actl select.len {
+  width: 13ch;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
 .seg button { border-radius: 0; padding: 3px 8px; font-size: 12px; }
 .seg button:first-child { border-radius: 6px 0 0 6px; }
 .seg button:last-child { border-radius: 0 6px 6px 0; }

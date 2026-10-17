@@ -4701,10 +4701,13 @@ class Planets(Clock):
 
 
 # co ludzik robi z nudów: wyłączone zajęcia i jak często (ustawiane w TUI, zapisywane w konfiguracji)
-LUDZIK = {"lvl": {}, "freq": 2}  # lvl: częstość każdego zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami
+LUDZIK = {"lvl": {}, "len": {}, "freq": 2}  # lvl: częstość każdego zajęcia (0–3, brak = normalnie);
+# len: długość zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami
 LUDZIK_FREQ = [("nigdy", None), ("rzadko", (20, 40)), ("normalnie", (4, 10)), ("często", (1, 4)), ("bez przerwy", (0, 0.5))]
 LUDZIK_LVL = ["wył.", "rzadko", "normalnie", "często"]
 LVL_WEIGHT = [0, 1, 3, 9]                     # zajęcia: waga losowania
+LUDZIK_LEN = ["krótko", "normalnie", "długo", "bardzo długo"]
+LEN_MUL = [0.4, 1, 1.8, 3]                    # długość: mnożnik czasu zajęcia (rowerem i autem – okrążeń)
 BANNER_EVERY = [None, 10, 5, 2]               # transparent z pogodą: co ile minut
 WALK_REST = [None, (8, 16), (2, 6), (0.5, 2)]  # spacer: ile stoi między spacerami (s)
 CROSS_P = [0, 0.15, 0.35, 0.7]                # przechodzenie: jaka część spacerów kończy się po drugiej stronie
@@ -4712,6 +4715,10 @@ CROSS_P = [0, 0.15, 0.35, 0.7]                # przechodzenie: jaka część spa
 
 def ludzik_lvl(name):
     return LUDZIK["lvl"].get(name, 2)
+
+
+def ludzik_len(name):
+    return LUDZIK["len"].get(name, 1)
 
 
 @reg("ludzik")
@@ -5064,7 +5071,8 @@ class Worker(Clock):
         d = -1 if goal >= self.x else 1  # odjeżdża od celu i wraca zza drugiej krawędzi: trasa najwyżej W + 2*o
         out = W + o - self.x if d > 0 else self.x + o
         back = goal + o if d > 0 else W + o - goal
-        _, v, (lo, hi) = self.RIDES[name]
+        _, v, laps_range = self.RIDES[name]
+        lo, hi = (max(1, round(n * LEN_MUL[ludzik_len(name)])) for n in laps_range)
         free = self.free - 2 - (abs(goal - xr - 1) - abs(self.x - xr - 1)) / self.WALK  # do roboty pójdzie od celu
         if (out + back) / v > free:  # out + back to najwyżej jedno okrążenie
             return None
@@ -5077,9 +5085,15 @@ class Worker(Clock):
         """Czas jednego okrążenia."""
         return (W + 2 * self.RIDE_OFF) / self.RIDES[name][1]
 
+    def trick_spec(self, name):
+        """TRICKS[name] z czasem od–do według ustawionej długości."""
+        (lo, hi), *rest = self.TRICKS[name]
+        k = LEN_MUL[ludzik_len(name)]
+        return ((lo * k, hi * k), *rest)
+
     def trick_len(self, name):
         """Ile pełnych rund zajęcia zmieści się przed przestawianiem cyfr -> najdłuższy czas albo None."""
-        (lo, hi), poses, step, _ = self.TRICKS[name]
+        (lo, hi), poses, step, _ = self.trick_spec(name)
         cycle = len(poses) * step
         dur = int(min(hi, self.free - 2) / cycle) * cycle
         return dur if dur >= min(lo, 3) and dur >= cycle else None
@@ -5150,7 +5164,7 @@ class Worker(Clock):
                     if dur is not None:  # inaczej nie zdąży dojechać – za 3 s losuje znowu
                         self.next_trick = t + dur + random.uniform(*pause)
                 else:
-                    (lo, hi), poses, step, _ = self.TRICKS[n]
+                    (lo, hi), poses, step, _ = self.trick_spec(n)
                     cycle = len(poses) * step
                     dur = max(cycle, int(min(random.uniform(lo, hi), self.trick_len(n)) / cycle) * cycle)
                     self.trick = (n, t, fl, dur)
@@ -5272,6 +5286,7 @@ class Worker(Clock):
 
 
 LUDZIK_ACTS = ["spacer", "na drugą stronę", *Worker.TRICKS, *Worker.RIDES, "transparent z pogodą"]  # co można włączyć/wyłączyć
+LUDZIK_TIMED = [*Worker.TRICKS, *Worker.RIDES]  # te mają ustawianą długość
 
 
 # ---------------------------------------------------------------- zwykły zegar w kolorze pory dnia
@@ -5863,7 +5878,8 @@ class Engine:
                "panel_levels": PANEL["levels"] if panel_manual() else None,
                "panel_levels_bri": PANEL["bri"] if panel_manual() else None, "panel_pe": PANEL["pe"],
                "psu": POWER["psu"], "auto_dim": POWER["auto"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
-               "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_freq": LUDZIK["freq"],
+               "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_len": LUDZIK["len"],
+               "ludzik_freq": LUDZIK["freq"],
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
@@ -6222,7 +6238,7 @@ class Engine:
                                "fx": self.SETTING_FX.get(n, "")}, **self.choice_json(n)) for n, val, _, hint in self.settings],
             "setting_fx": sorted(self.setting_fx()),
             "heavy": [n for n in CLOCKS if self.heavy(n)],
-            "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS},
+            "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS}, "ludzik_len": {a: ludzik_len(a) for a in LUDZIK_TIMED},
             "inbox": INBOX.snapshot(),
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
                       "psu": POWER["psu"], "auto": POWER["auto"]},
@@ -6344,6 +6360,8 @@ class Tui(Engine):
                 LUDZIK["lvl"][act] = (ludzik_lvl(act) + 1) % 4
             elif k in ("0", "1", "2", "3") and act:
                 LUDZIK["lvl"][act] = int(k)
+            elif k in ("-", "+", "=") and act in LUDZIK_TIMED:  # długość zajęcia
+                LUDZIK["len"][act] = max(0, min(len(LUDZIK_LEN) - 1, ludzik_len(act) + (-1 if k == "-" else 1)))
             elif k == "*" and m:  # wszystkie widoczne: wyłącz, a gdy już wyłączone – normalnie
                 names = [LUDZIK_ACTS[i] for i in m]
                 v = 0 if any(ludzik_lvl(a) for a in names) else 2
@@ -6517,7 +6535,7 @@ class Tui(Engine):
         sf = self.focus == "set"
         if self.focus == "acts":
             right = [f"{INV} Zajęcia ludzika {R} " + (f"{Y}szukaj: {self.afilt}█{R}" if self.afilt else
-                                                      f"{D}(co robi z nudów i jak często; pisz, żeby szukać){R}")]
+                                                      f"{D}(co robi z nudów: ←→ jak często, - + jak długo; pisz, żeby szukać){R}")]
             m = self.act_matches()
             if not m:
                 right.append(f"  {D}nic nie pasuje do „{self.afilt}” (Backspace / Esc){R}")
@@ -6526,6 +6544,8 @@ class Tui(Engine):
                 sel = i == self.acur
                 lv = ludzik_lvl(act)
                 lab = (D, Y, G, C)[lv] + "◂ " + f"{LUDZIK_LVL[lv]:9s}" + " ▸" + R
+                if act in LUDZIK_TIMED:
+                    lab += f"  {D if not lv else ''}{LUDZIK_LEN[ludzik_len(act)]}{R}"
                 right.append(f"{Y + '▸' if sel else ' '}{R} {(B if sel else '')}{act:20s}{R} {lab}")
         else:
             right = [(f"{INV} Ustawienia {R}" if sf else f"{D}Ustawienia{R}") + f" {D}(Tab){R}"]
@@ -6656,8 +6676,14 @@ def web_cmd(e, c):
         if len(host) > 64 or not re.fullmatch(r"[A-Za-z0-9.:\-\[\]]*", host):
             raise ValueError("zły adres hosta")
         return lambda: e.set_host(host)
-    if op == "ludzik":
-        act, lvl = c.get("act"), int(c.get("lvl", 2))
+    if op == "ludzik":  # częstość (lvl) albo długość (len) zajęcia
+        act = c.get("act")
+        if "len" in c:
+            n = int(c["len"])
+            if act not in LUDZIK_TIMED or not 0 <= n < len(LUDZIK_LEN):
+                raise ValueError("zła długość zajęcia ludzika")
+            return lambda: LUDZIK["len"].__setitem__(act, n)
+        lvl = int(c.get("lvl", 2))
         if act not in LUDZIK_ACTS or not 0 <= lvl <= 3:
             raise ValueError("złe zajęcie ludzika")
         return lambda: LUDZIK["lvl"].__setitem__(act, lvl)
@@ -6757,6 +6783,7 @@ class WebHandler(httpd.BaseHTTPRequestHandler):
                                     "categories": [{"name": c, "icon": icon, "names": names.split() + (["cykl"] if c == "Narzędzia" else [])}
                                                    for c, icon, names in CATEGORIES],
                                     "ludzik_acts": LUDZIK_ACTS, "ludzik_lvl": LUDZIK_LVL,
+                                    "ludzik_timed": LUDZIK_TIMED, "ludzik_len": LUDZIK_LEN,
                                     "wled": e.wled_fx, "wled_ver": e.wled_ver})
         if name == "state":
             self.watch()
@@ -7402,6 +7429,8 @@ def main():
     for n in cfg.get("ludzik_off", []):  # starszy zapis: lista wyłączonych
         if n in LUDZIK_ACTS:
             LUDZIK["lvl"].setdefault(n, 0)
+    LUDZIK["len"] = {n: int(clamp(v, 0, len(LUDZIK_LEN) - 1)) for n, v in (cfg.get("ludzik_len") or {}).items()
+                     if n in LUDZIK_TIMED}
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
