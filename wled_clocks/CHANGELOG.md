@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.6.0
+
+- „⏻ WLED włączony / wyłączony” na pasku to przycisk: włącza i wyłącza WLED (klawisz `w`, też w TUI). Po
+  wyłączeniu z panelu skrypt od razu przestaje wysyłać, nawet zanim WLED potwierdzi zmianę.
+
 ## 1.5.1
 
 - Karta „Efekty” jest tak wysoka jak karta ustawień obok; lista efektów wypełnia ją całą.

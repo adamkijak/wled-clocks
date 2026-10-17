@@ -497,9 +497,15 @@ function render(s) {
   }
   const send = $("#send-state");
   const off = s.wled_on === false; // włącznik WLED wyłączony – skrypt nic nie wysyła, póki go nie włączysz
-  send.textContent = off ? "⏻ WLED wyłączony" : s.wled_mode ? "◆ efekt WLED" : s.sending ? "● wysyła" : "○ nie wysyła";
-  send.title = off ? "WLED wyłączony (przycisk, aplikacja lub HA) – skrypt nic nie wysyła, żeby go nie zapalić" : "";
-  send.classList.toggle("ok", s.sending && !s.wled_mode && !off);
+  const power = $("#btn-power");
+  power.textContent = off ? "⏻ WLED wyłączony" : s.wled_on ? "⏻ WLED włączony" : "⏻ WLED ?";
+  power.title = off ? "Włącz WLED (w) – wyłączony WLED skrypt zostawia w spokoju, nic nie wysyła"
+    : s.wled_on ? "Wyłącz WLED (w)" : "WLED nie odpowiada";
+  power.classList.toggle("off", off);
+  power.disabled = s.wled_on == null;
+  send.hidden = off;
+  send.textContent = s.wled_mode ? "◆ efekt WLED" : s.sending ? "● wysyła" : "○ nie wysyła";
+  send.classList.toggle("ok", s.sending && !s.wled_mode);
   $("#host").textContent = s.host ? `host ${s.host}` : "brak hosta – wpisz w ustawieniach";
   $("#clock").textContent = s.time + (s.fake_time ? " (udawany)" : "");
   $("#badges").textContent = (s.paused ? "⏸ pauza  " : "") + (s.mirror ? "⇋ odbicie" : "");
@@ -558,7 +564,7 @@ document.addEventListener("keydown", (e) => {
   if (e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
   const keys = {
     ArrowRight: ["skip", { d: 1 }], ArrowLeft: ["skip", { d: -1 }], n: ["skip", { d: 1 }], p: ["skip", { d: -1 }],
-    " ": ["pause"], s: ["send"], m: ["mirror"], l: ["shuffle"], o: ["override"], r: ["realtime"],
+    " ": ["pause"], s: ["send"], w: ["power"], m: ["mirror"], l: ["shuffle"], o: ["override"], r: ["realtime"],
     "]": ["every", { d: 1 }], "[": ["every", { d: -1 }], ">": ["speed", { d: 1 }], "<": ["speed", { d: -1 }],
   };
   if (e.key === "c") cmd("select", { name: "cykl" });

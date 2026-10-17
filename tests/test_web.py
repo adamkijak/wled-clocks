@@ -387,6 +387,7 @@ class WledEffectsTest(unittest.TestCase):
 
             def do_POST(self):
                 posted.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                wled["on"] = posted[-1].get("on", wled["on"])
                 self.do_GET()
 
         self.srv = wc.httpd.ThreadingHTTPServer(("127.0.0.1", 0), Fake)
@@ -440,6 +441,36 @@ class WledEffectsTest(unittest.TestCase):
         finally:
             for x in engines:
                 x.running = False
+            wc.send_ddp, wc.Engine.WATCH_EVERY = old
+
+    def test_power_button(self):
+        """Przycisk ⏻ w panelu włącza i wyłącza WLED; po wyłączeniu ani jednej klatki, nawet ze stanem sprzed kliknięcia."""
+        sent, old = [], (wc.send_ddp, wc.Engine.WATCH_EVERY)
+        wc.send_ddp, wc.Engine.WATCH_EVERY = (lambda *a: sent.append(1)), 0.05
+        e = wc.Engine(args(host=self.host, mode="zegar"), {})
+        try:
+            self.wait(lambda: (e.tick(), e.wled_on)[1])
+            stale = e.wled_st                                               # „on”: true sprzed kliknięcia
+            e.cmds.put(wc.web_cmd(e, {"op": "power"}))
+            e.tick()
+            self.assertIs(e.wled_on, False)
+            self.wait(lambda: {"on": False} in self.posted and not self.wled["on"])
+            e.wled_st = dict(stale)                                         # spóźniona odpowiedź WLED
+            sent.clear()
+            for _ in range(5):
+                e.tick()
+            self.assertEqual(sent, [])
+            self.assertIs(e.wled_on, False)
+            e.cmds.put(wc.web_cmd(e, {"op": "power"}))
+            e.tick()
+            self.assertTrue(e.wled_on)
+            self.wait(lambda: {"on": True} in self.posted and self.wled["on"])
+            e.tick()
+            self.assertTrue(sent)
+            self.wled["on"] = False                                         # potem przycisk w WLED – wygrywa on
+            self.wait(lambda: (e.tick(), e.wled_on is False)[1])
+        finally:
+            e.running = False
             wc.send_ddp, wc.Engine.WATCH_EVERY = old
 
     def test_wled_effects(self):

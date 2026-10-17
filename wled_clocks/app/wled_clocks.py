@@ -28,7 +28,7 @@ Pogoda i słońce liczone dla Warszawy; inne miejsce: --lat 50.06 --lon 19.94
 Interaktywny TUI (domyślnie, gdy uruchomione w terminalu):
   podgląd panelu na żywo, ↑↓ + Enter wybór zegara, ←→ następny/poprzedni, c cykl,
   Tab ustawienia (tempo animacji, tempo tekstu, fps, cykl…), [ ] czas w cyklu, < > przyspieszenie czasu, r prawdziwa godzina,
-  spacja pauza, s wysyłanie on/off, h zmiana IP, v podgląd on/off, m odbicie lustrzane (do kamerki), q wyjście,
+  spacja pauza, s wysyłanie on/off, w włącznik WLED, h zmiana IP, v podgląd on/off, m odbicie lustrzane (do kamerki), q wyjście,
   / szukaj (po nazwie i opisie), PgUp/PgDn przewijanie listy, l losowa kolejność w cyklu.
   --no-tui = stare zachowanie (tylko wysyłanie, np. w tle).
 
@@ -5500,6 +5500,7 @@ class Engine:
         self.lor = 0
         self.wled_st = None   # ostatni /json/state z WLED (wątek watch_wled)
         self.wled_on = None   # włącznik WLED: True/False, None = jeszcze nie wiemy – wtedy też nic nie wysyłamy
+        self.power_want = None, 0.0  # (on, do kiedy) po przełączeniu z panelu – zanim WLED to przyjmie
         self.watch_wled()
         if self.sending:
             self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")   # WLED ma pokazywać nasz strumień
@@ -5776,6 +5777,11 @@ class Engine:
         PANEL["bri"] = st["bri"]
         self.lor = st.get("lor", 0)
         on = bool(st.get("on", True))
+        want, until = self.power_want
+        if on == want or time.monotonic() >= until:
+            self.power_want = None, 0.0  # WLED przyjął przełączenie (albo nie odpowiedział) – dalej rządzi jego stan
+        elif want is not None:
+            on = want  # stan sprzed naszego przełączenia – inaczej jedna klatka DDP zapaliłaby WLED z powrotem
         if self.wled_on is not False and not on:
             self.say("WLED wyłączony – nie wysyłam, póki go nie włączysz")
             if self.sending and self.wled_id(self.mode) is None:
@@ -6034,12 +6040,24 @@ class Engine:
             self.say("najpierw podaj host WLED")
             self.ask_host()
 
+    def toggle_power(self):
+        """Włącznik WLED z panelu: jak przycisk w WLED, tylko zdalnie."""
+        if not self.host or self.wled_on is None:
+            self.say("WLED nie odpowiada – nie wiem, czy jest włączony")
+            return
+        on = not self.wled_on
+        self.wled_post({"on": on}, "włączyć WLED" if on else "wyłączyć WLED")
+        self.power_want = None, 0.0  # nowe kliknięcie zastępuje poprzednie
+        self.wled_state_in({**self.wled_st, "on": on})
+        self.power_want = on, time.monotonic() + 3 * self.WATCH_EVERY + 4
+
     def set_host(self, host):
         self.host = host.strip()
         self.sending = bool(self.host)
         self.err = ""
         self.say(f"host: {self.host or '(brak)'}")
         self.wled_st, self.wled_on, self._last_st = None, None, None
+        self.power_want = None, 0.0
         self.wled_fx = []
         self.load_wled_fx()
 
@@ -6349,6 +6367,8 @@ class Tui(Engine):
             self.toggle_pause()
         elif k == "s":
             self.toggle_send()
+        elif k == "w":
+            self.toggle_power()
         elif k == "h":
             self.ask_host()
         elif k == "o":
@@ -6553,7 +6573,7 @@ def web_cmd(e, c):
     """Polecenie z panelu WWW -> funkcja do wykonania w wątku klatek; ValueError = złe polecenie."""
     op = c.get("op")
     d = 1 if int(c.get("d", 1)) > 0 else -1
-    simple = {"pause": e.toggle_pause, "send": e.toggle_send, "mirror": e.toggle_mirror, "shuffle": e.toggle_shuffle,
+    simple = {"pause": e.toggle_pause, "send": e.toggle_send, "power": e.toggle_power, "mirror": e.toggle_mirror, "shuffle": e.toggle_shuffle,
               "override": e.override_off, "realtime": e.real_time}
     if op in simple:
         return simple[op]

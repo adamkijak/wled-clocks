@@ -65,6 +65,7 @@ Całkiem wyłączyć można też przez zatrzymanie dodatku.
 Wyłączony WLED zostaje wyłączony: skrypt co sekundę sprawdza jego stan i, gdy jest wyłączony, nie wysyła ani
 jednej klatki (każda klatka DDP sama zapala wyłączony WLED). Po wyłączeniu od razu kończy tryb realtime, więc panel
 gaśnie bez czekania. Na pasku widać wtedy **⏻ WLED wyłączony**. Po włączeniu skrypt sam wraca do wysyłania.
+Ten napis na pasku to też przycisk (albo klawisz `w`): włącza i wyłącza WLED tak jak przycisk w WLED.
 Zmiana jasności czy efektu WLED w panelu też go nie zapala – zadziała po włączeniu.
 
 ## Kolory: podgląd = panel
@@ -99,7 +100,7 @@ tylko te, których dany efekt używa, z nazwami z WLED. Każdy efekt pamięta sw
 
 ## Skróty klawiszowe w panelu
 
-← → poprzedni/następny, spacja pauza, `c` cykl, `s` wysyłanie, `m` odbicie, `l` losowa kolejność,
+← → poprzedni/następny, spacja pauza, `c` cykl, `s` wysyłanie, `w` włącznik WLED, `m` odbicie, `l` losowa kolejność,
 `[` `]` czas w cyklu, `<` `>` przyspieszenie czasu, `r` prawdziwa godzina, `/` szukaj.
 
 ## Uwagi
