@@ -59,6 +59,38 @@
       <div id="fx-settings" class="settings"></div>
       <div id="wled-settings" class="settings"></div>
       <p id="fx-none" class="muted">Ten efekt nie ma własnych ustawień.</p>
+      <div id="inbox" class="inbox" hidden>
+        <div class="card-head">
+          <h3>Skrzynka na wiadomości od widzów</h3>
+          <span id="inbox-state" class="pill">…</span>
+        </div>
+        <p id="inbox-info" class="muted"></p>
+        <div class="inbox-btns">
+          <button id="inbox-open">Otwórz skrzynkę</button>
+          <button id="inbox-close">Zamknij</button>
+          <button id="inbox-clear" title="Usuwa wiadomości czekające na akceptację i te w kolejce">Wyczyść niepokazane</button>
+        </div>
+        <div class="srow">
+          <span>otwarta przez</span>
+          <div class="wide"><input id="inbox-hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal"> h</div>
+          <span class="hint">potem zamyka się sama i nikt obcy już nie napisze; od 0,25 do 24 h</span>
+        </div>
+        <div class="srow">
+          <span>akceptacja</span>
+          <div class="wide pick">
+            <select id="inbox-auto">
+              <option value="0">ręczna – każda wiadomość czeka na Twoje ✓</option>
+              <option value="1">automatyczna – od razu na panel (tylko filtry)</option>
+            </select>
+          </div>
+        </div>
+        <h3>Czekają na akceptację</h3>
+        <ul id="inbox-pending" class="msgs"></ul>
+        <h3>W kolejce na panel</h3>
+        <ul id="inbox-queue" class="msgs"></ul>
+        <h3>Pokazane</h3>
+        <ul id="inbox-shown" class="msgs"></ul>
+      </div>
       <div id="acts" class="acts" hidden>
         <div class="card-head">
           <h3>Zajęcia ludzika</h3>
@@ -70,28 +102,6 @@
       <div id="settings" class="settings"></div>
     </section>
   </div>
-
-  <section class="card inbox">
-    <div class="card-head">
-      <h2>Wiadomości od widzów <span class="muted">– efekt „napisz”</span></h2>
-      <span id="inbox-state" class="pill">…</span>
-    </div>
-    <p id="inbox-info" class="muted"></p>
-    <div class="inbox-btns">
-      <button id="inbox-open">Otwórz skrzynkę</button>
-      <button id="inbox-close">Zamknij</button>
-      <button id="inbox-hours" title="Na ile otworzyć (kliknij, żeby zmienić)">na 2 h</button>
-      <button id="inbox-auto" title="Ręczna: każda wiadomość czeka na Twoje ✓. Automatyczna: tylko filtry.">Akceptacja: ręczna</button>
-      <button data-select="napisz">Pokaż „napisz” na panelu</button>
-      <button id="inbox-clear">Wyczyść kolejkę</button>
-    </div>
-    <h3>Czekają na akceptację</h3>
-    <ul id="inbox-pending" class="msgs"></ul>
-    <h3>W kolejce na panel</h3>
-    <ul id="inbox-queue" class="msgs"></ul>
-    <h3>Pokazane</h3>
-    <ul id="inbox-shown" class="msgs"></ul>
-  </section>
 
   <section class="card net">
     <div id="stat-net" class="muted"></div>

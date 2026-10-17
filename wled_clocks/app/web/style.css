@@ -136,6 +136,12 @@ main > *, .cols > * { min-width: 0; }
   cursor: default;
 }
 .list li.sep:hover { background: none; }
+.list li.sep:first-child { margin-top: 0; padding-top: 6px; border-top: 0; }
+.list li.grp { display: grid; grid-template-columns: 3ch 1fr auto; gap: 8px; cursor: pointer; color: var(--text); }
+.list li.grp:hover { background: var(--btn); }
+.list li.grp .arrow, .list li.grp .count { color: var(--muted); font-weight: 400; text-align: right; }
+.list li.grp .count { font-size: 12px; font-variant-numeric: tabular-nums; }
+.list li.grp { margin-top: 0; padding-top: 7px; padding-bottom: 7px; }
 .list li .tags { color: var(--muted); font-size: 12px; }
 
 .settings { display: grid; gap: 2px; }
@@ -187,9 +193,14 @@ main > *, .cols > * { min-width: 0; }
 .stats .warn { color: var(--warn); }
 .stats .bad { color: var(--bad); }
 
+.inbox { margin-top: 4px; }
+.inbox .card-head h3 { margin: 0; font-size: 14px; color: var(--text); }
 .inbox h3 { margin: 14px 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.inbox .srow .wide { align-items: center; }
+.inbox .srow .wide input { flex: 0 0 7em; }
+.inbox .srow:last-of-type { border-bottom: 0; }
 .inbox p { margin: 0 0 10px; overflow-wrap: anywhere; }
-.inbox-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.inbox-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
 .msgs { list-style: none; margin: 0; padding: 0; }
 .msgs li {
   display: grid;

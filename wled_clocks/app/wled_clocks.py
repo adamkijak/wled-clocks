@@ -5,21 +5,23 @@ Tylko biblioteka standardowa Pythona 3.8+ – bez żadnych dodatkowych pakietów
 
   python3 wled_clocks.py --list     – pełna lista ze opisami
 
-Kategorie:
-  * na początku listy: ludzik (1), zegar (2, zwykła godzina i data w kolorze pory dnia),
-      napisz (3, wiadomości od widzów, np. na callu)
-  * klasyka (4-15): licznik, roj, ogien, matrix, niebo, doba, skaner, tecza, hiperskok, zycie, akwarium, pong
-  * dane z internetu (16-37), bez kluczy API, pobierane w tle tylko dla widocznego efektu:
-      pogoda, prognoza, opady, wiatr, termometr, smog (Open-Meteo), kursy, zloto (NBP), krypto (Binance),
-      iss, kosmonauci, trzesienia (USGS), zorza (NOAA Kp), bloki (mempool.space), hackernews,
-      wiadomosci (TVN24 RSS), imieniny, rakieta (The Space Devs), zart, slonce, uv, barometr
-  * style zegarów (38-69): binarny, analogowy, slownie, rzymski, morse, klepsydra, postep, kalendarz,
-      odliczanie, nixie, segmenty, klapki, lustro, cien, tetris, hex, kolor, dziesietny, beaty, unix,
-      strefy, obwod, wahadlo, fala, glitch, neon, pismo, kreskowy, maszyna, radar, domino, ksiezyc
-  * sceny, symulacje i gry (70-103), kolory (104, test do kalibracji): plazma, lawa, swietliki, fajerwerki, snieg, burza, gwiazdy, ocean,
-      dym, kalejdoskop, labirynt, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, pociag, miasto,
-      las, gory, dna, oscyloskop, equalizer, ekg, mrowka, piasek, kule, kregi, wir, synthwave, pory, planety
-  * cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
+Kategorie (w tej kolejności lista, numery i cykl – patrz CATEGORIES):
+  * Na start: ludzik, zegar (zwykła godzina i data), napisz (wiadomości od widzów, np. na callu)
+  * Tarcze i wyświetlacze: analogowy, nixie, segmenty, klapki, licznik, wahadlo, klepsydra, maszyna, pismo, kreskowy,
+      neon, radar, obwod, kalendarz, postep, lustro, cien
+  * Inne zapisy czasu: binarny, hex, kolor, dziesietny, beaty, unix, rzymski, morse, slownie, domino, strefy, odliczanie
+  * Pogoda (Open-Meteo): pogoda, prognoza, opady, wiatr, termometr, smog, slonce, uv, barometr
+  * Niebo i kosmos: niebo, doba, ksiezyc, planety, iss, kosmonauci, rakieta (The Space Devs), zorza (NOAA Kp),
+      gwiazdy, hiperskok
+  * Wiadomości i finanse: kursy, zloto (NBP), krypto (Binance), bloki (mempool.space), hackernews,
+      wiadomosci (TVN24 RSS), imieniny, zart, trzesienia (USGS)
+  * Sceny i przyroda: akwarium, swietliki, snieg, burza, ocean, miasto, las, gory, pory, fajerwerki, synthwave,
+      pociag, ogien, fala
+  * Gry: pong, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, labirynt, tetris
+  * Abstrakcje i symulacje: roj, matrix, skaner, tecza, glitch, zycie, mrowka, plazma, kalejdoskop, wir, dna,
+      oscyloskop, equalizer, ekg, kule, kregi, piasek, lawa, dym
+  * Narzędzia: kolory (test do kalibracji), cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
+  Dane z internetu – bez kluczy API, pobierane w tle tylko dla widocznego efektu.
 
 Pogoda i słońce liczone dla Warszawy; inne miejsce: --lat 50.06 --lon 19.94
 
@@ -1317,10 +1319,10 @@ class Pong(Clock):
 
 
 # ================================================================ SIEĆ (dane z internetu w tle)
-def http(url, kind="json"):
+def http(url, kind="json", timeout=12):
     req = urllib.request.Request(url, headers={"User-Agent": "wled-clocks/2.0 (python urllib)",
                                                "Accept": "application/json" if kind == "json" else "*/*"})
-    with urllib.request.urlopen(req, timeout=12) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         b = r.read()
     if kind == "json":
         return json.loads(b)
@@ -1398,7 +1400,6 @@ SOURCES = {  # klucz: (funkcja, co ile sekund odświeżać)
     "launch": (lambda: [(x["name"], x["net"]) for x in http("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=5&mode=list")["results"]], 3600),
     "joke": (lambda: http("https://icanhazdadjoke.com/")["joke"], 300),
     "baner": (lambda: _banner_weather(), 900),
-    "wled": (lambda: http(f"http://{PANEL['host']}/json/state"), 10),
 }
 
 
@@ -5364,14 +5365,27 @@ class Inbound(Clock):
         scroll_segs(f, segs, t, 30, 0, self.X0, gap=40)
 
 
-CLOCKS = {
-    "ludzik": REG["ludzik"],  # pierwszy na liście (i w cyklu)
-    "zegar": REG["zegar"],    # zwykła godzina i data
-    "napisz": REG["napisz"],  # zaraz pod ręką na callu
-    "licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "niebo": Sky, "doba": DayRibbon,
-    "skaner": Scanner, "tecza": Rainbow, "hiperskok": Warp, "zycie": Life, "akwarium": Aquarium, "pong": Pong,
-    **REG,
-}
+CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lista, numery i cykl
+    ("Na start", "⭐", "ludzik zegar napisz"),
+    ("Tarcze i wyświetlacze", "🕰", "analogowy nixie segmenty klapki licznik wahadlo klepsydra maszyna pismo kreskowy "
+                                   "neon radar obwod kalendarz postep lustro cien"),
+    ("Inne zapisy czasu", "🔢", "binarny hex kolor dziesietny beaty unix rzymski morse slownie domino strefy odliczanie"),
+    ("Pogoda", "🌦", "pogoda prognoza opady wiatr termometr smog slonce uv barometr"),
+    ("Niebo i kosmos", "🌌", "niebo doba ksiezyc planety iss kosmonauci rakieta zorza gwiazdy hiperskok"),
+    ("Wiadomości i finanse", "📰", "kursy zloto krypto bloki hackernews wiadomosci imieniny zart trzesienia"),
+    ("Sceny i przyroda", "🌄", "akwarium swietliki snieg burza ocean miasto las gory pory fajerwerki synthwave pociag "
+                              "ogien fala"),
+    ("Gry", "🎮", "pong waz arkanoid najezdzcy pacman dino flappy wyscig labirynt tetris"),
+    ("Abstrakcje i symulacje", "🌀", "roj matrix skaner tecza glitch zycie mrowka plazma kalejdoskop wir dna oscyloskop "
+                                    "equalizer ekg kule kregi piasek lawa dym"),
+    ("Narzędzia", "🔧", "kolory"),
+]
+_ALL = {"licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "niebo": Sky, "doba": DayRibbon,
+        "skaner": Scanner, "tecza": Rainbow, "hiperskok": Warp, "zycie": Life, "akwarium": Aquarium, "pong": Pong,
+        **REG}
+CLOCKS = {n: _ALL[n] for _, _, names in CATEGORIES for n in names.split()}
+CATEGORY = {n: c for c, _, names in CATEGORIES for n in names.split()}  # efekt -> nazwa kategorii
+assert len(CLOCKS) == len(_ALL) == sum(len(x[2].split()) for x in CATEGORIES), "efekt bez kategorii albo w dwóch"
 
 
 class Cycle(Clock):
@@ -5484,6 +5498,9 @@ class Engine:
         self.new_width = None
         self._last_st = None
         self.lor = 0
+        self.wled_st = None   # ostatni /json/state z WLED (wątek watch_wled)
+        self.wled_on = None   # włącznik WLED: True/False, None = jeszcze nie wiemy – wtedy też nic nie wysyłamy
+        self.watch_wled()
         if self.sending:
             self.wled_post({"lor": 0}, "wyłączyć nadpisywania w WLED")   # WLED ma pokazywać nasz strumień
         self.peak = cfg.get("peaks", {})            # najwyższy szacowany prąd każdego efektu (mA przy danej jasności)
@@ -5733,7 +5750,39 @@ class Engine:
         threading.Thread(target=go, daemon=True).start()
 
     def set_wled_bri(self, bri):
-        self.wled_post({"bri": bri}, "ustawić jasności")
+        # samo „bri” zapala wyłączony WLED; z "on": false WLED tylko zapamięta jasność na po włączeniu
+        self.wled_post({"bri": bri} if self.wled_on is not False else {"bri": bri, "on": False}, "ustawić jasności")
+
+    WATCH_EVERY = 1.0  # co ile sekund pytamy WLED o stan (włącznik)
+
+    def watch_wled(self):
+        """W tle co sekundę /json/state z WLED. Włącznik WLED jest nieprzekraczalny: każda klatka DDP przy
+        wyłączonym WLED zapala diody, więc gdy WLED jest wyłączony (przycisk, aplikacja, HA) – nic nie wysyłamy."""
+        def go():
+            while self.running:
+                host = self.host
+                if host:
+                    try:
+                        st = http(f"http://{host}/json/state", timeout=2)
+                    except Exception:  # noqa: BLE001 – WLED nie odpowiada: zostaje ostatni znany stan
+                        st = None
+                    if isinstance(st, dict) and "bri" in st and host == self.host:
+                        self.wled_st = st
+                time.sleep(self.WATCH_EVERY)
+        threading.Thread(target=go, daemon=True).start()
+
+    def wled_state_in(self, st):
+        """Nowy stan z WLED (w tick): jasność, nadpisanie, włącznik."""
+        PANEL["bri"] = st["bri"]
+        self.lor = st.get("lor", 0)
+        on = bool(st.get("on", True))
+        if self.wled_on is not False and not on:
+            self.say("WLED wyłączony – nie wysyłam, póki go nie włączysz")
+            if self.sending and self.wled_id(self.mode) is None:
+                self.wled_post({"live": False}, "zakończyć trybu realtime w WLED")  # gaśnie od razu, bez czekania
+        elif self.wled_on is False and on:
+            self.say("WLED włączony – wysyłam dalej")
+        self.wled_on = on
 
     def text_step(self):
         """Podpowiedź do „tempo tekstu”: jak przesuwają się napisy i (wolniejszy) transparent ludzika. Płynnie jest
@@ -5868,7 +5917,7 @@ class Engine:
         i = self.wled_id(self.mode)
         if i is None:
             return
-        seg = (NET.get("wled") or {}).get("mainseg", 0)
+        seg = (self.wled_st or {}).get("mainseg", 0)
         if key.startswith("col"):
             col = [list(c) for c in (self.wled_seg.get("col") or [[0, 0, 0]] * 3)] + [[0, 0, 0]] * 3
             col = col[:3]
@@ -5907,9 +5956,10 @@ class Engine:
             return
         self.fade_from = None
         self.mode = f"wled:{i}"
-        seg = (NET.get("wled") or {}).get("mainseg", 0)
+        seg = (self.wled_st or {}).get("mainseg", 0)
         mine = self.wled_saved.get(str(i))  # zapamiętane ustawienia tego efektu, a bez nich domyślne z WLED
-        self.wled_post({"on": True, "live": False, "seg": [dict({"id": seg, "fx": i}, **(mine or {"fxdef": True}))]},
+        # bez "on": wyłączony WLED zostaje wyłączony (włącznik jest nieprzekraczalny), efekt ruszy po włączeniu
+        self.wled_post({"live": False, "seg": [dict({"id": seg, "fx": i}, **(mine or {"fxdef": True}))]},
                        "włączyć efektu WLED")
         self.wled_seg = {}
         self.refresh_wled_seg()
@@ -5989,6 +6039,7 @@ class Engine:
         self.sending = bool(self.host)
         self.err = ""
         self.say(f"host: {self.host or '(brak)'}")
+        self.wled_st, self.wled_on, self._last_st = None, None, None
         self.wled_fx = []
         self.load_wled_fx()
 
@@ -6028,7 +6079,7 @@ class Engine:
 
     # ---------------------------------------------------------- pętla
     def send(self, data):
-        if not (self.sending and self.host):
+        if not (self.sending and self.host and self.wled_on):  # wyłączony (albo nieznany) WLED – nic
             return
         try:
             send_ddp(self.sock, self.host, data, self.seq)
@@ -6064,13 +6115,10 @@ class Engine:
             self.offset += dtm.timedelta(seconds=rdt * (self.speed - 1))
         now = dtm.datetime.now().astimezone() + self.offset
         ANIM.update(fps=self.fps, tempo=self.tempo, text=self.text)
-        if self.host:
-            PANEL["host"] = self.host
-            st = NET.get("wled")
-            if st and "bri" in st and st is not self._last_st:
-                self._last_st = st
-                PANEL["bri"] = st["bri"]
-                self.lor = st.get("lor", 0)
+        st = self.wled_st
+        if st is not None and st is not self._last_st:
+            self._last_st = st
+            self.wled_state_in(st)
         c0 = time.monotonic()
         if self.frame is None or not self.paused:
             # stały krok animacji = równe ruchy w każdej klatce (bez szarpania przy wahaniach zegara)
@@ -6100,7 +6148,7 @@ class Engine:
             "w": W, "h": H, "mode": self.mode, "current": self.cycle.current, "paused": self.paused,
             "wled_mode": self.wled_id(self.mode) is not None, "wled_ver": self.wled_ver,
             "wled_settings": self.wled_snapshot(),
-            "sending": self.sending, "host": self.host, "lor": self.lor, "mirror": PANEL["mirror"],
+            "sending": self.sending, "wled_on": self.wled_on, "host": self.host, "lor": self.lor, "mirror": PANEL["mirror"],
             "time": now.strftime("%H:%M:%S"), "fake_time": bool(self.offset) or self.speed != 1,
             "settings": [dict({"name": n, "value": val(), "hint": self.text_step() if n == "tempo tekstu" else hint,
                                "fx": self.SETTING_FX.get(n, "")}, **self.choice_json(n)) for n, val, _, hint in self.settings],
@@ -6351,6 +6399,8 @@ class Tui(Engine):
         L = []
         if self.edit is not None:
             state = f"{Y}wpisz IP WLED, Enter = OK, Esc = anuluj{R}"
+        elif self.sending and self.wled_on is False:
+            state = f"{Y}⏻ WLED wyłączony{R}"
         elif self.sending:
             state = f"{G}● wysyła{R}"
         else:
@@ -6375,7 +6425,8 @@ class Tui(Engine):
         if self.search is not None:
             head = f"{Y}/{self.search}█{R} {D}({len(self.matches())}){R}"
         else:
-            head = (f"{INV if lf else B} Efekt {R}" if lf else f"{D}Efekt{R}") + f" {D}{self.cursor + 1}/{len(self.NAMES)}{R}"
+            head = ((f"{INV if lf else B} Efekt {R}" if lf else f"{D}Efekt{R}") + f" {D}{self.cursor + 1}/{len(self.NAMES)}"
+                    f"  {CATEGORY.get(self.NAMES[self.cursor], 'cykl')}{R}")
         left = [head]
         top = int(clamp(self.cursor - lh // 2, 0, max(0, len(self.NAMES) - lh)))
         for i in range(top, min(len(self.NAMES), top + lh)):
@@ -6572,7 +6623,11 @@ def web_cmd(e, c):
         if act == "auto":
             return lambda: setattr(INBOX, "auto", not INBOX.auto)
         if act == "hours":
-            return lambda: INBOX.hours_step(d)
+            h = float(c.get("v", 0))
+            if not MSG_HOURS[0] <= h <= MSG_HOURS[1]:
+                raise ValueError(f"czas otwarcia skrzynki: od {MSG_HOURS[0]:g} do {MSG_HOURS[1]:g} h")
+            h = round(h * 4) / 4  # co kwadrans
+            return lambda: INBOX.set_hours(h)
         if act in ("approve", "reject", "block", "again", "clear"):
             mid = int(c.get("id", 0))
             return lambda: INBOX.act(act, mid)
@@ -6629,6 +6684,8 @@ class WebHandler(httpd.BaseHTTPRequestHandler):
                 return self.reply(500, {"error": f"brak pliku web/{name}"})
         if name == "clocks":
             return self.reply(200, {"names": e.NAMES, "docs": {n: " ".join(e.doc(n).split()) for n in e.NAMES},
+                                    "categories": [{"name": c, "icon": icon, "names": names.split() + (["cykl"] if c == "Narzędzia" else [])}
+                                                   for c, icon, names in CATEGORIES],
                                     "ludzik_acts": LUDZIK_ACTS, "ludzik_lvl": LUDZIK_LVL,
                                     "wled": e.wled_fx, "wled_ver": e.wled_ver})
         if name == "state":
@@ -6704,7 +6761,7 @@ MSG_GAP, MSG_PER, MSG_WINDOW = 20, 5, 600   # z jednego adresu: co najmniej 20 s
 MSG_ALL = (12, 60)           # gdy adresu nadawcy nie widać (tunel): wszystkich razem najwyżej 12 na minutę
 MSG_MISSES = 10              # tyle prób pod zły adres (zły kod) i adres IP jest blokowany do następnego otwarcia
 MSG_CONNS = 16               # równoczesnych połączeń; nadmiarowe są od razu zamykane
-MSG_HOURS = [0.5, 1, 2, 4]   # na ile otwiera się skrzynka
+MSG_HOURS = (0.25, 24)       # na ile godzin można otworzyć skrzynkę (od–do); potem zamyka się sama
 MSG_CODE = "abcdefghjkmnpqrstuvwxyz23456789"  # bez 0/o i 1/l/i – kod odczytuje się z kamerki
 HTTP_METHOD = re.compile(rb"(GET|POST|HEAD|PUT|DELETE|OPTIONS|PATCH|CONNECT|TRACE) ")
 # filtr celowo prosty (rdzenie słów po zdjęciu ogonków i „leetspeaku”); resztę łapie akceptacja ręczna
@@ -6887,7 +6944,7 @@ class Inbox:
         self.taddr, self.proc, self.gen, self.err = "", None, 0, ""  # adres z tunelu, proces, numer otwarcia
         self.all = []                         # czasy wiadomości od nieznanych nadawców (limit wspólny)
         self.auto, self.hours = False, 2
-        self.until, self.code, self.srv = 0.0, "", None
+        self.until, self.opened, self.code, self.srv = 0.0, 0.0, "", None
         self.pending, self.queue, self.shown = [], [], []
         self.hits, self.misses, self.blocked = {}, {}, set()
         self.next_id = 1
@@ -6917,7 +6974,8 @@ class Inbox:
             self.code = "" if self.tunnel else "".join(secrets.choice(MSG_CODE) for _ in range(4))
             self.misses.clear()
             self.blocked.clear()
-            self.until = time.time() + self.hours * 3600
+            self.opened = time.time()
+            self.until = self.opened + self.hours * 3600
         if self.tunnel:
             threading.Thread(target=self.run_tunnel, args=(self.gen, self.srv.server_address[1]), daemon=True).start()
         print(f"napisz: skrzynka otwarta na {self.hours} h" + ("" if self.tunnel else f", adres {self.address()}"),
@@ -6981,9 +7039,12 @@ class Inbox:
             return True
         return False
 
-    def hours_step(self, d):
-        i = MSG_HOURS.index(self.hours) if self.hours in MSG_HOURS else 2
-        self.hours = MSG_HOURS[max(0, min(len(MSG_HOURS) - 1, i + d))]
+    def set_hours(self, h):
+        """Na ile godzin skrzynka jest otwarta; otwarta teraz – zamknie się po tylu godzinach od otwarcia."""
+        self.hours = h
+        with self.lock:
+            if self.until > time.time():
+                self.until = self.opened + h * 3600
 
     def act(self, action, mid=0):
         """Moderacja z panelu WWW."""
@@ -7283,7 +7344,8 @@ def main():
     INBOX.port, INBOX.bind, INBOX.public, INBOX.proxy = a.msg_port, a.msg_bind, a.msg_public.strip(), a.msg_proxy
     INBOX.tunnel, INBOX.bore = a.msg_tunnel.strip(), a.msg_bore
     INBOX.auto = bool(cfg.get("msg_auto", False))
-    INBOX.hours = cfg.get("msg_hours") if cfg.get("msg_hours") in MSG_HOURS else 2
+    h = cfg.get("msg_hours")
+    INBOX.hours = h if isinstance(h, (int, float)) and MSG_HOURS[0] <= h <= MSG_HOURS[1] else 2
     PANEL["ddp_w"] = W
     if a.host:
         try:
@@ -7294,6 +7356,8 @@ def main():
             pass
     if a.list:
         for i, (n, c) in enumerate(CLOCKS.items(), 1):
+            if i == 1 or CATEGORY[n] != CATEGORY[list(CLOCKS)[i - 2]]:
+                print(f"\n{CATEGORY[n]}:")
             print(f"{i:3d}. {n:12s} {' '.join((c.__doc__ or '').split())}")
         return
 

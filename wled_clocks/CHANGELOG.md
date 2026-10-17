@@ -1,5 +1,17 @@
 # Zmiany
 
+## 1.5.0
+
+- Włącznik WLED jest nieprzekraczalny: gdy WLED jest wyłączony (przycisk dzwonkowy, aplikacja, HA), skrypt nie
+  wysyła klatek, które go same zapalały. Stan sprawdzany co sekundę, po wyłączeniu panel gaśnie od razu, po włączeniu
+  wysyłanie wraca samo. Zmiana jasności i wybór efektu WLED też go już nie zapalają.
+- Lista efektów w zwijanych kategoriach (Tarcze i wyświetlacze, Inne zapisy czasu, Pogoda, Niebo i kosmos,
+  Wiadomości i finanse, Sceny i przyroda, Gry, Abstrakcje i symulacje, Narzędzia; efekty WLED: ♪, 2D, 1D).
+  Kolejność efektów, numery i cykl idą teraz według kategorii.
+- Skrzynka na wiadomości od widzów jest w „Ustawieniach efektu” **napisz** (widać ją, gdy ten efekt jest na panelu);
+  czekające wiadomości sygnalizuje ✉ przy „napisz” na liście. Czas otwarcia wpisuje się w pole „otwarta przez”
+  (0,25–24 h) zamiast przełączania przyciskiem; akceptacja ręczna/automatyczna to lista rozwijana.
+
 ## 1.4.0
 
 - Kolory na panelu nie zależą już od jasności WLED: skrypt liczy dokładnie tak, jak WLED 16 skaluje jasność

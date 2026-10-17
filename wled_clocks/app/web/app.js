@@ -81,38 +81,80 @@ function b64bytes(s) {
 }
 
 // ------------------------------------------------------------ lista efektów
+// efekty w zwijanych kategoriach; na start rozwinięte tylko „Na start” i kategoria efektu na panelu,
+// a co zwinięte/rozwinięte – zapamiętuje przeglądarka
+const WLED_GROUPS = [["WLED – reagują na dźwięk", "♪"], ["WLED – 2D", "▦"], ["WLED – 1D", "▬"]];
+const wledGroup = (fx) => WLED_GROUPS[fx.tags.includes("♪") ? 0 : fx.tags.includes("2D") ? 1 : 2][0];
+let collapsed = {};
+try { collapsed = JSON.parse(localStorage.getItem("wc-collapsed")) || {}; } catch (e) { /* bez pamięci */ }
+const isCollapsed = (g) => (g in collapsed ? collapsed[g] : g !== "Na start");
+function setCollapsed(g, v) {
+  collapsed[g] = v;
+  try { localStorage.setItem("wc-collapsed", JSON.stringify(collapsed)); } catch (e) { /* bez pamięci */ }
+  listKey = "";
+  renderList();
+}
+let shownMode = null;
+
+function groups() {
+  const out = (clocks.categories || []).map((c) => ({ name: c.name, icon: c.icon, items: c.names.map((name) => ({
+    mode: name, n: clocks.names.indexOf(name) + 1, label: name, doc: clocks.docs[name] || "",
+    text: [name, clocks.docs[name] || ""] })) }));
+  const wled = WLED_GROUPS.map(([name, icon]) => ({ name, icon, items: [] }));
+  for (const fx of clocks.wled || []) {
+    wled.find((g) => g.name === wledGroup(fx)).items.push({ mode: `wled:${fx.id}`, n: fx.id, label: fx.name,
+      tags: fx.tags, text: [fx.name, fx.tags, "wled"] });
+  }
+  return out.concat(wled.filter((g) => g.items.length));
+}
+
 function renderList() {
   const q = fold($("#search").value.trim());
   const heavy = new Set(state ? state.heavy : []);
-  const key = [q, state && state.mode, state && state.current, [...heavy].join(), clocks.wled_ver].join("|");
+  const mode = state && state.mode, cur = state && state.current;
+  if (mode && mode !== shownMode) { // nowy efekt na panelu – jego kategoria się rozwija
+    shownMode = mode;
+    const g = groups().find((g) => g.items.some((it) => it.mode === (mode === "cykl" ? cur : mode)));
+    if (g && isCollapsed(g.name)) collapsed[g.name] = false;
+  }
+  const waiting = state && state.inbox ? state.inbox.pending.length : 0; // wiadomości czekające na ✓
+  const key = [q, mode, cur, [...heavy].join(), clocks.wled_ver, JSON.stringify(collapsed), waiting].join("|");
   if (key === listKey) return;
   listKey = key;
   const ol = $("#list");
   ol.textContent = "";
-  clocks.names.forEach((name, i) => {
-    const doc = clocks.docs[name] || "";
-    if (q && !fold(name).includes(q) && !fold(doc).includes(q)) return;
-    const li = el("li");
-    if (state && name === state.mode) li.classList.add("sel");
-    else if (state && state.mode === "cykl" && name === state.current) li.classList.add("incycle");
-    li.append(el("span", "n", String(i + 1)), el("span", "name", name), el("span", "heavy", heavy.has(name) ? "⚡" : ""));
-    li.append(el("span", "d", doc));
-    li.title = doc;
-    li.onclick = () => cmd("select", { name });
-    ol.append(li);
-  });
-  // efekty wbudowane w WLED – pod naszymi; numer to numer efektu w WLED
-  const wled = (clocks.wled || []).filter((fx) => !q || fold(fx.name).includes(q) || fold(fx.tags).includes(q) ||
-    fold("wled").includes(q));
-  if (wled.length) ol.append(el("li", "sep", "Efekty wbudowane w WLED"));
-  for (const fx of wled) {
-    const name = `wled:${fx.id}`;
-    const li = el("li");
-    if (state && state.mode === name) li.classList.add("sel");
-    li.append(el("span", "n", String(fx.id)), el("span", "name", fx.name), el("span", "tags", fx.tags));
-    li.title = fx.tags.includes("♪") ? "reaguje na dźwięk – potrzebny mikrofon w WLED" : "efekt WLED";
-    li.onclick = () => cmd("select", { name });
-    ol.append(li);
+  for (const g of groups()) {
+    const items = g.items.filter((it) => !q || it.text.some((t) => fold(t).includes(q)));
+    if (!items.length) continue;
+    const open = q || !isCollapsed(g.name);
+    const h = el("li", "sep grp" + (open ? " open" : ""));
+    h.append(el("span", "arrow", open ? "▾" : "▸"), el("span", "", `${g.icon} ${g.name}`),
+      el("span", "count", q ? `${items.length}/${g.items.length}` : String(g.items.length)));
+    h.tabIndex = 0;
+    h.setAttribute("role", "button");
+    h.setAttribute("aria-expanded", String(Boolean(open)));
+    const toggle = () => !q && setCollapsed(g.name, open);
+    h.onclick = toggle;
+    h.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), toggle());
+    ol.append(h);
+    if (!open) continue;
+    for (const it of items) {
+      const li = el("li");
+      if (it.mode === mode) li.classList.add("sel");
+      else if (mode === "cykl" && it.mode === cur) li.classList.add("incycle");
+      li.append(el("span", "n", String(it.n)), el("span", "name", it.label));
+      if (it.tags !== undefined) {
+        li.append(el("span", "tags", it.tags));
+        li.title = it.tags.includes("♪") ? "reaguje na dźwięk – potrzebny mikrofon w WLED" : "efekt WLED";
+      } else {
+        const mail = it.mode === "napisz" && waiting ? `✉ ${waiting}` : "";
+        li.append(el("span", "heavy", (mail + " " + (heavy.has(it.mode) ? "⚡" : "")).trim()), el("span", "d", it.doc));
+        if (mail) li.title = `${waiting} wiadomości czeka na akceptację – wybierz „napisz”`;
+        li.title = li.title || it.doc;
+      }
+      li.onclick = () => cmd("select", { name: it.mode });
+      ol.append(li);
+    }
   }
   const sel = ol.querySelector("li.sel, li.incycle");
   if (sel && !q) ol.scrollTop = sel.offsetTop - ol.offsetTop - ol.clientHeight / 2 + sel.offsetHeight / 2;
@@ -120,7 +162,7 @@ function renderList() {
 $("#search").addEventListener("input", renderList);
 $("#search").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
-    const first = $("#list li");
+    const first = $("#list li:not(.sep)");
     if (first) first.click();
   } else if (e.key === "Escape") {
     e.target.value = "";
@@ -339,7 +381,7 @@ function renderSettings() {
     if (r.hint) r.hint.classList.toggle("warn", s.hint.includes("skacze")); // ruch nie będzie płynny
   }
   $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : $("#now-name").textContent;
-  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown;
+  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown || fx.has("napisz");
   if (!fx.has("ludzik")) $("#acts").hidden = true;
 }
 
@@ -372,9 +414,16 @@ $("#acts-close").onclick = () => ($("#acts").hidden = true);
 const inboxCmd = (act, extra = {}) => cmd("inbox", { act, ...extra });
 $("#inbox-open").onclick = () => inboxCmd("open");
 $("#inbox-close").onclick = () => inboxCmd("close");
-$("#inbox-hours").onclick = () => inboxCmd("hours", { d: 1 });
-$("#inbox-hours").oncontextmenu = (e) => (e.preventDefault(), inboxCmd("hours", { d: -1 }));
-$("#inbox-auto").onclick = () => inboxCmd("auto");
+// czas otwarcia: wpisany – zapisujemy po Enter albo po wyjściu z pola
+$("#inbox-hours").addEventListener("change", (e) => {
+  const v = Number(String(e.target.value).replace(",", "."));
+  if (v >= 0.25 && v <= 24) inboxCmd("hours", { v });
+  else toast("czas otwarcia: od 0,25 do 24 h");
+});
+$("#inbox-hours").addEventListener("keydown", (e) => e.key === "Enter" && e.target.blur());
+$("#inbox-auto").addEventListener("change", (e) => {
+  if ((e.target.value === "1") !== state.inbox.auto) inboxCmd("auto");
+});
 $("#inbox-clear").onclick = () => confirm("Usunąć wszystkie czekające wiadomości?") && inboxCmd("clear");
 
 // teksty od obcych ludzi – tylko przez textContent (el), nigdy innerHTML
@@ -399,7 +448,9 @@ function msgList(id, items, buttons) {
 
 let inboxKey = "";
 function renderInbox(ib) {
-  if (!ib) return;
+  // skrzynka to ustawienia efektu „napisz” – widać ją, gdy „napisz” jest na panelu
+  $("#inbox").hidden = !ib || !(state.setting_fx || []).includes("napisz");
+  if (!ib || $("#inbox").hidden) return;
   const st = $("#inbox-state");
   st.textContent = !ib.enabled ? "wyłączona" : ib.open ? `otwarta do ${ib.until}` : "zamknięta";
   st.classList.toggle("ok", ib.open);
@@ -421,9 +472,8 @@ function renderInbox(ib) {
   $("#inbox-open").textContent = ib.open ? "Nowy kod i czas od teraz" : `Otwórz skrzynkę`;
   $("#inbox-open").disabled = !ib.enabled;
   $("#inbox-close").disabled = !ib.open;
-  $("#inbox-hours").textContent = `na ${String(ib.hours).replace(".", ",")} h`;
-  $("#inbox-auto").textContent = `Akceptacja: ${ib.auto ? "automatyczna" : "ręczna"}`;
-  $("#inbox-auto").classList.toggle("on", !ib.auto);
+  if (document.activeElement !== $("#inbox-hours")) $("#inbox-hours").value = String(ib.hours);
+  if (document.activeElement !== $("#inbox-auto")) $("#inbox-auto").value = ib.auto ? "1" : "0";
   const key = JSON.stringify([ib.pending, ib.queue, ib.shown]);
   if (key === inboxKey) return; // listy przebudowujemy tylko po zmianie – inaczej klik mógłby trafić w znikający przycisk
   inboxKey = key;
@@ -446,8 +496,10 @@ function render(s) {
     reloadClocks().finally(() => (render.loading = false));
   }
   const send = $("#send-state");
-  send.textContent = s.wled_mode ? "◆ efekt WLED" : s.sending ? "● wysyła" : "○ nie wysyła";
-  send.classList.toggle("ok", s.sending && !s.wled_mode);
+  const off = s.wled_on === false; // włącznik WLED wyłączony – skrypt nic nie wysyła, póki go nie włączysz
+  send.textContent = off ? "⏻ WLED wyłączony" : s.wled_mode ? "◆ efekt WLED" : s.sending ? "● wysyła" : "○ nie wysyła";
+  send.title = off ? "WLED wyłączony (przycisk, aplikacja lub HA) – skrypt nic nie wysyła, żeby go nie zapalić" : "";
+  send.classList.toggle("ok", s.sending && !s.wled_mode && !off);
   $("#host").textContent = s.host ? `host ${s.host}` : "brak hosta – wpisz w ustawieniach";
   $("#clock").textContent = s.time + (s.fake_time ? " (udawany)" : "");
   $("#badges").textContent = (s.paused ? "⏸ pauza  " : "") + (s.mirror ? "⇋ odbicie" : "");

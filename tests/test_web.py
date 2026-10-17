@@ -329,8 +329,12 @@ class WebTest(unittest.TestCase):
             self.get("../wled_clocks.py")
 
     def test_clocks_state_frame(self):
-        names = json.loads(self.get("api/clocks")[2])["names"]
+        clocks = json.loads(self.get("api/clocks")[2])
+        names = clocks["names"]
         self.assertIn("cykl", names)
+        in_cats = [n for c in clocks["categories"] for n in c["names"]]
+        self.assertEqual(sorted(in_cats), sorted(names))                    # każdy efekt w dokładnie jednej kategorii
+        self.assertEqual([n for n in in_cats if n != "cykl"], names[:-1])  # kolejność listy = kolejność kategorii
         state = json.loads(self.get("api/state")[2])
         self.assertIn("settings", state)
         self.assertEqual(len(self.get("api/frame")[2]), wc.W * wc.H * 3)
@@ -361,6 +365,7 @@ class WledEffectsTest(unittest.TestCase):
 
     def setUp(self):
         self.posted = posted = []
+        self.wled = wled = {"on": True}
 
         class Fake(wc.httpd.BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -370,7 +375,7 @@ class WledEffectsTest(unittest.TestCase):
                 body = {"/json/eff": ["Solid", "Blink", "RSVD", "Fire 2012"],
                         "/json/fxdata": ["", "!,Duty cycle;!,!;!;01", "", "Cooling,Spark rate,,2D Blur,,Boost;;!;2v"],
                         "/json/pal": ["Default", "Party", "Lava"],
-                        "/json/state": {"bri": wc.PANEL["bri"], "mainseg": 0, "lor": 0,
+                        "/json/state": {"on": wled["on"], "bri": wc.PANEL["bri"], "mainseg": 0, "lor": 0,
                                         "seg": [{"id": 0, "fx": 3, "sx": 64, "ix": 160, "c1": 128, "c2": 128,
                                                  "c3": 16, "o1": False, "o2": False, "o3": False, "pal": 2,
                                                  "col": [[255, 0, 0], [0, 0, 0], [0, 0, 0]]}]}}.get(self.path)
@@ -401,6 +406,42 @@ class WledEffectsTest(unittest.TestCase):
             time.sleep(0.02)
         self.assertTrue(cond())
 
+    def test_switch_off_is_absolute(self):
+        """Wyłączony WLED (np. przyciskiem dzwonkowym) – ani jednej klatki DDP, bo każda by go zapaliła."""
+        sent, old = [], (wc.send_ddp, wc.Engine.WATCH_EVERY)
+        wc.send_ddp, wc.Engine.WATCH_EVERY = (lambda *a: sent.append(1)), 0.05
+        engines = []
+        try:
+            unknown = wc.Engine(args(host="127.0.0.1:9", mode="zegar"), {})  # WLED nie odpowiada – stan nieznany
+            e = wc.Engine(args(host=self.host, mode="zegar"), {})
+            engines += [unknown, e]
+            unknown.tick()
+            self.assertEqual(sent, [])
+            self.wait(lambda: (e.tick(), e.wled_on)[1])
+            self.assertTrue(sent)
+            self.wled["on"] = False                                         # przycisk: wyłącz
+            self.wait(lambda: (e.tick(), e.wled_on is False)[1])
+            sent.clear()
+            for _ in range(5):
+                e.tick()
+            self.assertEqual(sent, [])
+            self.assertEqual(e.snapshot(e.tick()[1])["wled_on"], False)
+            self.wait(lambda: {"live": False} in self.posted)                # od razu koniec realtime – gaśnie
+            e.set_wled_bri(64)                                              # jasność bez zapalania
+            self.wait(lambda: {"bri": 64, "on": False} in self.posted)
+            e.select("wled:3")
+            self.wait(lambda: any("seg" in p and p["seg"][0].get("fx") == 3 for p in self.posted))
+            self.assertFalse(any("on" in p and p["on"] for p in self.posted))  # nic nie zapala WLED
+            e.select("zegar")
+            self.wled["on"] = True                                          # przycisk: włącz
+            self.wait(lambda: (e.tick(), e.wled_on)[1])
+            e.tick()
+            self.assertTrue(sent)
+        finally:
+            for x in engines:
+                x.running = False
+            wc.send_ddp, wc.Engine.WATCH_EVERY = old
+
     def test_wled_effects(self):
         e = wc.Engine(args(host=self.host), {})
         self.wait(lambda: e.wled_fx)
@@ -412,7 +453,7 @@ class WledEffectsTest(unittest.TestCase):
         e.tick()
         self.assertEqual(e.mode, "wled:3")
         self.assertEqual(sent, [])                                          # WLED gra sam – nic nie wysyłamy
-        self.wait(lambda: {"on": True, "live": False, "seg": [{"id": 0, "fx": 3, "fxdef": True}]} in self.posted)
+        self.wait(lambda: {"live": False, "seg": [{"id": 0, "fx": 3, "fxdef": True}]} in self.posted)
         self.wait(lambda: e.wled_seg.get("fx") == 3)                       # parametry segmentu z WLED
         ws = e.wled_snapshot()
         self.assertEqual([(it["key"], it["label"], it["value"]) for it in ws["items"]],
@@ -429,7 +470,7 @@ class WledEffectsTest(unittest.TestCase):
                 wc.web_cmd(e, bad)
         e.select("wled:1")
         e.select("wled:3")                                                  # powrót: zapamiętane, bez fxdef
-        self.wait(lambda: {"on": True, "live": False, "seg": [{"id": 0, "fx": 3, "sx": 200, "o1": True}]} in self.posted)
+        self.wait(lambda: {"live": False, "seg": [{"id": 0, "fx": 3, "sx": 200, "o1": True}]} in self.posted)
         e.select("wled:1")
         self.assertEqual([it["key"] for it in e.wled_snapshot()["items"]], ["sx", "ix", "pal", "col0", "col1"])
         e.select("wled:3")
@@ -580,10 +621,14 @@ class InboxTest(unittest.TestCase):
     def test_effect_and_engine(self):
         e = wc.Engine(args(), {})
         self.assertFalse(e.cycle.allowed("napisz"))                             # zamknięta: nie w cyklu
-        for c in ({"op": "inbox", "act": "open"}, {"op": "inbox", "act": "auto"}, {"op": "inbox", "act": "hours", "d": 1}):
+        for c in ({"op": "inbox", "act": "open"}, {"op": "inbox", "act": "auto"}, {"op": "inbox", "act": "hours", "v": 3.5}):
             e.cmds.put(wc.web_cmd(e, c))
         e.tick()
-        self.assertTrue(self.ib.is_open() and self.ib.auto and self.ib.hours == 4)
+        self.assertTrue(self.ib.is_open() and self.ib.auto and self.ib.hours == 3.5)
+        self.assertAlmostEqual(self.ib.until - self.ib.opened, 3.5 * 3600)   # otwarta: czas liczony od otwarcia
+        for bad in (0, 0.1, 25, "abc"):
+            with self.assertRaises(ValueError):
+                wc.web_cmd(e, {"op": "inbox", "act": "hours", "v": bad})
         self.assertTrue(e.cycle.allowed("napisz"))
         with self.assertRaises(ValueError):
             wc.web_cmd(e, {"op": "inbox", "act": "rm"})
