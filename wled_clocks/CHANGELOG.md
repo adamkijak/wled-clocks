@@ -1,5 +1,9 @@
 # Zmiany
 
+## 1.5.1
+
+- Karta „Efekty” jest tak wysoka jak karta ustawień obok; lista efektów wypełnia ją całą.
+
 ## 1.5.0
 
 - Włącznik WLED jest nieprzekraczalny: gdy WLED jest wyłączony (przycisk dzwonkowy, aplikacja, HA), skrypt nie
