@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.9.0
+
+- Ludzik: przycisk ▶ przy każdym zajęciu w „Zajęcia ludzika” (w TUI klawisz `!`) – ludzik zrobi to zaraz po
+  bieżącym zajęciu, bez przerwy i losowania, nawet gdy zajęcie jest wyłączone. Drugie kliknięcie anuluje.
+- Ludzik: do wyboru 5 postaci (ustawienie „ludzik postać”): robotnik, strażak, Mikołaj, robot, kosmita.
+  Oczy i usta świecą – wcześniej były zgaszonymi diodami i twarz wyglądała dziurawo.
+
 ## 1.8.0
 
 - Ludzik: długość każdego zajęcia ustawia się osobno (krótko / normalnie / długo / bardzo długo) – w panelu WWW

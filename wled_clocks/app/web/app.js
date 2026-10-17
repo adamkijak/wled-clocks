@@ -399,7 +399,10 @@ function renderActs() {
         seg.append(b);
       });
       const ctl = el("div", "actl");
-      ctl.append(seg);
+      const now = el("button", "small go", "▶");
+      now.title = "Zrób to jako następne (drugi raz – anuluj)";
+      now.onclick = () => cmd("ludzik", { act, next: true });
+      ctl.append(now, seg);
       if (clocks.ludzik_timed.includes(act)) { // długość zajęcia
         const len = el("select", "len");
         len.title = "Jak długo";
@@ -414,7 +417,8 @@ function renderActs() {
   }
   for (const row of box.children) {
     const act = row.dataset.act, lvl = state.ludzik[act];
-    for (const b of row.querySelectorAll("button")) b.classList.toggle("on", Number(b.dataset.lvl) === lvl);
+    for (const b of row.querySelectorAll(".seg button")) b.classList.toggle("on", Number(b.dataset.lvl) === lvl);
+    row.querySelector(".go").classList.toggle("on", state.ludzik_next === act);
     const len = row.querySelector("select");
     if (len && document.activeElement !== len) len.value = String(state.ludzik_len[act]);
     if (len) len.disabled = !lvl;

@@ -192,6 +192,8 @@ main > *, .cols > * { min-width: 0; }
 .arow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0; }
 .seg { display: inline-flex; }
 .actl { display: inline-flex; align-items: center; gap: 6px; }
+.actl .go { padding: 3px 8px; font-size: 12px; }
+.actl .go.on { color: var(--ok); }
 .actl select.len {
   width: 13ch;
   font: inherit;

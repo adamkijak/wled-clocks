@@ -98,6 +98,47 @@ class EngineTest(unittest.TestCase):
         finally:
             wc.LUDZIK["lvl"], wc.LUDZIK["len"], wc.LUDZIK["freq"] = old
 
+    def test_ludzik_next_and_chars(self):
+        """▶ = zrób jako następne, nawet wyłączone; każda postać ma świecące oczy i usta."""
+        old = {k: (dict(v) if isinstance(v, dict) else v) for k, v in wc.LUDZIK.items()}
+        old_txt = wc.Worker.__dict__["banner_text"]
+        try:
+            wc.Worker.banner_text = staticmethod(lambda: "12°C we Warszawie")   # bez sieci
+            wc.LUDZIK["lvl"] = {a: 0 for a in wc.LUDZIK_ACTS}                   # wszystko wyłączone
+            wc.LUDZIK["freq"] = 2
+            e = wc.Engine(args(), {})
+            base = wc.dtm.datetime(2026, 10, 16, 12, 0, 2).astimezone()
+            for act in wc.LUDZIK_ACTS:
+                fx, done = wc.CLOCKS["ludzik"](), False
+                e.cmds.put(wc.web_cmd(e, {"op": "ludzik", "act": act, "next": True}))
+                e.run_cmds()
+                self.assertEqual(e.snapshot(e.tick()[1])["ludzik_next"], act)
+                for i in range(int(120 / 0.05)):
+                    t = i * 0.05
+                    fx.draw(wc.Frame(), base + wc.dtm.timedelta(seconds=t), t, 0.05)
+                    now = (fx.trick and fx.trick[0]) or (fx.ride and fx.ride["n"]) or (fx.banner and "transparent z pogodą")
+                    if now == act or (act in ("spacer", "na drugą stronę") and wc.LUDZIK["next"] is None):
+                        done = True
+                        break
+                self.assertTrue(done, act)
+                self.assertIsNone(wc.LUDZIK["next"], act)
+            e.cmds.put(wc.web_cmd(e, {"op": "ludzik", "act": "łuk", "next": True}))
+            e.cmds.put(wc.web_cmd(e, {"op": "ludzik", "act": "łuk", "next": True}))  # drugi raz – anuluj
+            e.run_cmds()
+            self.assertIsNone(wc.LUDZIK["next"])
+            for name, pal in wc.LUDZIK_CHARS:
+                self.assertTrue(all(max(pal[k]) >= 90 for k in "EMSYBPO"), name)    # nic w postaci nie jest zgaszone
+            e.pick("ludzik postać", 3)
+            self.assertEqual(wc.LUDZIK["char"], 3)
+            fx = wc.CLOCKS["ludzik"]()
+            f = wc.Frame()
+            fx.man(f, "stoi", 10)
+            self.assertIn(wc.LUDZIK_CHARS[3][1]["E"], [c for row in f.rgb_rows() for c in row])
+        finally:
+            wc.Worker.banner_text = old_txt
+            wc.LUDZIK.clear()
+            wc.LUDZIK.update(old)
+
     def test_small_font_polish_marks(self):
         plain = set(wc.small_pl("PIATEK SRODA", 0, 1))
         pl = set(wc.small_pl("PIĄTEK ŚRODA", 0, 1))

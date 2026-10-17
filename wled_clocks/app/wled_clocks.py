@@ -4701,8 +4701,9 @@ class Planets(Clock):
 
 
 # co ludzik robi z nudów: wyłączone zajęcia i jak często (ustawiane w TUI, zapisywane w konfiguracji)
-LUDZIK = {"lvl": {}, "len": {}, "freq": 2}  # lvl: częstość każdego zajęcia (0–3, brak = normalnie);
-# len: długość zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami
+LUDZIK = {"lvl": {}, "len": {}, "freq": 2, "char": 0, "next": None}  # lvl: częstość każdego zajęcia (0–3, brak =
+# normalnie); len: długość zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami; char: postać (LUDZIK_CHARS);
+# next: zajęcie wymuszone jako następne (przycisk ▶, nie zapisywane)
 LUDZIK_FREQ = [("nigdy", None), ("rzadko", (20, 40)), ("normalnie", (4, 10)), ("często", (1, 4)), ("bez przerwy", (0, 0.5))]
 LUDZIK_LVL = ["wył.", "rzadko", "normalnie", "często"]
 LVL_WEIGHT = [0, 1, 3, 9]                     # zajęcia: waga losowania
@@ -4711,6 +4712,22 @@ LEN_MUL = [0.4, 1, 1.8, 3]                    # długość: mnożnik czasu zaję
 BANNER_EVERY = [None, 10, 5, 2]               # transparent z pogodą: co ile minut
 WALK_REST = [None, (8, 16), (2, 6), (0.5, 2)]  # spacer: ile stoi między spacerami (s)
 CROSS_P = [0, 0.15, 0.35, 0.7]                # przechodzenie: jaka część spacerów kończy się po drugiej stronie
+
+
+# postacie: kolory kasku/włosów (Y), skóry (S), oczu (E), zamkniętych oczu (C), ust (M), koszulki (B), spodni (P)
+# i butów (O). Oczy i usta świecą – zgaszona dioda w twarzy wygląda jak dziura.
+LUDZIK_CHARS = [
+    ("robotnik", {"Y": (255, 200, 0), "S": (255, 180, 130), "E": (30, 70, 200), "C": (150, 90, 60),
+                  "M": (200, 40, 50), "B": (230, 40, 40), "P": (40, 90, 230), "O": (210, 210, 210)}),
+    ("strażak", {"Y": (230, 30, 20), "S": (255, 180, 130), "E": (30, 70, 200), "C": (150, 90, 60),
+                 "M": (200, 40, 50), "B": (220, 170, 30), "P": (95, 95, 115), "O": (120, 70, 30)}),
+    ("Mikołaj", {"Y": (220, 20, 20), "S": (255, 180, 130), "E": (30, 70, 200), "C": (150, 90, 60),
+                 "M": (240, 240, 240), "B": (220, 20, 20), "P": (220, 20, 20), "O": (110, 70, 40)}),  # M = broda
+    ("robot", {"Y": (150, 160, 185), "S": (110, 120, 145), "E": (255, 40, 30), "C": (110, 20, 15),
+               "M": (0, 210, 255), "B": (170, 180, 205), "P": (90, 100, 125), "O": (70, 80, 100)}),
+    ("kosmita", {"Y": (90, 220, 70), "S": (90, 220, 70), "E": (170, 0, 255), "C": (40, 110, 30),
+                 "M": (20, 100, 20), "B": (130, 50, 210), "P": (180, 185, 200), "O": (130, 50, 210)}),
+]
 
 
 def ludzik_lvl(name):
@@ -4865,7 +4882,9 @@ class Worker(Clock):
                 "d": [abs(x - xr - 1) / self.WALK, 0.5, mv, 0.8, mv, 1.8]}
 
     def man(self, f, pose, x, flip=False, blink=False):
-        pal = dict(self.PAL, E=self.PAL["S"]) if blink else self.PAL
+        pal = dict(self.PAL, **LUDZIK_CHARS[LUDZIK["char"]][1])
+        if blink:
+            pal["E"] = pal["S"]
         sprite(f, self.POSES[pose], x, 0, pal, flip)
 
     def place(self, pose, flip):
@@ -5011,12 +5030,15 @@ class Worker(Clock):
             return None
 
     def banner_due(self, now, t, nxt_t, lead):
-        """Czy pora na transparent: co kilka minut, i tylko gdy zdąży przed następnym przestawianiem cyfr."""
+        """Czy pora na transparent: co kilka minut (albo wymuszony przyciskiem ▶), i tylko gdy zdąży przed następnym
+        przestawianiem cyfr."""
+        forced = LUDZIK["next"] == "transparent z pogodą"
         every = BANNER_EVERY[ludzik_lvl("transparent z pogodą")] if LUDZIK["freq"] else None
-        if not every:
+        if not every and not forced:
             return None
         txt = self.banner_text()
-        if txt is None or (self.banner_at is not None and (now - self.banner_at).total_seconds() < every * 60 - 5):
+        if txt is None or (not forced and self.banner_at is not None and
+                           (now - self.banner_at).total_seconds() < every * 60 - 5):
             return None
         length = text_w(txt, TXT) + 12
         dur = abs(self.x - (W - 9)) / self.WALK + 0.8 + scroll_time(W + length + 10, self.BANNER_SPEED)
@@ -5123,6 +5145,42 @@ class Worker(Clock):
                 f.add(back - d * (1 + ph * 6), 9 - ph * 2, mul(visible((90, 90, 95), 4), 1 - ph))
         return True
 
+    def begin_trick(self, n, t, fl, pause, forced=False):
+        (lo, hi), poses, step, _ = self.trick_spec(n)
+        cycle = len(poses) * step
+        dur = max(cycle, int(min(random.uniform(lo, hi), self.trick_len(n)) / cycle) * cycle)
+        self.trick = (n, t, fl, dur, forced)
+        self.next_trick = t + dur + (random.uniform(*pause) if pause else 0)
+
+    def start_forced(self, n, t, xs, xr, pause):
+        """Zajęcie wymuszone przyciskiem ▶: zaraz po bieżącym, bez przerwy i losowania (także wyłączone). Gdy tu się
+        nie mieści – idzie tam, gdzie się zmieści; gdy brak czasu do przestawiania cyfr – czeka na następną minutę."""
+        zs = self.zones(xs, xr)
+        here = next((z for z in zs if z[0] - 1 <= self.x <= z[1] + 1), zs[0])
+        if n in ("spacer", "na drugą stronę"):
+            other = [z for z in zs if z != here]
+            z = random.choice(other) if n == "na drugą stronę" and other else here
+            self.goal, self.wait, self.moon, LUDZIK["next"] = random.randint(z[0], z[1]), t, False, None
+            return
+        if n in self.RIDES:
+            dur = self.start_ride(n, t, xs, xr, False)
+            if dur is not None:
+                self.ride["forced"], LUDZIK["next"] = True, None
+                self.next_trick = t + dur + (random.uniform(*pause) if pause else 0)
+            return
+        if n not in self.TRICKS or not self.trick_len(n):  # transparent rysuje draw(); brak czasu – czeka
+            return
+        tr, away = self.TRICKS[n], self.x > xr
+        dirs = lambda x: (x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
+        fl = next((fl for fl in dirs(self.x) if self.fits(tr, fl, xs, xr)), None)
+        if fl is not None:
+            self.begin_trick(n, t, fl, pause, forced=True)
+            LUDZIK["next"] = None
+            return
+        spots = [x for z in zs for x in range(z[0], z[1] + 1) if any(self.fits(tr, fl, xs, xr, x) for fl in dirs(x))]
+        if spots:  # tu się nie mieści – idzie tam, gdzie się zmieści (i wtedy zaczyna)
+            self.goal, self.wait = min(spots, key=lambda x: abs(x - self.x)), t
+
     def idle(self, f, t, dt, xs, xr, blink):
         """Bez roboty: spaceruje po obu stronach zegara (przechodzi za cyframi), a z nudów coś robi."""
         pause = LUDZIK_FREQ[LUDZIK["freq"]][1]
@@ -5131,11 +5189,16 @@ class Worker(Clock):
         if self.next_trick is None:
             self.next_trick = t + (random.uniform(*pause) if pause else 0)
         standing = self.goal is None or abs(self.x - self.goal) < 0.5
-        if self.trick and self.trick[0] in off:  # właśnie wyłączone w ustawieniach
+        if self.trick and self.trick[0] in off and not self.trick[4]:  # właśnie wyłączone w ustawieniach
             self.trick = None
         if self.pending in off or not pause:
             self.pending = None
-        if self.trick is None and standing and t >= self.next_trick and pause:
+        forced = LUDZIK["next"]
+        if forced and self.trick is None and self.ride is None and standing:
+            self.pending = None
+            self.start_forced(forced, t, xs, xr, pause)
+            standing = self.goal is None or abs(self.x - self.goal) < 0.5
+        if self.trick is None and self.ride is None and standing and t >= self.next_trick and pause and not forced:
             away = self.x > xr  # rzeczy (książka, kubek, miotła) najlepiej po stronie z dala od cyfr
             dirs = lambda n: (self.x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
             opts = [(n, fl) for n, tr in self.TRICKS.items() if n not in off and self.trick_len(n)
@@ -5164,17 +5227,13 @@ class Worker(Clock):
                     if dur is not None:  # inaczej nie zdąży dojechać – za 3 s losuje znowu
                         self.next_trick = t + dur + random.uniform(*pause)
                 else:
-                    (lo, hi), poses, step, _ = self.trick_spec(n)
-                    cycle = len(poses) * step
-                    dur = max(cycle, int(min(random.uniform(lo, hi), self.trick_len(n)) / cycle) * cycle)
-                    self.trick = (n, t, fl, dur)
-                    self.next_trick = t + dur + random.uniform(*pause)
-        if self.ride and self.ride["n"] in off:  # właśnie wyłączone w ustawieniach
+                    self.begin_trick(n, t, fl, pause)
+        if self.ride and self.ride["n"] in off and not self.ride.get("forced"):  # właśnie wyłączone w ustawieniach
             self.ride = None
         if self.ride and self.draw_ride(f, t, blink):
             return
         if self.trick:
-            name, t0, fl, dur = self.trick
+            name, t0, fl, dur, _ = self.trick
             _, poses, step, mirror = self.TRICKS[name]
             if t - t0 < dur:
                 i = int((t - t0) / step) % len(poses)
@@ -5223,6 +5282,8 @@ class Worker(Clock):
             self.banner = self.banner_due(now, t, nxt_t, sum(job["d"][:4]))
             if self.banner:
                 self.banner_at = now
+                if LUDZIK["next"] == "transparent z pogodą":
+                    LUDZIK["next"] = None
         if self.banner:
             for x in range(W):
                 f.set(x, 11, visible((40, 26, 12)))
@@ -5524,7 +5585,7 @@ class Engine:
     PREVIEWS = ["włączony", "wyłączony"]
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
-                  "ludzik co ile": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
+                  "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
                   "diody: zielony": "kolory", "diody: niebieski": "kolory"}
 
     def __init__(self, a, cfg):
@@ -5661,6 +5722,9 @@ class Engine:
         def s_lfreq(d):
             LUDZIK["freq"] = max(0, min(len(LUDZIK_FREQ) - 1, LUDZIK["freq"] + d))
 
+        def s_lchar(d):
+            LUDZIK["char"] = (LUDZIK["char"] + d) % len(LUDZIK_CHARS)
+
         def s_led(ch):
             return lambda d: COLOR.update({ch: self.step_in(COLOR_STEPS, COLOR[ch], d)})
 
@@ -5718,6 +5782,8 @@ class Engine:
             "odbicie lustrz.": flag(lambda: PANEL["mirror"], lambda v: PANEL.update(mirror=v)),
             "ludzik co ile": opt(list(range(len(LUDZIK_FREQ))), lambda: LUDZIK["freq"], lambda v: LUDZIK.update(freq=v),
                                  lambda v: LUDZIK_FREQ[v][0]),
+            "ludzik postać": opt(list(range(len(LUDZIK_CHARS))), lambda: LUDZIK["char"], lambda v: LUDZIK.update(char=v),
+                                 lambda v: LUDZIK_CHARS[v][0]),
             "barwa": opt(list(range(len(CLOCK_HUES))), lambda: CLOCK["hue"], lambda v: CLOCK.update(hue=v),
                          lambda v: CLOCK_HUES[v][0]),
             "temperatura": opt(CLOCK_TEMPS, lambda: CLOCK["temp"], lambda v: CLOCK.update(temp=v),
@@ -5752,6 +5818,7 @@ class Engine:
             ("ludzik zajęcia", lambda: f"{len([a for a in LUDZIK_ACTS if ludzik_lvl(a)])}/{len(LUDZIK_ACTS)} włączone",
              s_lacts, "Enter = co robi z nudów i jak często"),
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
+            ("ludzik postać", lambda: LUDZIK_CHARS[LUDZIK["char"]][0], s_lchar, "wygląd ludzika"),
             ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
             ("diody: czerwony", lambda: f"x{COLOR['r']:g}", s_led("r"), "jasność kanału w podglądzie – dopasuj do panelu"),
@@ -5879,7 +5946,7 @@ class Engine:
                "panel_levels_bri": PANEL["bri"] if panel_manual() else None, "panel_pe": PANEL["pe"],
                "psu": POWER["psu"], "auto_dim": POWER["auto"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_len": LUDZIK["len"],
-               "ludzik_freq": LUDZIK["freq"],
+               "ludzik_freq": LUDZIK["freq"], "ludzik_postac": LUDZIK_CHARS[LUDZIK["char"]][0],
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
@@ -6239,6 +6306,7 @@ class Engine:
             "setting_fx": sorted(self.setting_fx()),
             "heavy": [n for n in CLOCKS if self.heavy(n)],
             "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS}, "ludzik_len": {a: ludzik_len(a) for a in LUDZIK_TIMED},
+            "ludzik_next": LUDZIK["next"],
             "inbox": INBOX.snapshot(),
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
                       "psu": POWER["psu"], "auto": POWER["auto"]},
@@ -6360,6 +6428,8 @@ class Tui(Engine):
                 LUDZIK["lvl"][act] = (ludzik_lvl(act) + 1) % 4
             elif k in ("0", "1", "2", "3") and act:
                 LUDZIK["lvl"][act] = int(k)
+            elif k == "!" and act:  # zrób jako następne (drugi raz – anuluj)
+                LUDZIK["next"] = None if LUDZIK["next"] == act else act
             elif k in ("-", "+", "=") and act in LUDZIK_TIMED:  # długość zajęcia
                 LUDZIK["len"][act] = max(0, min(len(LUDZIK_LEN) - 1, ludzik_len(act) + (-1 if k == "-" else 1)))
             elif k == "*" and m:  # wszystkie widoczne: wyłącz, a gdy już wyłączone – normalnie
@@ -6535,7 +6605,7 @@ class Tui(Engine):
         sf = self.focus == "set"
         if self.focus == "acts":
             right = [f"{INV} Zajęcia ludzika {R} " + (f"{Y}szukaj: {self.afilt}█{R}" if self.afilt else
-                                                      f"{D}(co robi z nudów: ←→ jak często, - + jak długo; pisz, żeby szukać){R}")]
+                                                      f"{D}(←→ jak często, - + jak długo, ! zrób następne; pisz, żeby szukać){R}")]
             m = self.act_matches()
             if not m:
                 right.append(f"  {D}nic nie pasuje do „{self.afilt}” (Backspace / Esc){R}")
@@ -6545,7 +6615,9 @@ class Tui(Engine):
                 lv = ludzik_lvl(act)
                 lab = (D, Y, G, C)[lv] + "◂ " + f"{LUDZIK_LVL[lv]:9s}" + " ▸" + R
                 if act in LUDZIK_TIMED:
-                    lab += f"  {D if not lv else ''}{LUDZIK_LEN[ludzik_len(act)]}{R}"
+                    lab += f"  {D if not lv else ''}{LUDZIK_LEN[ludzik_len(act)]:12s}{R}"
+                if LUDZIK["next"] == act:
+                    lab += f"  {G}▶ następne{R}"
                 right.append(f"{Y + '▸' if sel else ' '}{R} {(B if sel else '')}{act:20s}{R} {lab}")
         else:
             right = [(f"{INV} Ustawienia {R}" if sf else f"{D}Ustawienia{R}") + f" {D}(Tab){R}"]
@@ -6676,8 +6748,12 @@ def web_cmd(e, c):
         if len(host) > 64 or not re.fullmatch(r"[A-Za-z0-9.:\-\[\]]*", host):
             raise ValueError("zły adres hosta")
         return lambda: e.set_host(host)
-    if op == "ludzik":  # częstość (lvl) albo długość (len) zajęcia
+    if op == "ludzik":  # częstość (lvl), długość (len) zajęcia albo „zrób jako następne” (next; drugi raz = anuluj)
         act = c.get("act")
+        if c.get("next"):
+            if act not in LUDZIK_ACTS:
+                raise ValueError("złe zajęcie ludzika")
+            return lambda: LUDZIK.update(next=None if LUDZIK["next"] == act else act)
         if "len" in c:
             n = int(c["len"])
             if act not in LUDZIK_TIMED or not 0 <= n < len(LUDZIK_LEN):
@@ -7432,6 +7508,7 @@ def main():
     LUDZIK["len"] = {n: int(clamp(v, 0, len(LUDZIK_LEN) - 1)) for n, v in (cfg.get("ludzik_len") or {}).items()
                      if n in LUDZIK_TIMED}
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
+    LUDZIK["char"] = next((i for i, (n, _) in enumerate(LUDZIK_CHARS) if n == cfg.get("ludzik_postac")), 0)
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
     rgb = cfg.get("led_rgb")
