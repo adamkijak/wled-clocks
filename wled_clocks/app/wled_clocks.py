@@ -4718,8 +4718,9 @@ def ludzik_lvl(name):
 class Worker(Clock):
     """Robotnik w kasku sam przestawia cyfry: przed nową minutą wyciąga stare za panel, a o pełnej wpycha nowe;
     z nudów spaceruje po obu stronach zegara, czyta, śpi, je, pije kawę, żongluje, zamiata, robi pajacyki i pompki,
-    strzela przez zegar do tarczy z łuku, pistoletu albo bazooki, jeździ rowerem i autem (wyjeżdża za krawędź
-    i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą."""
+    strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem i autem (kilka okrążeń:
+    wyjeżdża za krawędź i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą.
+    Zajęcia trwają tyle, ile zostało do przestawiania cyfr (najwyżej górna granica z TRICKS)."""
 
     POSES = {k: [r.ljust(max(map(len, v)), ".") for r in v] for k, v in {  # twarzą w lewo; kolumna 0 = dłonie
         "stoi": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", ".BBBBBBB", ".SBBBBBS",
@@ -4793,26 +4794,31 @@ class Worker(Clock):
     POSES["kawa1"] = [r.replace("A", "W") for r in POSES["je1"]]  # kubek zamiast jabłka
     POSES["kawa2"] = [r.replace("A", "W") for r in POSES["je2"]]
     POSES["glowa1"], POSES["glowa2"] = POSES["stoi"][::-1], POSES["idzie1"][::-1]  # stanie na głowie, nogi machają
-    TRICKS = {  # nudzi się: nazwa -> (czas, kolejne pozy, czas jednej pozy, co druga odbita w lustrze)
-        "pajacyki": (3.0, ("stoi", "pajac_pol", "pajac", "pajac_pol"), 0.14, False),
-        "przysiady": (3.0, ("stoi", "kuca"), 0.5, False),
-        "taniec": (3.5, ("taniec", "taniec"), 0.35, True),
-        "pompki": (3.2, ("pompka1", "pompka2"), 0.45, False),
-        "na głowie": (2.6, ("glowa1", "glowa2"), 0.3, False),
-        "czytanie": (9.0, ("czyta1",) * 7 + ("czyta2",), 0.25, False),
-        "spanie": (10.0, ("spi1", "spi2"), 0.9, False),
-        "jedzenie": (6.0, ("je1", "je2", "je3", "je2", "je3"), 0.35, False),
-        "kawa": (7.0, ("kawa2",) * 5 + ("kawa1",) * 2, 0.4, False),
-        "żonglerka": (6.0, ("zongl1", "zongl2"), 0.25, False),
-        "zamiatanie": (6.0, ("zamiata1", "zamiata2"), 0.4, False),
-        "łuk": (5.4, ("luk1",) * 4 + ("luk2",) * 14, 0.3, False),
-        "pistolet": (4.6, ("pist1",) * 5 + ("pist2", "pist1", "pist1", "pist1") * 3 + ("pist1",) * 5, 0.2, False),
-        "bazooka": (5.4, ("baz1",) * 4 + ("baz2",) * 2 + ("baz1",) * 12, 0.3, False),
+    # nudzi się: nazwa -> (czas od–do w s, pozy jednej rundy, czas jednej pozy, co druga odbita w lustrze);
+    # czas zaokrągla się do pełnych rund, a gdy do przestawiania cyfr zostało mniej – tyle rund, ile się zmieści
+    TRICKS = {
+        "pajacyki": ((6, 14), ("stoi", "pajac_pol", "pajac", "pajac_pol"), 0.14, False),
+        "przysiady": ((6, 12), ("stoi", "kuca"), 0.5, False),
+        "taniec": ((8, 18), ("taniec", "taniec"), 0.35, True),
+        "pompki": ((6, 14), ("pompka1", "pompka2"), 0.45, False),
+        "na głowie": ((4, 9), ("glowa1", "glowa2"), 0.3, False),
+        "czytanie": ((15, 35), ("czyta1",) * 7 + ("czyta2",), 0.25, False),
+        "spanie": ((20, 40), ("spi1", "spi2"), 0.9, False),
+        "jedzenie": ((10, 20), ("je1", "je2", "je3", "je2", "je3"), 0.35, False),
+        "kawa": ((12, 25), ("kawa2",) * 5 + ("kawa1",) * 2, 0.4, False),
+        "żonglerka": ((10, 22), ("zongl1", "zongl2"), 0.25, False),
+        "zamiatanie": ((10, 20), ("zamiata1", "zamiata2"), 0.4, False),
+        "łuk": ((11, 25), ("luk1",) * 4 + ("luk2",) * 8, 0.3, False),  # runda = jedna strzała
+        "pistolet": ((8, 20), ("pist1",) * 3 + ("pist2", "pist1", "pist1", "pist1") * 3 + ("pist1",) * 4, 0.2, False),
+        "bazooka": ((11, 22), ("baz1",) * 4 + ("baz2",) * 2 + ("baz1",) * 12, 0.3, False),
     }
-    RIDES = {"rower": (("rower1", "rower2"), 24), "auto": (("auto",), 45)}  # pozy i prędkość (px/s)
+    RIDES = {"rower": (("rower1", "rower2"), 24, (2, 5)), "auto": (("auto",), 45, (3, 8))}  # pozy, px/s, okrążenia
     RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony
-    # strzelanie przez zegar do tarczy po drugiej stronie: kiedy strzał (s od początku) i prędkość pocisku (px/s)
-    SHOTS = {"łuk": ((1.2,), 45), "pistolet": ((1.0, 1.8, 2.6), 120), "bazooka": ((1.2,), 50)}
+    # strzelanie przez zegar do tarczy po drugiej stronie: poza strzału (pierwsza z serii = strzał) i prędkość pocisku (px/s)
+    SHOTS = {"łuk": ("luk2", 55), "pistolet": ("pist2", 120), "bazooka": ("baz2", 50)}
+    ARROW_DY = (0, -1, 1, -2, 2, 0, 1, -1)  # strzały wbijają się w różne miejsca tarczy
+    HOLES = ((1, 0), (1, -2), (1, 2), (0, -1), (2, 1), (0, 1), (2, -1), (1, -1), (1, 1), (0, 0), (2, 0), (0, -2),
+             (2, 2), (1, -3), (1, 3))  # dziury po kulach (x w tarczy, y od środka)
     TARGET = [".R.", "RWR", "WRW", "RYR", "WRW", "RWR", ".R.", "T.T", "T.T"]
     TARGET_PAL = {"R": (230, 30, 30), "W": (235, 235, 235), "Y": (255, 220, 0), "T": (150, 90, 40)}
     PAL = {"Y": (255, 200, 0), "S": (255, 180, 130), "E": (0, 0, 0), "M": (0, 0, 0), "R": (170, 0, 25),
@@ -4830,7 +4836,7 @@ class Worker(Clock):
         self.trick, self.next_trick, self.pending = None, None, None
         self.banner, self.banner_at = None, None
         self.rate, self.prev = None, None
-        self.ride, self.left = None, 60.0
+        self.ride, self.left, self.free = None, 60.0, 0.0  # free: s animacji do przestawiania cyfr
 
     @staticmethod
     def layout(s):
@@ -4841,13 +4847,15 @@ class Worker(Clock):
             x += text_w(ch) + 1
         return xs, x - 2
 
-    def plan(self, old, new, t):
+    def plan(self, old, new, t, x=None):
+        """Przestawianie cyfr; x = skąd idzie do roboty (domyślnie: tam, gdzie stoi)."""
+        x = self.x if x is None else x
         xs, xr = self.layout(new)
         k = next(i for i, (a, b) in enumerate(zip(old, new)) if a != b)  # od tej cyfry w prawo wszystko jedzie
         dist = W - xs[k]
         mv = dist / max(self.MOVE, dist / 4.5)  # długi blok cyfr: szybciej, żeby zegar nie stał długo pusty
-        return {"old": old, "new": new, "k": k, "dist": dist, "t0": t, "x0": self.x,
-                "d": [abs(self.x - xr - 1) / self.WALK, 0.5, mv, 0.8, mv, 1.8]}
+        return {"old": old, "new": new, "k": k, "dist": dist, "t0": t, "x0": x,
+                "d": [abs(x - xr - 1) / self.WALK, 0.5, mv, 0.8, mv, 1.8]}
 
     def man(self, f, pose, x, flip=False, blink=False):
         pal = dict(self.PAL, E=self.PAL["S"]) if blink else self.PAL
@@ -4881,7 +4889,7 @@ class Worker(Clock):
         """Gdzie może spacerować (x pozy „stoi”): z prawej i z lewej strony godziny."""
         return [z for z in ((xr + 1, W - 8), (-1, xs[0] - 9)) if z[0] <= z[1]]
 
-    def props(self, f, name, pose, e, sx, flip):
+    def props(self, f, name, pose, e, sx, flip, dur):
         """Rzeczy przy niektórych zajęciach: piłeczki, para z kubka, „Z” nad śpiącym."""
         w = len(self.POSES[pose][0])
         cx = lambda c: sx + (w - 1 - c if flip else c)
@@ -4898,16 +4906,25 @@ class Worker(Clock):
             for k in range(3):
                 f.add(cx(1 + (int(e * 3) + k) % 2), 4 - k - (e * 2) % 1, mul(steam, 1 - k * 0.25))
         elif name in self.SHOTS:
-            self.shoot(f, name, e, flip, cx)
+            self.shoot(f, name, e, flip, cx, dur)
         elif name == "spanie":
             for k in (0, 1):
                 ph = (e / 2.4 + k / 2) % 1
                 f.draw(text_px("Z", cx(7 + 3 * ph) if flip else cx(3 + 3 * ph), 3 - 5 * ph, SMALL),
                        mul((150, 180, 255), 1 - 0.7 * ph))
 
-    def shoot(self, f, name, e, flip, cx):
-        """Tarcza przy przeciwnej krawędzi panelu, pocisk leci za cyframi; trafienia: strzała, dziury albo wybuch."""
-        times, v = self.SHOTS[name]
+    def shot_times(self, name, dur):
+        """Kiedy (s od początku) pada każdy strzał serii trwającej dur."""
+        fire, _ = self.SHOTS[name]
+        _, poses, step, _ = self.TRICKS[name]
+        one = [i * step for i, p in enumerate(poses) if p == fire and (i == 0 or poses[i - 1] != fire)]
+        cycle = len(poses) * step
+        return [c * cycle + ft for c in range(round(dur / cycle)) for ft in one]
+
+    def shoot(self, f, name, e, flip, cx, dur):
+        """Tarcza przy przeciwnej krawędzi panelu, pocisk leci za cyframi; trafienia: strzały, dziury albo wybuch
+        (po wybuchu wyskakuje nowa tarcza)."""
+        times, v = self.shot_times(name, dur), self.SHOTS[name][1]
         d = 1 if flip else -1                      # kierunek lotu
         tx = W - 3 if flip else 0                  # lewy brzeg tarczy
         face = tx if flip else tx + 2              # kolumna tarczy od strony strzelca
@@ -4921,10 +4938,11 @@ class Worker(Clock):
             if fe * v < dist:                      # w locie
                 px = mx + d * fe * v
                 if name == "łuk":
-                    f.set(px, my, (200, 200, 215))
+                    ay = my + self.ARROW_DY[i % len(self.ARROW_DY)]
+                    f.set(px, ay, (200, 200, 215))
                     for q in range(1, 4):
-                        f.set(px - d * q, my, (170, 110, 50))
-                    f.set(px - d * 4, my, (230, 40, 40))
+                        f.set(px - d * q, ay, (170, 110, 50))
+                    f.set(px - d * 4, ay, (230, 40, 40))
                 elif name == "pistolet":
                     f.set(px, my, (255, 235, 130))
                     f.set(px - d, my, (140, 110, 40))
@@ -4941,8 +4959,11 @@ class Worker(Clock):
                             f.add(cx(11 + q), 5 + (q + int(e * 15)) % 2, mul((255, 140, 20), 1 - fe * 2))
             else:
                 hits.append((i, fe - dist / v))
-        if name == "bazooka" and hits:             # wybuch: tarcza znika
-            h = hits[0][1]
+        pop = e                                    # od kiedy stoi tarcza
+        if name == "bazooka" and hits:             # wybuch: tarcza znika, po chwili wyskakuje nowa
+            h = hits[-1][1]
+            pop = h - 1.5
+        if pop < 0:
             cx_, cy_ = tx + 1, 5
             if h < 0.15:
                 disc(f, cx_, cy_, 2.5, (255, 255, 220))
@@ -4954,15 +4975,19 @@ class Worker(Clock):
                     f.set(cx_ + math.cos(a) * r, cy_ + math.sin(a) * r * 0.8 + h * h * 3, mul(c, 1 - h / 1.2))
             return
         wob = (1 if int(e * 25) % 2 else -1) if any(name == "łuk" and h < 0.4 for _, h in hits) else 0
-        y0 = 2 + round((1 - clamp(e / 0.4)) * 9)    # tarcza wyskakuje z podłogi
+        y0 = 2 + round((1 - clamp(pop / 0.4)) * 9)  # tarcza wyskakuje z podłogi
         sprite(f, self.TARGET, tx + wob, y0, self.TARGET_PAL)
+        if name == "bazooka":
+            return
         for i, h in hits:
             if name == "łuk":                       # strzała wbita w tarczę
+                ay = my + self.ARROW_DY[i % len(self.ARROW_DY)]
                 for q in range(0, 3):
-                    f.set(face - d * q + wob, my, (170, 110, 50))
-                f.set(face - d * 3 + wob, my, (230, 40, 40))
+                    f.set(face - d * q + wob, ay, (170, 110, 50))
+                f.set(face - d * 3 + wob, ay, (230, 40, 40))
             else:                                   # dziura po kuli (i błysk przy trafieniu)
-                f.set(tx + 1, my + (0, -2, 2)[i], (255, 255, 255) if h < 0.1 else (20, 10, 10))
+                hx, hy = self.HOLES[i % len(self.HOLES)]
+                f.set(tx + hx, my + hy, (255, 255, 255) if h < 0.1 else (20, 10, 10))
 
     BANNER_SPEED = 18  # px/s przy tempie tekstu 1 – wolno, żeby dało się przeczytać
 
@@ -5029,7 +5054,8 @@ class Worker(Clock):
         return True
 
     def start_ride(self, name, t, xs, xr, here_only):
-        """Wsiada i jedzie: za krawędź panelu i z powrotem z drugiej strony (za cyframi) do nowego miejsca."""
+        """Wsiada i jedzie: za krawędź panelu i z powrotem z drugiej strony (za cyframi), kilka okrążeń, aż do
+        nowego miejsca. Okrążeń tyle, ile się zmieści przed przestawianiem cyfr. -> czas jazdy albo None."""
         zs = self.zones(xs, xr)
         if here_only:
             zs = [z for z in zs if z[0] - 1 <= self.x <= z[1] + 1] or zs
@@ -5038,21 +5064,37 @@ class Worker(Clock):
         d = -1 if goal >= self.x else 1  # odjeżdża od celu i wraca zza drugiej krawędzi: trasa najwyżej W + 2*o
         out = W + o - self.x if d > 0 else self.x + o
         back = goal + o if d > 0 else W + o - goal
-        self.ride = {"n": name, "t0": t, "x0": self.x, "d": d, "goal": goal, "out": out, "len": out + back}
+        _, v, (lo, hi) = self.RIDES[name]
+        free = self.free - 2 - (abs(goal - xr - 1) - abs(self.x - xr - 1)) / self.WALK  # do roboty pójdzie od celu
+        if (out + back) / v > free:  # out + back to najwyżej jedno okrążenie
+            return None
+        laps = min(random.randint(lo, hi), 1 + int((free - (out + back) / v) / self.ride_time(name)))
+        self.ride = {"n": name, "t0": t, "x0": self.x, "d": d, "goal": goal, "out": out,
+                     "len": out + (laps - 1) * (W + 2 * o) + back}
+        return self.ride["len"] / v
 
     def ride_time(self, name):
+        """Czas jednego okrążenia."""
         return (W + 2 * self.RIDE_OFF) / self.RIDES[name][1]
+
+    def trick_len(self, name):
+        """Ile pełnych rund zajęcia zmieści się przed przestawianiem cyfr -> najdłuższy czas albo None."""
+        (lo, hi), poses, step, _ = self.TRICKS[name]
+        cycle = len(poses) * step
+        dur = int(min(hi, self.free - 2) / cycle) * cycle
+        return dur if dur >= min(lo, 3) and dur >= cycle else None
 
     def draw_ride(self, f, t, blink):
         """-> False, gdy dojechał."""
         r = self.ride
-        poses, v = self.RIDES[r["n"]]
+        poses, v, _ = self.RIDES[r["n"]]
         k = min(r["len"], (t - r["t0"]) * v)
         if k >= r["len"]:
             self.x, self.goal, self.ride = r["goal"], None, None
             return False
         d = r["d"]
-        x = r["x0"] + d * k if k < r["out"] else (-self.RIDE_OFF if d > 0 else W + self.RIDE_OFF) + d * (k - r["out"])
+        lap = W + 2 * self.RIDE_OFF
+        x = r["x0"] + d * k if k < r["out"] else (-self.RIDE_OFF if d > 0 else W + self.RIDE_OFF) + d * ((k - r["out"]) % lap)
         self.x = clamp(x, -10, W)  # gdyby przerwało przestawianie cyfr – idzie do roboty stąd
         pose, flip = poses[int(k / 3) % len(poses)], d > 0
         sx = x + self.place(pose, flip)
@@ -5082,7 +5124,7 @@ class Worker(Clock):
         if self.trick is None and standing and t >= self.next_trick and pause:
             away = self.x > xr  # rzeczy (książka, kubek, miotła) najlepiej po stronie z dala od cyfr
             dirs = lambda n: (self.x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
-            opts = [(n, fl) for n, tr in self.TRICKS.items() if n not in off
+            opts = [(n, fl) for n, tr in self.TRICKS.items() if n not in off and self.trick_len(n)
                     for fl in [next((fl for fl in dirs(n) if self.fits(tr, fl, xs, xr)), None)] if fl is not None]
             if self.pending in [n for n, _ in opts]:  # doszedł na stanowisko strzeleckie
                 opts = [o for o in opts if o[0] == self.pending]
@@ -5098,30 +5140,34 @@ class Worker(Clock):
                     standing = False
                     opts = []
             if self.pending is None:  # przejażdżki – tylko gdy zdąży przed przestawianiem cyfr
-                opts += [(n, None) for n in self.RIDES if n not in off and self.left > self.ride_time(n) + 15]
+                opts += [(n, None) for n in self.RIDES if n not in off and self.free > self.ride_time(n) + 2]
             self.pending = None if opts else self.pending
             self.next_trick = t + 3 if self.pending is None else t
             if opts:  # częstsze zajęcia losują się częściej
                 n, fl = random.choices(opts, [weight(n) for n, _ in opts])[0]
                 if n in self.RIDES:
-                    self.start_ride(n, t, xs, xr, "na drugą stronę" in off)
-                    self.next_trick = t + self.ride_time(n) + random.uniform(*pause)
+                    dur = self.start_ride(n, t, xs, xr, "na drugą stronę" in off)
+                    if dur is not None:  # inaczej nie zdąży dojechać – za 3 s losuje znowu
+                        self.next_trick = t + dur + random.uniform(*pause)
                 else:
-                    self.trick = (n, t, fl)
-                    self.next_trick = t + self.TRICKS[n][0] + random.uniform(*pause)
+                    (lo, hi), poses, step, _ = self.TRICKS[n]
+                    cycle = len(poses) * step
+                    dur = max(cycle, int(min(random.uniform(lo, hi), self.trick_len(n)) / cycle) * cycle)
+                    self.trick = (n, t, fl, dur)
+                    self.next_trick = t + dur + random.uniform(*pause)
         if self.ride and self.ride["n"] in off:  # właśnie wyłączone w ustawieniach
             self.ride = None
         if self.ride and self.draw_ride(f, t, blink):
             return
         if self.trick:
-            name, t0, fl = self.trick
-            dur, poses, step, mirror = self.TRICKS[name]
+            name, t0, fl, dur = self.trick
+            _, poses, step, mirror = self.TRICKS[name]
             if t - t0 < dur:
                 i = int((t - t0) / step) % len(poses)
                 flip = fl != (mirror and i % 2 == 1)
                 sx = self.x + self.place(poses[i], flip)
                 self.man(f, poses[i], sx, flip, blink)
-                self.props(f, name, poses[i], t - t0, sx, flip)
+                self.props(f, name, poses[i], t - t0, sx, flip, dur)
                 return
             self.trick, self.wait = None, max(self.wait, t + 1)
         if t >= self.wait and standing and "spacer" not in off:
@@ -5171,14 +5217,18 @@ class Worker(Clock):
             self.banner, self.x, self.goal, self.wait = None, -10, home, t  # wraca zza lewej krawędzi
             self.next_trick = max(self.next_trick or 0, t + 4)
         if self.job is None:
+            self.free = 0.0
             if self.shown not in (cur, nxt):  # spóźniony (start efektu, skok czasu) – od razu do roboty
                 self.job = self.plan(self.shown, cur, t)
             elif nxt != self.shown:  # zaczyna wcześniej, żeby nowe cyfry wjeżdżały równo z pełną minutą
-                job = self.plan(self.shown, nxt, t)
-                if (nxt_t - now).total_seconds() <= sum(job["d"][:4]) * (self.rate or 1 / ANIM["tempo"]):
-                    self.job = job
+                job = self.plan(self.shown, nxt, t, self.ride["goal"] if self.ride else None)  # jazda kończy się u celu
+                lead = sum(job["d"][:4])
+                if (nxt_t - now).total_seconds() <= lead * (self.rate or 1 / ANIM["tempo"]):
+                    self.job = self.plan(self.shown, nxt, t) if self.ride else job
+                else:
+                    self.free = self.left - lead
         if self.job is not None:
-            self.ride = None  # do roboty – pojazd znika, ludzik idzie od miejsca, gdzie był
+            self.ride = self.trick = None  # do roboty – pojazd znika, ludzik idzie od miejsca, gdzie był
         ground = visible((40, 26, 12))
         for x in range(W):
             f.set(x, 11, ground)

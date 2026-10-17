@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.7.0
+
+- Ludzik: zajęcia trwają dużo dłużej (np. czytanie i spanie do pół minuty), strzelanie to seria (kilka strzał
+  w różnych miejscach tarczy, kilka magazynków z pistoletu, kilka rakiet z bazooki – po wybuchu wyskakuje nowa
+  tarcza), rower i auto robią kilka okrążeń. Długość dopasowuje się do czasu do przestawienia cyfr, więc zajęcie
+  nie urywa się w połowie.
+
 ## 1.6.0
 
 - „⏻ WLED włączony / wyłączony” na pasku to przycisk: włącza i wyłącza WLED (klawisz `w`, też w TUI). Po
