@@ -1,5 +1,11 @@
 # Zmiany
 
+## 1.12.0
+
+- Ludzik: nowe ustawienie „ludzik strona” – dowolnie (jak dotąd), prawa albo lewa. Przy wybranej stronie spaceruje
+  i robi swoje zajęcia głównie po niej, najchętniej blisko krawędzi panelu. Na drugą stronę przechodzi tylko na chwilę.
+- Efekt „napisz” pokazuje na panelu sam adres skrzynki (domena:port, np. `bore.pub:41234`), bez zachęty i komend.
+
 ## 1.11.0
 
 - Lista efektów w panelu WWW ma przy każdym efekcie podgląd (jak wygląda na panelu, w barwach diod). Podglądy liczą

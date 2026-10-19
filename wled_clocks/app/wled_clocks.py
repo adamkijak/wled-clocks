@@ -4713,12 +4713,13 @@ class Planets(Clock):
 
 
 # co ludzik robi z nudów: wyłączone zajęcia i jak często (ustawiane w TUI, zapisywane w konfiguracji)
-LUDZIK = {"lvl": {}, "len": {}, "freq": 2, "char": 0, "how": 0, "next": None}  # lvl: częstość każdego zajęcia (0–3,
-# brak = normalnie); len: długość zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami; char: postać
-# (LUDZIK_CHARS); how: sposób przestawiania godziny (0 = losowo, potem LUDZIK_HOWS);
+LUDZIK = {"lvl": {}, "len": {}, "freq": 2, "char": 0, "how": 0, "side": 0, "next": None}  # lvl: częstość zajęcia
+# (0–3, brak = normalnie); len: długość zajęcia (0–3, brak = normalnie); freq: przerwy między zajęciami; char: postać
+# (LUDZIK_CHARS); how: sposób przestawiania godziny (0 = losowo, potem LUDZIK_HOWS); side: strona (LUDZIK_SIDES);
 # next: zajęcie wymuszone jako następne (przycisk ▶, nie zapisywane)
 LUDZIK_HOWS = ["przepychanie", "malarz", "zapadnia", "bazooka", "kopniak", "zamiatanie", "magik", "spawacz", "lina",
                "holowanie", "obrót"]
+LUDZIK_SIDES = ["dowolnie", "prawa", "lewa"]  # gdzie spaceruje: obie strony albo głównie jedna (na drugą na chwilę)
 LUDZIK_FREQ = [("nigdy", None), ("rzadko", (20, 40)), ("normalnie", (4, 10)), ("często", (1, 4)), ("bez przerwy", (0, 0.5))]
 LUDZIK_LVL = ["wył.", "rzadko", "normalnie", "często"]
 LVL_WEIGHT = [0, 1, 3, 9]                     # zajęcia: waga losowania
@@ -4727,6 +4728,7 @@ LEN_MUL = [0.4, 1, 1.8, 3]                    # długość: mnożnik czasu zaję
 BANNER_EVERY = [None, 10, 5, 2]               # transparent z pogodą: co ile minut
 WALK_REST = [None, (8, 16), (2, 6), (0.5, 2)]  # spacer: ile stoi między spacerami (s)
 CROSS_P = [0, 0.15, 0.35, 0.7]                # przechodzenie: jaka część spacerów kończy się po drugiej stronie
+AWAY_REST = (1, 4)                            # ustawiona strona: ile stoi po drugiej stronie, zanim wróci (s)
 
 
 # postacie: kolory kasku/włosów (Y), skóry (S), oczu (E), zamkniętych oczu (C), ust (M), koszulki (B), spodni (P)
@@ -5248,6 +5250,26 @@ class Worker(Clock):
         """Gdzie może spacerować (x pozy „stoi”): z prawej i z lewej strony godziny."""
         return [z for z in ((xr + 1, W - 8), (-1, xs[0] - 9)) if z[0] <= z[1]]
 
+    @staticmethod
+    def side_zones(xs, xr):
+        """Strefy na ustawionej stronie (prawa/lewa); dowolnie – albo gdy tam brak miejsca – obie."""
+        zs = Worker.zones(xs, xr)
+        if not LUDZIK["side"]:
+            return zs
+        return [z for z in zs if (z[0] > xr) == (LUDZIK["side"] == 1)] or zs
+
+    def at_side(self, xs, xr):
+        """Czy stoi na swojej stronie (przy „dowolnie” zawsze)."""
+        return any(z[0] - 1 <= self.x <= z[1] + 1 for z in self.side_zones(xs, xr))
+
+    @staticmethod
+    def spot(z, xr):
+        """Losowe miejsce w strefie; przy ustawionej stronie najczęściej blisko krawędzi panelu."""
+        if not LUDZIK["side"]:
+            return random.randint(z[0], z[1])
+        k = round((z[1] - z[0]) * random.random() ** 2)
+        return z[1] - k if z[0] > xr else z[0] + k
+
     def props(self, f, name, pose, e, sx, flip, dur):
         """Rzeczy przy niektórych zajęciach: piłeczki, para z kubka, „Z” nad śpiącym."""
         w = len(self.POSES[pose][0])
@@ -5418,11 +5440,11 @@ class Worker(Clock):
     def start_ride(self, name, t, xs, xr, here_only):
         """Wsiada i jedzie: za krawędź panelu i z powrotem z drugiej strony (za cyframi), kilka okrążeń, aż do
         nowego miejsca. Okrążeń tyle, ile się zmieści przed przestawianiem cyfr. -> czas jazdy albo None."""
-        zs = self.zones(xs, xr)
+        zs = self.side_zones(xs, xr)
         if here_only:
             zs = [z for z in zs if z[0] - 1 <= self.x <= z[1] + 1] or zs
         z = random.choice(zs)
-        goal, o = random.randint(z[0], z[1]), self.RIDE_OFF
+        goal, o = self.spot(z, xr), self.RIDE_OFF
         d = -1 if goal >= self.x else 1  # odjeżdża od celu i wraca zza drugiej krawędzi: trasa najwyżej W + 2*o
         out = W + o - self.x if d > 0 else self.x + o
         back = goal + o if d > 0 else W + o - goal
@@ -5488,12 +5510,12 @@ class Worker(Clock):
     def start_forced(self, n, t, xs, xr, pause):
         """Zajęcie wymuszone przyciskiem ▶: zaraz po bieżącym, bez przerwy i losowania (także wyłączone). Gdy tu się
         nie mieści – idzie tam, gdzie się zmieści; gdy brak czasu do przestawiania cyfr – czeka na następną minutę."""
-        zs = self.zones(xs, xr)
+        zs, mine = self.zones(xs, xr), self.side_zones(xs, xr)
         here = next((z for z in zs if z[0] - 1 <= self.x <= z[1] + 1), zs[0])
         if n in ("spacer", "na drugą stronę"):
             other = [z for z in zs if z != here]
-            z = random.choice(other) if n == "na drugą stronę" and other else here
-            self.goal, self.wait, self.moon, LUDZIK["next"] = random.randint(z[0], z[1]), t, False, None
+            z = random.choice(other) if n == "na drugą stronę" and other else here if here in mine else mine[0]
+            self.goal, self.wait, self.moon, LUDZIK["next"] = self.spot(z, xr), t, False, None
             return
         if n in self.RIDES:
             dur = self.start_ride(n, t, xs, xr, False)
@@ -5505,12 +5527,13 @@ class Worker(Clock):
             return
         tr, away = self.TRICKS[n], self.x > xr
         dirs = lambda x: (x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
-        fl = next((fl for fl in dirs(self.x) if self.fits(tr, fl, xs, xr)), None)
+        fl = next((fl for fl in dirs(self.x) if self.fits(tr, fl, xs, xr)), None) if self.at_side(xs, xr) else None
         if fl is not None:
             self.begin_trick(n, t, fl, pause, forced=True)
             LUDZIK["next"] = None
             return
-        spots = [x for z in zs for x in range(z[0], z[1] + 1) if any(self.fits(tr, fl, xs, xr, x) for fl in dirs(x))]
+        ok = lambda zs: [x for z in zs for x in range(z[0], z[1] + 1) if any(self.fits(tr, fl, xs, xr, x) for fl in dirs(x))]
+        spots = ok(mine) or ok(zs)  # najpierw na swojej stronie
         if spots:  # tu się nie mieści – idzie tam, gdzie się zmieści (i wtedy zaczyna)
             self.goal, self.wait = min(spots, key=lambda x: abs(x - self.x)), t
 
@@ -5531,7 +5554,8 @@ class Worker(Clock):
             self.pending = None
             self.start_forced(forced, t, xs, xr, pause)
             standing = self.goal is None or abs(self.x - self.goal) < 0.5
-        if self.trick is None and self.ride is None and standing and t >= self.next_trick and pause and not forced:
+        if self.trick is None and self.ride is None and standing and t >= self.next_trick and pause and not forced \
+                and self.at_side(xs, xr):  # po drugiej stronie jest tylko na chwilę – zajęcia u siebie
             away = self.x > xr  # rzeczy (książka, kubek, miotła) najlepiej po stronie z dala od cyfr
             dirs = lambda n: (self.x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
             opts = [(n, fl) for n, tr in self.TRICKS.items() if n not in off and self.trick_len(n)
@@ -5540,7 +5564,7 @@ class Worker(Clock):
                 opts = [o for o in opts if o[0] == self.pending]
             elif self.pending is None and not any(n in self.SHOTS for n, _ in opts) and \
                     random.random() < min(0.8, 0.1 * max(weight(n) for n in self.SHOTS)):
-                zs = self.zones(xs, xr) if "na drugą stronę" not in off else \
+                zs = self.side_zones(xs, xr) if "na drugą stronę" not in off else \
                     [z for z in self.zones(xs, xr) if z[0] - 1 <= self.x <= z[1] + 1]
                 spots = [(n, x) for n in self.SHOTS if n not in off for z in zs for x in range(z[0], z[1] + 1)
                          if self.fits(self.TRICKS[n], x < xs[0], xs, xr, x)]
@@ -5576,14 +5600,18 @@ class Worker(Clock):
                 self.props(f, name, poses[i], t - t0, sx, flip, dur)
                 return
             self.trick, self.wait = None, max(self.wait, t + 1)
-        if t >= self.wait and standing and "spacer" not in off:
+        away = not self.at_side(xs, xr)  # po drugiej stronie niż ustawiona – zaraz wraca (także bez spacerów)
+        if t >= self.wait and standing and ("spacer" not in off or away):
             if self.goal is not None:
-                self.wait = t + random.uniform(*WALK_REST[ludzik_lvl("spacer")])
+                self.wait = t + random.uniform(*(AWAY_REST if away else WALK_REST[ludzik_lvl("spacer")]))
             zs = self.zones(xs, xr)
             here = next((z for z in zs if z[0] - 1 <= self.x <= z[1] + 1), zs[0])
             other = [z for z in zs if z != here]
-            z = random.choice(other) if other and random.random() < CROSS_P[ludzik_lvl("na drugą stronę")] else here
-            self.goal = random.randint(z[0], z[1])
+            if away:
+                z = self.side_zones(xs, xr)[0]
+            else:
+                z = random.choice(other) if other and random.random() < CROSS_P[ludzik_lvl("na drugą stronę")] else here
+            self.goal = self.spot(z, xr)
             self.moon = random.random() < 0.25  # czasem idzie tyłem, moonwalkiem
         if self.goal is not None and t >= self.wait and abs(self.x - self.goal) >= 0.5:
             self.x += min(abs(self.goal - self.x), self.WALK * dt) * (1 if self.goal > self.x else -1)
@@ -5605,7 +5633,7 @@ class Worker(Clock):
         if self.shown is None:
             self.shown = cur
         xs, xr = self.layout(self.shown)
-        home = xr + 1
+        home = xs[0] - 9 if LUDZIK["side"] == 2 and xs[0] >= 8 else xr + 1  # przy cyfrach, na swojej stronie
         if self.x is None:
             self.x = home
         if LUDZIK["freq"] and ludzik_lvl("transparent z pogodą"):
@@ -5771,7 +5799,7 @@ ENVELOPE = ["YYYYYYYYYYY", "DDYYYYYYYDD", "YDDYYYYYDDY", "YYDDYYYDDYY", "YYYDDYD
 
 @reg("napisz")
 class Inbound(Clock):
-    """Wiadomości od widzów (np. uczestników calla): zachęta po angielsku z adresem (tunel bore.pub albo własny),
+    """Wiadomości od widzów (np. uczestników calla): sam adres (domena:port – tunel bore.pub albo własny),
     pod który wysyła się tekst – echo do /dev/tcp, curl albo przeglądarka – a potem po kolei to, co przyszło.
     Skrzynkę otwiera się w panelu WWW – tylko wtedy coś przyjmuje."""
 
@@ -5804,13 +5832,12 @@ class Inbound(Clock):
             f.text(msg, self.X0 + 2, 0, (120, 120, 140))
             return
         sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
-        cmd, gray = (80, 255, 80), (160, 160, 170)
-        segs = [("write something on this panel:  ", (255, 255, 255)), ("$ ", (0, 200, 0))]
-        if INBOX.tunnel:  # bez kodu w ścieżce – działa też gołe TCP
-            host, port = addr.rsplit(":", 1)
-            segs += [(f"echo hi > /dev/tcp/{host}/{port}", cmd), ("   or  ", gray), ("$ ", (0, 200, 0))]
-        segs += [(f"curl -d hi {addr}", cmd), ("   or open in a browser:  ", gray), (addr, (80, 200, 255))]
-        scroll_segs(f, segs, t, 30, 0, self.X0, gap=40)
+        addr = addr.split("://", 1)[-1]  # sam adres: domena:port (własny port – jeszcze kod w ścieżce)
+        tw = text_w(addr, TXT)
+        if tw <= W - self.X0:
+            f.text(addr, self.X0 + (W - self.X0 - tw) // 2, 0, (80, 200, 255), TXT)
+        else:
+            scroll_segs(f, [(addr, (80, 200, 255))], t, 30, 0, self.X0, gap=40)
 
 
 CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lista, numery i cykl
@@ -5907,7 +5934,8 @@ class Engine:
     PREVIEWS = ["włączony", "wyłączony"]
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
-                  "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
+                  "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik",
+                  "ludzik strona": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
                   "diody: zielony": "kolory", "diody: niebieski": "kolory"}
 
     def __init__(self, a, cfg):
@@ -6050,6 +6078,9 @@ class Engine:
         def s_lchar(d):
             LUDZIK["char"] = (LUDZIK["char"] + d) % len(LUDZIK_CHARS)
 
+        def s_lside(d):
+            LUDZIK["side"] = (LUDZIK["side"] + d) % len(LUDZIK_SIDES)
+
         def s_led(ch):
             return lambda d: COLOR.update({ch: self.step_in(COLOR_STEPS, COLOR[ch], d)})
 
@@ -6111,6 +6142,8 @@ class Engine:
                                      lambda v: LUDZIK.update(how=v), lambda v: (["losowo"] + LUDZIK_HOWS)[v]),
             "ludzik postać": opt(list(range(len(LUDZIK_CHARS))), lambda: LUDZIK["char"], lambda v: LUDZIK.update(char=v),
                                  lambda v: LUDZIK_CHARS[v][0]),
+            "ludzik strona": opt(list(range(len(LUDZIK_SIDES))), lambda: LUDZIK["side"], lambda v: LUDZIK.update(side=v),
+                                 lambda v: LUDZIK_SIDES[v]),
             "barwa": opt(list(range(len(CLOCK_HUES))), lambda: CLOCK["hue"], lambda v: CLOCK.update(hue=v),
                          lambda v: CLOCK_HUES[v][0]),
             "temperatura": opt(CLOCK_TEMPS, lambda: CLOCK["temp"], lambda v: CLOCK.update(temp=v),
@@ -6147,6 +6180,8 @@ class Engine:
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
             ("ludzik postać", lambda: LUDZIK_CHARS[LUDZIK["char"]][0], s_lchar, "wygląd ludzika"),
             ("ludzik przestawia", lambda: (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]], s_lhow, "jak zmienia godzinę"),
+            ("ludzik strona", lambda: LUDZIK_SIDES[LUDZIK["side"]], s_lside,
+             "gdzie spaceruje: po obu stronach albo głównie po jednej (na drugą tylko na chwilę)"),
             ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
             ("diody: czerwony", lambda: f"x{COLOR['r']:g}", s_led("r"), "jasność kanału w podglądzie – dopasuj do panelu"),
@@ -6275,7 +6310,7 @@ class Engine:
                "psu": POWER["psu"], "auto_dim": POWER["auto"], "skip_heavy": self.skip_heavy, "peaks": self.peak, "width": self.new_width or W,
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_len": LUDZIK["len"],
                "ludzik_freq": LUDZIK["freq"], "ludzik_postac": LUDZIK_CHARS[LUDZIK["char"]][0],
-               "ludzik_zmiana": (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]],
+               "ludzik_zmiana": (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]], "ludzik_strona": LUDZIK_SIDES[LUDZIK["side"]],
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
@@ -7899,6 +7934,7 @@ def main():
     LUDZIK["char"] = next((i for i, (n, _) in enumerate(LUDZIK_CHARS) if n == cfg.get("ludzik_postac")), 0)
     hows = ["losowo"] + LUDZIK_HOWS
     LUDZIK["how"] = hows.index(cfg["ludzik_zmiana"]) if cfg.get("ludzik_zmiana") in hows else 0
+    LUDZIK["side"] = LUDZIK_SIDES.index(cfg["ludzik_strona"]) if cfg.get("ludzik_strona") in LUDZIK_SIDES else 0
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
     rgb = cfg.get("led_rgb")

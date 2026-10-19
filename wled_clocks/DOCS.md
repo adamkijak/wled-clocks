@@ -22,9 +22,9 @@ zapisują się w `/data/wled_clocks.json` i przetrwają restart oraz aktualizacj
 
 ## Wiadomości od widzów (efekt „napisz”)
 
-Na callu kamerka pokazuje panel z zachętą po angielsku, np.
-`write something on this panel: $ echo hi > /dev/tcp/bore.pub/41234  or  $ curl -d hi bore.pub:41234  or open in a browser: bore.pub:41234`.
-Kto to wyśle (albo otworzy adres w przeglądarce i wpisze tekst w formularz), zobaczy swoją wiadomość na panelu –
+Na callu kamerka pokazuje panel z samym adresem skrzynki, np. `bore.pub:41234`. Wysłać można np.
+`curl -d hi bore.pub:41234`, `echo hi > /dev/tcp/bore.pub/41234` albo otworzyć adres w przeglądarce i wpisać tekst
+w formularz. Nadawca zobaczy swoją wiadomość na panelu –
 po kolei, jedna po drugiej.
 
 1. W panelu wybierz efekt **napisz** – skrzynka jest w jego „Ustawieniach efektu” – i kliknij **Otwórz skrzynkę**.
