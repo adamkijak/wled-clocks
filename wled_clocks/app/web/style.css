@@ -225,6 +225,8 @@ main > *, .cols > * { min-width: 0; }
 .inbox .srow .wide input { flex: 0 0 7em; }
 .inbox .srow:last-of-type { border-bottom: 0; }
 .inbox p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.inbox .addr { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.inbox .addr code { font-size: 16px; font-weight: 600; user-select: all; overflow-wrap: anywhere; }
 .inbox-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
 .msgs { list-style: none; margin: 0; padding: 0; }
 .msgs li {

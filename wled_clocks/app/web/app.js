@@ -31,6 +31,11 @@ async function cmd(op, extra = {}) {
   }
 }
 
+// tekst tylko po zmianie – inaczej co odświeżenie stanu znika zaznaczenie (nie da się skopiować)
+function setText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
 let toastTimer = 0;
 function toast(msg) {
   const t = $("#toast");
@@ -497,6 +502,17 @@ $("#inbox-hours").addEventListener("keydown", (e) => e.key === "Enter" && e.targ
 $("#inbox-auto").addEventListener("change", (e) => {
   if ((e.target.value === "1") !== state.inbox.auto) inboxCmd("auto");
 });
+$("#inbox-copy").onclick = async () => {
+  const text = $("#inbox-addr-text").textContent;
+  try {
+    await navigator.clipboard.writeText(text); // tylko https/localhost
+  } catch (e) {
+    const sel = getSelection(); // zwykłe http: zaznacza adres i kopiuje po staremu
+    sel.selectAllChildren($("#inbox-addr-text"));
+    if (!document.execCommand("copy")) return toast("Zaznaczone – skopiuj Ctrl+C");
+  }
+  toast(`Skopiowano: ${text}`);
+};
 $("#inbox-clear").onclick = () => confirm("Usunąć wszystkie czekające wiadomości?") && inboxCmd("clear");
 
 // teksty od obcych ludzi – tylko przez textContent (el), nigdy innerHTML
@@ -514,7 +530,8 @@ function msgList(id, items, buttons) {
       b.onclick = () => inboxCmd(act, { id: m.id });
       box.append(b);
     }
-    li.append(el("span", "at", m.at), el("span", "txt", m.text), el("span", "ip", m.ip), box);
+    const ip = el("span", "ip", m.ip ? `${m.ip} · ${m.geo || "…"}` : "IP ukryty (tunel bore)");
+    li.append(el("span", "at", m.at), el("span", "txt", m.text), ip, box);
     ul.append(li);
   }
 }
@@ -525,10 +542,12 @@ function renderInbox(ib) {
   $("#inbox").hidden = !ib || !(state.setting_fx || []).includes("napisz");
   if (!ib || $("#inbox").hidden) return;
   const st = $("#inbox-state");
-  st.textContent = !ib.enabled ? "wyłączona" : ib.open ? `otwarta do ${ib.until}` : "zamknięta";
+  setText(st, !ib.enabled ? "wyłączona" : ib.open ? `otwarta do ${ib.until}` : "zamknięta");
   st.classList.toggle("ok", ib.open);
   const [host, port] = (ib.address || "").split(":");
-  $("#inbox-info").textContent = !ib.enabled
+  $("#inbox-addr").hidden = !(ib.open && ib.address);
+  setText($("#inbox-addr-text"), ib.address || "");
+  setText($("#inbox-info"), !ib.enabled
     ? "Uruchom skrypt z --msg-tunnel bore.pub albo --msg-port PORT."
     : !ib.open
       ? (ib.tunnel
@@ -536,13 +555,13 @@ function renderInbox(ib) {
         : "Zamknięta skrzynka nie słucha na porcie. Otwarcie losuje nowy kod w adresie – znają go tylko ci, którzy widzą panel.")
       : ib.tunnel
         ? (ib.address
-          ? `Adres: ${ib.address}  –  echo hi > /dev/tcp/${host}/${port}  albo  curl -d hi ${ib.address}  albo przeglądarka.` +
+          ? `Wysyła się: echo hi > /dev/tcp/${host}/${port}  albo  curl -d hi ${ib.address}  albo przeglądarka.` +
             "  Przez tunel nie widać, kto pisze: limit jest wspólny, ⛔ niedostępne."
           : `Łączę z ${ib.tunnel}…`) + (ib.err ? `  ${ib.err}` : "")
         : `Na panelu: curl -d hi ${ib.address}  –  albo ten adres w przeglądarce.` +
           (ib.public ? "" : "  Ustaw adres publiczny (msg_public), żeby zamiast „adres” było widać prawdziwy.") +
-          (ib.blocked ? `  Zablokowane adresy: ${ib.blocked}.` : "");
-  $("#inbox-open").textContent = ib.open ? "Nowy kod i czas od teraz" : `Otwórz skrzynkę`;
+          (ib.blocked ? `  Zablokowane adresy: ${ib.blocked}.` : ""));
+  setText($("#inbox-open"), ib.open ? "Nowy kod i czas od teraz" : "Otwórz skrzynkę");
   $("#inbox-open").disabled = !ib.enabled;
   $("#inbox-close").disabled = !ib.open;
   if (document.activeElement !== $("#inbox-hours")) $("#inbox-hours").value = String(ib.hours);

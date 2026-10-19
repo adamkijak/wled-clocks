@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.13.0
+
+- Skrzynka „napisz” w panelu WWW: adres stoi osobno, z przyciskiem 📋 Kopiuj, i da się go zaznaczyć (wcześniej tekst
+  odświeżał się co chwilę i kasował zaznaczenie).
+- Przy każdej wiadomości jest adres IP nadawcy i skąd jest (miasto, region, kraj – z ipwho.is, wysyłany jest tylko
+  adres IP). Za tunelem bore adresu nadawcy nie widać – wtedy „IP ukryty”.
+
 ## 1.12.0
 
 - Ludzik: nowe ustawienie „ludzik strona” – dowolnie (jak dotąd), prawa albo lewa. Przy wybranej stronie spaceruje

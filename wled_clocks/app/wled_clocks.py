@@ -62,6 +62,7 @@ import time
 import tty
 import hmac
 import html
+import ipaddress
 import http.server as httpd  # „http” to w tym pliku funkcja pobierająca dane
 import json
 import threading
@@ -7541,6 +7542,7 @@ class Inbox:
         self.until, self.opened, self.code, self.srv = 0.0, 0.0, "", None
         self.pending, self.queue, self.shown = [], [], []
         self.hits, self.misses, self.blocked = {}, {}, set()
+        self.geo = {}                         # adres nadawcy -> skąd jest (miasto, kraj), sprawdzane w tle
         self.next_id = 1
 
     def is_open(self):
@@ -7728,6 +7730,7 @@ class Inbox:
             if len(self.pending) + len(self.queue) >= MSG_WAIT:
                 return 503, "queue is full – try again in a moment"
             m = {"id": self.next_id, "text": text, "ip": ip, "at": now}
+            self.locate(ip)
             self.next_id += 1
             if self.auto:
                 self.queue.append(m)
@@ -7735,10 +7738,40 @@ class Inbox:
             self.pending.append(m)
             return 202, "thanks! your message is waiting for approval"
 
+    def locate(self, ip):
+        """Skąd jest nadawca – w tle, z ipwho.is (wysyła tam tylko adres IP); wynik do self.geo. Pod zamkiem."""
+        if not ip or ip in self.geo:
+            return
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            self.geo[ip] = "?"
+            return
+        if not a.is_global:
+            self.geo[ip] = "sieć lokalna"
+            return
+        if len(self.geo) > 500:
+            self.geo.clear()
+        self.geo[ip] = "…"
+
+        def look():
+            try:
+                j = http(f"https://ipwho.is/{a}", timeout=8)
+                where = ", ".join(x for x in (j.get("city"), j.get("region"), j.get("country")) if x) \
+                    if j.get("success") else "?"
+            except Exception:  # sieć, limit zapytań – nie wiadomo
+                where = "?"
+            with self.lock:
+                self.geo[ip] = where or "?"
+            print(f"napisz: {ip} – {where}", flush=True)
+
+        threading.Thread(target=look, daemon=True).start()
+
     def snapshot(self):
         """Stan do panelu WWW (tylko typy JSON)."""
         hm = lambda ts: dtm.datetime.fromtimestamp(ts).strftime("%H:%M")
-        row = lambda m: {"id": m["id"], "text": m["text"], "ip": m["ip"], "at": hm(m["at"])}
+        row = lambda m: {"id": m["id"], "text": m["text"], "ip": m["ip"], "geo": self.geo.get(m["ip"], ""),
+                         "at": hm(m["at"])}
         with self.lock:
             op = self.until > time.time()
             return {"enabled": self.enabled(), "open": op, "until": hm(self.until) if op else "",

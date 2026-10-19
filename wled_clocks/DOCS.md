@@ -45,6 +45,8 @@ Zabezpieczenia:
 - Filtr wulgaryzmów i linków (prosty – łatwo go obejść), dlatego domyślnie **akceptacja ręczna**: każda wiadomość
   czeka w panelu na ✓.
 - Dziennik dodatku zapisuje każdą wiadomość.
+- Przy wiadomości widać IP nadawcy i przybliżone miejsce (ipwho.is, dostaje tylko adres IP) – o ile IP jest znane:
+  za tunelem bore nie jest, przy własnym porcie (i `--msg-proxy` za Cloudflare) tak.
 
 bore.pub to darmowy serwer bez gwarancji – gdy nie działa, dodatek co chwilę próbuje ponownie (błąd widać w panelu).
 Inny serwer bore: opcja `msg_tunnel`.
