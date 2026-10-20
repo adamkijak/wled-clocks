@@ -1,6 +1,6 @@
 # WLED zegary
 
-104 zegary i efekty dla panelu WLED 120x12, wysyłanych protokołem DDP. Po starcie add-onu w pasku bocznym
+112 zegary i efekty dla panelu WLED 120x12, wysyłanych protokołem DDP. Po starcie add-onu w pasku bocznym
 Home Assistant pojawia się **WLED zegary**: podgląd panelu na żywo, lista efektów z wyszukiwarką, cykl, pauza
 i wszystkie ustawienia znane z TUI.
 

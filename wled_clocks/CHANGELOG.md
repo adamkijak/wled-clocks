@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.15.0
+
+- Nowa kategoria „Oczy” – 8 efektów bez zegara: kot (pionowa źrenica, kocie przymykanie), czlowiek (białka,
+  tęczówki, powieki, brwi), bajka (kreskówkowe miny: radość, serduszka, zdziwienie, oczko), sowa (obraca głowę),
+  robot (świecące oczy z minami), sauron (ogniste oko), hal (HAL 9000), mrok (pary oczu w ciemności).
+- Ustawienie „kolor oczu” wspólne dla wszystkich oczu: w panelu WWW dowolny kolor z próbnika (widać od razu na
+  panelu) albo „naturalny”; w TUI gotowe kolory.
+
 ## 1.14.0
 
 - Ludzik: w ustawieniach efektu pole stanu – co robi teraz i co zrobi następnie (z częstością, długością i za ile

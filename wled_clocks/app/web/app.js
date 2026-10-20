@@ -262,6 +262,25 @@ function settingRow(s) {
     rows.set(s.name, { chars });
     return row;
   }
+  if (s.name === "kolor oczu") { // dowolny kolor albo naturalny (każde oczy swój)
+    const box = el("div", "wide pick");
+    const inp = el("input");
+    inp.type = "color";
+    inp.value = "#ff9900";
+    inp.setAttribute("aria-label", s.name);
+    let wait = 0;
+    inp.oninput = () => { // od razu na panelu, także w trakcie wybierania (najwyżej co 80 ms)
+      clearTimeout(wait);
+      wait = setTimeout(() => cmd("eyes", { col: inp.value }), 80);
+    };
+    const nat = el("button", "small", "naturalny");
+    nat.title = "Każde oczy w swoim kolorze";
+    nat.onclick = () => cmd("eyes", { col: "" });
+    box.append(inp, nat);
+    row.append(box);
+    rows.set(s.name, { color: inp, nat });
+    return row;
+  }
   if (s.kind) return pickRow(s, row); // suwak albo lista rozwijana
   const dec = el("button", "small", "◂");
   const inc = el("button", "small", "▸");
@@ -423,13 +442,18 @@ function renderSettings() {
   for (const s of state.settings) {
     const r = rows.get(s.name);
     if (!r) continue;
-    r.row.hidden = Boolean(s.fx) && !fx.has(s.fx);
+    r.row.hidden = Boolean(s.fx) && !s.fx.split(" ").some((n) => fx.has(n)); // ustawienie kilku efektów: „a b c”
     fxShown = fxShown || (Boolean(s.fx) && !r.row.hidden);
     if (r.input) {
       if (document.activeElement !== r.input) r.input.value = state.host;
       continue;
     }
     if (r.ctl) renderPick(r, s);
+    if (r.color) {
+      const own = s.value.startsWith("#");
+      if (own && document.activeElement !== r.color) r.color.value = s.value;
+      r.nat.classList.toggle("on", !own);
+    }
     if (r.chars) r.chars.forEach((b, i) => b.classList.toggle("on", i === s.index));
     // pasek „███░░░ 24” z TUI zamieniamy na wskaźnik + liczbę
     const m = /^([█░]+)\s*(.*)$/.exec(s.value);

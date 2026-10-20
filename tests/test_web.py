@@ -49,7 +49,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ludzik_first(self):
         self.assertEqual(wc.Engine.NAMES[:3], ["ludzik", "zegar", "napisz"])
-        self.assertEqual(len(wc.CLOCKS), 104)
+        self.assertEqual(len(wc.CLOCKS), 112)
 
     def test_ludzik_rides(self):
         old = dict(wc.LUDZIK["lvl"]), wc.LUDZIK["freq"]
@@ -414,6 +414,29 @@ class LudzikStatusTest(unittest.TestCase):
             _locate(ib, "192.168.1.5")
             _locate(ib, "zły")
         self.assertEqual(ib.geo, {"192.168.1.5": "sieć lokalna", "zły": "?"})
+
+
+class EyesTest(unittest.TestCase):
+    def test_eyes_color(self):
+        """Oczy: każdy rodzaj coś rysuje, w kolorze z ustawień; kolor sprawdzany, pusty = naturalny."""
+        e = wc.Engine(args(mode="kot"), {})
+        self.assertIn("kolor oczu", [n for n, *_ in e.shown_settings()])
+        wc.web_cmd(e, {"op": "eyes", "col": "#00ff00"})()
+        try:
+            for name in wc.CATEGORIES[[c[0] for c in wc.CATEGORIES].index("Oczy")][2].split():
+                fx, now, green = wc.CLOCKS[name](), wc.dtm.datetime.now().astimezone(), 0
+                for i in range(80):
+                    f = wc.Frame()
+                    fx.draw(f, now, i * 0.1, 0.1)
+                    green = max(green, sum(1 for row in f.px for c in row if c[1] > 60 and c[1] > 2 * max(c[0], c[2])))
+                self.assertGreater(green, 0, name)
+            for bad in ("zly", "#12345", 5):
+                with self.assertRaises(ValueError):
+                    wc.web_cmd(e, {"op": "eyes", "col": bad})
+            wc.web_cmd(e, {"op": "eyes", "col": ""})()
+            self.assertIsNone(wc.EYES["col"])
+        finally:
+            wc.EYES["col"] = None
 
 
 class WebTest(unittest.TestCase):

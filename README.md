@@ -1,6 +1,6 @@
 # wled-clocks
 
-104 kreatywne zegary i efekty dla panelu WLED 120x12 (DDP), tylko biblioteka standardowa Pythona 3.8+.
+112 kreatywne zegary i efekty dla panelu WLED 120x12 (DDP), tylko biblioteka standardowa Pythona 3.8+.
 Trzy sposoby sterowania, ta sama logika (`Engine`):
 
 - **TUI** w terminalu (jak dotąd),

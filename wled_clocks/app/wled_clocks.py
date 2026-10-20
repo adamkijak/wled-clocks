@@ -5858,6 +5858,417 @@ class Inbound(Clock):
             scroll_segs(f, [(addr, (80, 200, 255))], t, 30, 0, self.X0, gap=40)
 
 
+# ================================================================ oczy (bez zegara): kocie, ludzkie, bajkowe, sowa…
+EYES = {"col": None}  # kolor oczu z ustawień (tęczówka, świecenie); None = naturalny dla każdego efektu
+EYE_PRESETS = [None, (255, 0, 0), (255, 90, 0), (255, 170, 0), (255, 240, 0), (120, 255, 0), (0, 220, 60),
+               (0, 220, 200), (0, 150, 255), (40, 60, 255), (150, 40, 255), (255, 40, 160), (255, 255, 255)]
+
+
+def eye_hex(c):
+    return "#%02x%02x%02x" % tuple(int(v) for v in c) if c else ""
+
+
+def eye_rgb(h):
+    """"#rrggbb" -> (r, g, b); "" albo zły -> None (naturalny)."""
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) if re.fullmatch(r"#[0-9a-fA-F]{6}", h or "") else None
+
+
+def sd_ellipse(dx, dy, a, b):
+    """Przybliżona odległość ze znakiem od brzegu elipsy (ujemna w środku), w pikselach."""
+    return (math.hypot(dx / a, dy / b) - 1) * min(a, b)
+
+
+def sd_almond(dx, dy, a, b):
+    """Migdał (kształt oka): część wspólna dwóch kół – półszerokość a, półwysokość b."""
+    r = (a * a + b * b) / (2 * b)
+    return max(math.hypot(dx, dy - (r - b)), math.hypot(dx, dy + (r - b))) - r
+
+
+def sd_rbox(dx, dy, hw, hh, r):
+    """Prostokąt z zaokrąglonymi rogami."""
+    r = min(r, hw, hh)
+    qx, qy = abs(dx) - hw + r, abs(dy) - hh + r
+    return math.hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - r
+
+
+def cover(sd):
+    """Ile piksela zakrywa kształt (miękki brzeg zamiast schodków)."""
+    return clamp(0.5 - sd)
+
+
+class Eyes(Clock):
+    """Wspólne dla oczu: rozglądanie się (szybkie skoki wzroku), mruganie, kolor z ustawień."""
+    COL = (255, 255, 255)
+    CY = 6.0  # środek oka (środki pikseli: 0,5–11,5)
+
+    def __init__(self):
+        self.g, self.aim, self.look_at, self.blink_at, self.b0 = [0.0, 0.0], (0.0, 0.0), None, None, -9.0
+
+    def col(self):
+        return EYES["col"] or self.COL
+
+    def update(self, t, dt, wide=1.0):
+        if self.look_at is None:
+            self.look_at, self.blink_at = t, t + random.uniform(1, 3)
+        if t >= self.look_at:  # nowy punkt: zwykle gdzieś w bok, czasem prosto
+            self.aim = (0.0, 0.0) if random.random() < 0.3 else (random.uniform(-1, 1) * wide,
+                                                                  random.uniform(-0.7, 0.7))
+            self.look_at = t + random.uniform(0.6, 3.2)
+        k = 1 - math.exp(-dt * 16)
+        self.g = [self.g[0] + (self.aim[0] - self.g[0]) * k, self.g[1] + (self.aim[1] - self.g[1]) * k]
+        if t >= self.blink_at:
+            self.b0 = t
+            self.blink_at = t + (0.35 if random.random() < 0.2 else random.uniform(2, 6))  # czasem dwa razy
+
+    def lid(self, t, dur=0.2):
+        """0 = otwarte, 1 = zamknięte."""
+        p = (t - self.b0) / dur
+        return math.sin(math.pi * p) if 0 <= p < 1 else 0.0
+
+    @staticmethod
+    def paint(f, x0, x1, fn):
+        """fn(x, y) -> kolor albo None dla środków pikseli w kolumnach x0..x1."""
+        for x in range(max(0, int(x0)), min(W, int(x1) + 1)):
+            for y in range(H):
+                c = fn(x + 0.5, y + 0.5)
+                if c is not None:
+                    f.set(x, y, c)
+
+
+@reg("kot")
+class CatEyes(Eyes):
+    """Kocie oczy: bursztynowe tęczówki z pionową źrenicą, która rozszerza się i zwęża; mruga, czasem
+    powoli przymyka oczy po kociemu. Kolor oczu – w ustawieniach efektu."""
+    COL = (255, 160, 0)
+
+    def __init__(self):
+        super().__init__()
+        self.pw, self.pw_aim, self.pw_at, self.slow = 1.0, 1.0, 0.0, (-9.0, 0.0)
+
+    def draw(self, f, now, t, dt):
+        self.update(t, dt)
+        if t >= self.pw_at:  # źrenica: zwykle wąska szparka, czasem szeroka (zaciekawienie)
+            self.pw_aim = random.choice((1.0, 1.1, 1.6, 3.4))
+            self.pw_at = t + random.uniform(2, 7)
+            if random.random() < 0.15:
+                self.slow = (t, random.uniform(1.2, 2.2))
+        self.pw += (self.pw_aim - self.pw) * (1 - math.exp(-dt * 3))
+        s0, sd_ = self.slow
+        half = 0.55 * math.sin(math.pi * clamp((t - s0) / sd_)) if t - s0 < sd_ else 0  # powolne przymknięcie
+        c = max(self.lid(t, 0.24), half)
+        col, a, b = self.col(), 13.0, 5.6 * (1 - c)
+        lash = visible(mul(col, 0.12))
+        for cx in (W / 2 - 22, W / 2 + 22):
+            ox, oy = cx + self.g[0] * 6, self.CY + self.g[1] * 1.2
+
+            def px(x, y, cx=cx, ox=ox, oy=oy):
+                dx, dy = x - cx, y - self.CY
+                if b < 0.7:  # zamknięte – kreska powieki
+                    return lash if abs(dy) < 0.5 and abs(dx) < a * 0.95 else None
+                k = cover(sd_almond(dx, dy, a, b))
+                if not k:
+                    return None
+                r = math.hypot((x - ox) / a, (y - oy) / 5.6)
+                streak = 0.85 + 0.15 * noise2(math.atan2(y - oy, x - ox) * 4, r * 3)  # prążki tęczówki
+                iris = mul(col, (0.35 + 0.65 * clamp(1.1 - r)) * streak)
+                p = cover(sd_ellipse(x - ox, y - oy, self.pw, 5.4))
+                c_ = lerp(iris, (0, 0, 0), p)
+                if abs(x - (ox + self.pw + 1.2)) < 0.5 and abs(y - (oy - 2.5)) < 0.5:
+                    c_ = (255, 255, 255)  # błysk
+                return mul(c_, k)
+            self.paint(f, cx - a - 1, cx + a + 1, px)
+
+
+@reg("czlowiek")
+class HumanEyes(Eyes):
+    """Ludzkie oczy: białka, tęczówka z ciemniejszym brzegiem i źrenicą, powieki z rzęsami, brwi, które czasem
+    unoszą się ze zdziwienia. Rozgląda się i mruga. Kolor tęczówek – w ustawieniach efektu."""
+    COL = (40, 110, 255)
+    CY = 6.8
+
+    def __init__(self):
+        super().__init__()
+        self.brow, self.brow_aim, self.brow_at = 0.0, 0.0, 0.0
+
+    def draw(self, f, now, t, dt):
+        self.update(t, dt)
+        if t >= self.brow_at:
+            self.brow_aim = random.choice((0, 0, 0, 1, -0.6))  # 1 = zdziwienie, -0,6 = marszczy
+            self.brow_at = t + random.uniform(1.5, 5)
+        self.brow += (self.brow_aim - self.brow) * (1 - math.exp(-dt * 8))
+        c = self.lid(t)
+        col, a, b = self.col(), 12.0, 4.4
+        white, lash, brow = visible((105, 100, 95)), visible((45, 22, 8)), visible((70, 38, 14))
+        pr = 1.5 + 0.4 * math.sin(t * 0.7)  # źrenica oddycha
+        for side, cx in ((-1, W / 2 - 20), (1, W / 2 + 20)):
+            ox, oy = cx + self.g[0] * 6.5, self.CY + self.g[1] * 1.3
+
+            def px(x, y, cx=cx, ox=ox, oy=oy, side=side):
+                dx, dy = x - cx, y - self.CY
+                u = 1 - (dx / a) ** 2
+                by = 1.6 - self.brow * 1.2 + (dx * side / a) * self.brow * -0.9  # brew: łuk nad okiem
+                if abs(dx) < a + 1 and abs(y - (by - u * 1.0 + 0.5)) < 0.55:
+                    return brow
+                lid_y = self.CY + b * (-1 + 1.75 * c) * max(u, 0)  # krawędź górnej powieki
+                if abs(y - lid_y) < 0.55 and u > 0.02:
+                    return lash
+                k = cover(sd_almond(dx, dy, a, b))
+                if not k or y < lid_y:
+                    return None
+                cc = mul(white, 1 - 0.55 * abs(dx / a) ** 3)
+                r = math.hypot(x - ox, y - oy)
+                if r < 4.2:
+                    ring = 0.45 if r > 3.3 else 0.8 + 0.2 * noise2(math.atan2(y - oy, x - ox) * 5, r * 2)
+                    cc = lerp(cc, mul(col, ring), cover(r - 4.0))
+                    cc = lerp(cc, (0, 0, 0), cover(r - pr))
+                    if math.hypot(x - (ox + 1.5), y - (oy - 1.5)) < 0.8:
+                        cc = (255, 255, 255)
+                return mul(cc, k)
+            self.paint(f, cx - a - 2, cx + a + 2, px)
+
+
+@reg("bajka")
+class CartoonEyes(Eyes):
+    """Bajkowe oczy jak z kreskówki: duże, z wielkimi tęczówkami i błyskami. Robią miny: radość ^^, zakochanie
+    (serduszka), zdziwienie, mrugnięcie. Kolor tęczówek – w ustawieniach efektu."""
+    COL = (30, 190, 255)
+    MOODS = ("zwykłe", "zwykłe", "radość", "serca", "zdziwienie", "oczko")
+
+    def __init__(self):
+        super().__init__()
+        self.mood, self.mood_at = "zwykłe", 0.0
+
+    def draw(self, f, now, t, dt):
+        self.update(t, dt, 0.8)
+        if t >= self.mood_at:
+            self.mood = random.choice(self.MOODS) if self.mood == "zwykłe" else "zwykłe"
+            self.mood_at = t + (random.uniform(4, 9) if self.mood == "zwykłe" else random.uniform(1.8, 3))
+        c = self.lid(t, 0.16) if self.mood != "radość" else 0
+        col, a, b = self.col(), 8.0, 5.6
+        white = visible((160, 160, 165))
+        for side, cx in ((-1, W / 2 - 11), (1, W / 2 + 11)):
+            mood = "radość" if self.mood == "oczko" and side > 0 else self.mood
+            bb = b * (1 - c)
+            ox, oy = cx + self.g[0] * 3, self.CY + self.g[1] * 1.0
+
+            def px(x, y, cx=cx, ox=ox, oy=oy, mood=mood, bb=bb):
+                dx, dy = x - cx, y - self.CY
+                if mood == "radość":  # ^ ^ – łuk
+                    return col if abs(math.hypot(dx / 1.3, dy - 3.5) - 5.0) < 0.6 and dy < 2.5 else None
+                if bb < 0.8:
+                    return col if abs(dy) < 0.5 and abs(dx) < a else None
+                k = cover(sd_ellipse(dx, dy, a, bb))
+                if not k:
+                    return None
+                if mood == "serca":  # serduszko zamiast tęczówki
+                    hx, hy = (x - cx) / 4.6, -(y - self.CY - 0.6) / 4.6
+                    heart = (hx * hx + hy * hy - 0.6) ** 3 - hx * hx * hy ** 3
+                    return mul((255, 30, 110) if heart < 0 else white, k)
+                small = mood == "zdziwienie"
+                ia, ib = (2.6, 3.0) if small else (4.6, 5.0)
+                cc = lerp(white, mul(col, 0.55 + 0.45 * clamp((oy + ib - y) / (2 * ib))),
+                          cover(sd_ellipse(x - ox, y - oy, ia, ib)))
+                cc = lerp(cc, (0, 0, 0), cover(sd_ellipse(x - ox, y - oy, ia * 0.55, ib * 0.6)))
+                if math.hypot(x - (ox - 1.6), y - (oy - 2.0)) < 1.2 or math.hypot(x - (ox + 1.6), y - (oy + 1.8)) < 0.6:
+                    cc = (255, 255, 255)
+                return mul(cc, k)
+            self.paint(f, cx - a - 2, cx + a + 2, px)
+
+
+@reg("sowa")
+class OwlEyes(Eyes):
+    """Sowa: dwa wielkie okrągłe oczy obok siebie, dziób i pióra. Sowa nie rusza oczami – obraca głowę (cała twarz
+    przesuwa się po panelu), mruga powoli, czasem jednym okiem. Kolor tęczówek – w ustawieniach efektu."""
+    COL = (255, 150, 0)
+
+    def __init__(self):
+        super().__init__()
+        self.hx, self.h_aim, self.h_at, self.wink = 0.0, 0.0, 0.0, 0
+
+    def draw(self, f, now, t, dt):
+        self.update(t, dt)
+        if t >= self.h_at:
+            self.h_aim = random.choice((0, 0, -1, 1)) * random.uniform(0.3, 1) * (W / 2 - 22)
+            self.h_at = t + random.uniform(3, 8)
+        self.hx += (self.h_aim - self.hx) * (1 - math.exp(-dt * 2.5))
+        if t - self.b0 < 0.01:
+            self.wink = random.choice((0, 0, 0, -1, 1))
+        c = self.lid(t, 0.45)
+        col, r = self.col(), 5.6
+        feather, rim, beak = visible((48, 30, 14)), visible((70, 40, 12)), visible((150, 110, 40))
+        mid = W / 2 + self.hx
+        pr = 3.0 + 0.4 * math.sin(t * 0.5)
+
+        def px(x, y):
+            dx, dy = x - mid, y - self.CY
+            if 0 <= dy - 2.6 < 3 and abs(dx) < (5.6 - (dy - 2.6)) * 0.45:  # dziób
+                return beak
+            for side in (-1, 1):
+                ex = dx - side * 6.4
+                d = math.hypot(ex, dy)
+                if d < r + 0.6:
+                    cc = (side == self.wink or not self.wink) and c
+                    if y < self.CY - r + 2 * r * cc:  # powieka z góry
+                        return feather
+                    if d > r - 0.6:
+                        return rim
+                    k = clamp(1.05 - d / r) * 0.6 + 0.4
+                    cc_ = lerp(mul(col, k), (0, 0, 0), cover(math.hypot(ex - self.g[0] * 0.6, dy - self.g[1] * 0.5) - pr))
+                    if math.hypot(ex + 1.3, dy + 1.6) < 0.8:
+                        cc_ = (255, 255, 255)
+                    return cc_
+            ring = sd_ellipse(dx, dy, 17, 6.6)
+            if ring < 0 and hash1(int(x) * 31 + int(y) * 7) < 0.55:  # pióra wokół oczu
+                return mul(feather, 0.6 + 0.4 * hash1(int(x) * 13 + int(y)))
+            return None
+        self.paint(f, mid - 18, mid + 18, px)
+
+
+@reg("robot")
+class RobotEyes(Eyes):
+    """Oczy robota: świecące zaokrąglone prostokąty jak na ekranie. Robią miny: zadowolenie, złość, smutek,
+    senność, zdziwienie, rozglądają się całymi oczami. Kolor świecenia – w ustawieniach efektu."""
+    COL = (0, 170, 255)
+    MOODS = ("zwykłe", "zwykłe", "radość", "złość", "smutek", "senność", "zdziwienie")
+
+    def __init__(self):
+        super().__init__()
+        self.mood, self.mood_at, self.m = "zwykłe", 0.0, {}
+
+    def draw(self, f, now, t, dt):
+        self.update(t, dt)
+        if t >= self.mood_at:
+            self.mood = random.choice(self.MOODS) if self.mood == "zwykłe" else "zwykłe"
+            self.mood_at = t + (random.uniform(3, 7) if self.mood == "zwykłe" else random.uniform(1.5, 3))
+        want = {"hw": 8.0 if self.mood == "zdziwienie" else 7.0, "hh": 5.5 if self.mood != "senność" else 2.0,
+                "cut": {"radość": 1, "złość": 2, "smutek": 3}.get(self.mood, 0)}
+        for k, v in want.items():  # płynne przejścia między minami
+            self.m[k] = v if k == "cut" else self.m.get(k, v) + (v - self.m.get(k, v)) * (1 - math.exp(-dt * 10))
+        c = self.lid(t, 0.14)
+        col = self.col()
+        hw, hh = self.m["hw"], self.m["hh"] * (1 - c)
+        sx, sy = self.g[0] * 12, self.g[1] * 1.0
+        for side, cx in ((-1, W / 2 - 16 + sx), (1, W / 2 + 16 + sx)):
+            cy = self.CY + sy + (5.5 - self.m["hh"]) * 0.6 * (self.mood == "senność")
+
+            def px(x, y, cx=cx, cy=cy, side=side):
+                dx, dy = x - cx, y - cy
+                d = sd_rbox(dx, dy, hw, max(hh, 0.5), 3)
+                cut = self.m["cut"]
+                if cut == 1:  # radość: od dołu wycięty łuk
+                    d = max(d, -(math.hypot(dx * 0.7, dy - 6.5) - 5.5))
+                elif cut in (2, 3):  # złość: skos do środka, smutek: na zewnątrz
+                    s = side if cut == 2 else -side
+                    d = max(d, -(dy + 2.0 + dx * s * 0.45))
+                k = cover(d)
+                if not k:
+                    return None
+                glow = 0.75 + 0.25 * clamp(1 - math.hypot(dx / hw, dy / max(hh, 1)))
+                scan = 0.85 if int(y + t * 4) % 4 == 0 else 1.0  # delikatne linie ekranu
+                return mul(col, k * glow * scan)
+            self.paint(f, cx - hw - 2, cx + hw + 2, px)
+
+
+@reg("sauron")
+class SauronEye(Eyes):
+    """Oko Saurona: jedno wielkie ogniste oko z czarną pionową źrenicą, płomienie wokół, powoli wodzi wzrokiem
+    po panelu. Kolor ognia – w ustawieniach efektu."""
+    COL = (255, 90, 0)
+
+    def draw(self, f, now, t, dt):
+        self.update(t, dt)
+        col = self.col()
+        hot = lerp(col, (255, 240, 170), 0.75)
+        a, b, cx = min(42.0, W / 2 - 6), 5.8, W / 2
+        ox = cx + self.g[0] * a * 0.55
+        pw = 1.3 + 0.5 * math.sin(t * 1.3)
+
+        def px(x, y):
+            dx, dy = x - cx, y - self.CY
+            d = sd_almond(dx, dy, a, b)
+            n = noise2(x * 0.18 - t * 1.2 * (1 if dx > 0 else -1), y * 0.45 + t * 0.7)
+            if d > 0:  # płomienie poza okiem, gasną z odległością
+                v = clamp((1 - d / 4.5) * (0.4 + 0.8 * n) - 0.25)
+                return mul(col, v * 0.8) if v > 0.02 else None
+            e = math.hypot((x - ox) / 9, dy / 6)  # najjaśniej przy źrenicy
+            v = clamp(0.35 + 0.75 * n * (1 - clamp(-d / b) * 0.3) + 0.5 * clamp(1 - e))
+            cc = lerp(mul(col, 0.35 + 0.65 * v), hot, clamp(v - 0.65) * 2.5)
+            return lerp(cc, (0, 0, 0), cover(sd_ellipse(x - ox, dy, pw, 6.2)))
+        self.paint(f, 0, W - 1, px)
+
+
+@reg("hal")
+class Hal(Eyes):
+    """Oko HAL 9000: czerwony obiektyw w czarnej szybie i metalowej oprawie, powoli pulsuje. Kolor – w ustawieniach
+    efektu."""
+    COL = (255, 0, 0)
+
+    def draw(self, f, now, t, dt):
+        col = self.col()
+        pulse = 0.8 + 0.2 * math.sin(t * 1.4)
+        chrome, plate = visible((80, 80, 88)), visible((16, 16, 18))
+        cx = W / 2
+
+        def px(x, y):
+            dx, dy = x - cx, y - self.CY
+            r = math.hypot(dx, dy)
+            if r > 5.9:
+                return plate if abs(dx) < 11 else None  # płyta panelu
+            if r > 5.0:
+                return lerp(chrome, (190, 190, 200), clamp(-dy / 5) * 0.8)  # oprawa, jaśniej u góry
+            k = clamp(1 - r / 4.6) ** 1.6 * pulse
+            cc = mul(col, k)
+            if r < 1.0:
+                cc = lerp(cc, (255, 230, 170), (1 - r) * pulse)
+            if math.hypot(dx + 2.2, dy + 2.6) < 0.7:
+                cc = (70, 70, 80)  # odbicie w szybie
+            return cc
+        self.paint(f, cx - 12, cx + 12, px)
+
+
+@reg("mrok")
+class DarkEyes(Eyes):
+    """Oczy w ciemności: pary świecących oczu pojawiają się w mroku, mrugają, rozglądają się i znikają – jak
+    w lesie nocą. Kolor – w ustawieniach efektu (naturalny: różne zwierzęta, różne kolory)."""
+    COL = (255, 220, 60)
+    KINDS = ((255, 220, 60), (120, 255, 60), (255, 60, 20), (255, 150, 0), (180, 230, 255))
+
+    def __init__(self):
+        super().__init__()
+        self.pairs, self.spawn = [], 0.0
+
+    def draw(self, f, now, t, dt):
+        if t >= self.spawn and len(self.pairs) < 7:
+            big = random.random() < 0.35
+            gap = random.uniform(7, 10) if big else random.uniform(4.5, 6.5)
+            x = random.uniform(3, W - 4 - gap)
+            if all(abs(x - p["x"]) > 12 for p in self.pairs):
+                self.pairs.append({"x": x, "y": random.uniform(2.5, 9.5), "gap": gap, "big": big, "t0": t,
+                                   "life": random.uniform(3, 9), "c": random.choice(self.KINDS),
+                                   "blink": t + random.uniform(0.8, 2.5), "dx": 0.0, "aim": 0.0})
+            self.spawn = t + random.uniform(0.2, 1.0)
+        for p in list(self.pairs):
+            age = t - p["t0"]
+            if age > p["life"]:
+                self.pairs.remove(p)
+                continue
+            fade = clamp(age / 0.6) * clamp((p["life"] - age) / 0.6)
+            if t >= p["blink"]:
+                p["b0"], p["blink"] = t, t + random.uniform(1.5, 4)
+                p["aim"] = random.uniform(-1.5, 1.5)
+            p["dx"] += (p["aim"] - p["dx"]) * (1 - math.exp(-dt * 4))
+            bp = (t - p.get("b0", -9)) / 0.18
+            open_ = 1 - (math.sin(math.pi * bp) if 0 <= bp < 1 else 0)
+            col = mul(EYES["col"] or p["c"], fade)
+            a, b = (2.4, 1.3) if p["big"] else (1.6, 0.95)
+            for ex in (p["x"] + p["dx"], p["x"] + p["dx"] + p["gap"]):
+                for x in range(int(ex - a - 1), int(ex + a + 2)):
+                    for y in range(int(p["y"] - 2), int(p["y"] + 3)):
+                        k = cover(sd_almond(x + 0.5 - ex, y + 0.5 - p["y"], a, max(b * open_, 0.05)))
+                        if k:
+                            f.add(x, y, mul(col, k))
+
+
 CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lista, numery i cykl
     ("Na start", "⭐", "ludzik zegar napisz"),
     ("Tarcze i wyświetlacze", "🕰", "analogowy nixie segmenty klapki licznik wahadlo klepsydra maszyna pismo kreskowy "
@@ -5871,6 +6282,7 @@ CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lis
     ("Gry", "🎮", "pong waz arkanoid najezdzcy pacman dino flappy wyscig labirynt tetris"),
     ("Abstrakcje i symulacje", "🌀", "roj matrix skaner tecza glitch zycie mrowka plazma kalejdoskop wir dna oscyloskop "
                                     "equalizer ekg kule kregi piasek lawa dym"),
+    ("Oczy", "👀", "kot czlowiek bajka sowa robot sauron hal mrok"),
     ("Narzędzia", "🔧", "kolory"),
 ]
 _ALL = {"licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "niebo": Sky, "doba": DayRibbon,
@@ -5953,7 +6365,7 @@ class Engine:
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
                   "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik",
-                  "ludzik strona": "ludzik", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
+                  "ludzik strona": "ludzik", "kolor oczu": "kot czlowiek bajka sowa robot sauron hal mrok", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
                   "diody: zielony": "kolory", "diody: niebieski": "kolory"}
 
     def __init__(self, a, cfg):
@@ -6096,6 +6508,10 @@ class Engine:
         def s_lchar(d):
             LUDZIK["char"] = (LUDZIK["char"] + d) % len(LUDZIK_CHARS)
 
+        def s_eyecol(d):
+            i = EYE_PRESETS.index(EYES["col"]) if EYES["col"] in EYE_PRESETS else 0
+            EYES["col"] = EYE_PRESETS[(i + d) % len(EYE_PRESETS)]
+
         def s_lside(d):
             LUDZIK["side"] = (LUDZIK["side"] + d) % len(LUDZIK_SIDES)
 
@@ -6198,6 +6614,8 @@ class Engine:
             ("ludzik co ile", lambda: LUDZIK_FREQ[LUDZIK["freq"]][0], s_lfreq, "przerwy między zajęciami"),
             ("ludzik postać", lambda: LUDZIK_CHARS[LUDZIK["char"]][0], s_lchar, "wygląd ludzika"),
             ("ludzik przestawia", lambda: (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]], s_lhow, "jak zmienia godzinę"),
+            ("kolor oczu", lambda: eye_hex(EYES["col"]) or "naturalny", s_eyecol,
+             "tęczówki / świecenie; w panelu WWW dowolny kolor, tu gotowe"),
             ("ludzik strona", lambda: LUDZIK_SIDES[LUDZIK["side"]], s_lside,
              "gdzie spaceruje: po obu stronach albo głównie po jednej (na drugą tylko na chwilę)"),
             ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
@@ -6247,7 +6665,7 @@ class Engine:
         """Ustawienia wspólne, a pod nimi tylko te od efektu na panelu."""
         fx = self.setting_fx()
         return [st for st in self.settings if self.SETTING_FX.get(st[0]) is None] + \
-               [st for st in self.settings if self.SETTING_FX.get(st[0]) in fx]
+               [st for st in self.settings if fx & set((self.SETTING_FX.get(st[0]) or "").split())]
 
     def heavy(self, name):
         pk = self.peak.get(name)
@@ -6329,6 +6747,7 @@ class Engine:
                "mirror": PANEL["mirror"], "ludzik_lvl": LUDZIK["lvl"], "ludzik_len": LUDZIK["len"],
                "ludzik_freq": LUDZIK["freq"], "ludzik_postac": LUDZIK_CHARS[LUDZIK["char"]][0],
                "ludzik_zmiana": (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]], "ludzik_strona": LUDZIK_SIDES[LUDZIK["side"]],
+               "oczy_kolor": eye_hex(EYES["col"]),
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
@@ -7125,6 +7544,11 @@ def web_cmd(e, c):
                 raise ValueError(f"zła wartość ustawienia {name!r}")
             return lambda: e.pick(name, i)
         return lambda: e.setting(name, d)
+    if op == "eyes":
+        h = str(c.get("col", ""))
+        if h and not eye_rgb(h):
+            raise ValueError("kolor oczu: #rrggbb albo pusty (naturalny)")
+        return lambda: EYES.update(col=eye_rgb(h))
     if op == "host":
         host = str(c.get("host", "")).strip()
         if len(host) > 64 or not re.fullmatch(r"[A-Za-z0-9.:\-\[\]]*", host):
@@ -7984,6 +8408,7 @@ def main():
     LUDZIK["char"] = next((i for i, (n, _) in enumerate(LUDZIK_CHARS) if n == cfg.get("ludzik_postac")), 0)
     hows = ["losowo"] + LUDZIK_HOWS
     LUDZIK["how"] = hows.index(cfg["ludzik_zmiana"]) if cfg.get("ludzik_zmiana") in hows else 0
+    EYES["col"] = eye_rgb(cfg.get("oczy_kolor") or "")
     LUDZIK["side"] = LUDZIK_SIDES.index(cfg["ludzik_strona"]) if cfg.get("ludzik_strona") in LUDZIK_SIDES else 0
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
