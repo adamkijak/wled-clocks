@@ -49,7 +49,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ludzik_first(self):
         self.assertEqual(wc.Engine.NAMES[:3], ["ludzik", "zegar", "napisz"])
-        self.assertEqual(len(wc.CLOCKS), 112)
+        self.assertEqual(len(wc.CLOCKS), 143)
 
     def test_ludzik_rides(self):
         old = dict(wc.LUDZIK["lvl"]), wc.LUDZIK["freq"]

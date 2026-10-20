@@ -5858,6 +5858,1404 @@ class Inbound(Clock):
             scroll_segs(f, [(addr, (80, 200, 255))], t, 30, 0, self.X0, gap=40)
 
 
+# ================================================================ postacie i zwierzęta (bez zegara)
+CAT = {
+    "idzie1": ["............O.O.", "O...........OOO.", "O...........OEON", ".O.SOSOSOSOOOOO.", "..OOOOOOOOOOOO..",
+               "..OOOOOOOOOOO...", "..O.O.....O.O...", ".O...O...O...O.."],
+    "idzie2": ["............O.O.", ".O..........OOO.", "O...........OEON", "O..SOSOSOSOOOOO.", ".OOOOOOOOOOOOO..",
+               "..OOOOOOOOOOO...", "...O.O...O.O....", "...O.O...O.O...."],
+    "skok": ["............O.O.", "............OOO.", "OO..........OEON", "..OSOSOSOSOOOOO.", "..OOOOOOOOOOOO..",
+             ".OOOOOOOOOOOO...", "O..........OO...", "................"],
+    "siedzi": ["......O.O.", "......OOO.", "......OEON", ".....OOOO.", "....SOOOO.", "O..OSOOOO.",
+               "O.OOOOOOO.", ".OOOOO.OO."],
+    "liże": ["..........", "......O.O.", "......OOO.", "......OEOP", ".....OOOP.", "O..SOOOO..",
+             "O.OOOOOOO.", ".OOOOO.OO."],
+    "śpi": [".........O.O.", "..SOSOSOOOOO.", ".OOOOOOOOCOON", "OOOOOOOOOOOOO"],
+}
+
+
+@reg("kotek")
+class Kitten(Clock):
+    """Kotek: chodzi po panelu, goni czerwoną kropkę lasera i rzuca się na nią, siada, myje się, zasypia (Zzz)."""
+    PAL = {"O": (230, 120, 25), "S": (150, 60, 10), "E": (60, 255, 60), "N": (255, 110, 150), "P": (255, 110, 150),
+           "C": (90, 40, 10)}
+
+    def __init__(self):
+        self.x, self.dirr, self.state, self.until, self.goal = W / 3, 1, "idzie", 0.0, W / 2
+        self.dot, self.jump = None, None
+
+    def pick(self, t):
+        self.state = random.choice(("idzie", "laser", "laser", "siedzi", "liże", "śpi"))
+        self.until = t + {"idzie": 5, "laser": 10, "siedzi": 3, "liże": 4, "śpi": 8}[self.state] * random.uniform(0.8, 1.4)
+        self.goal = random.uniform(5, W - 20)
+        if self.state == "laser":
+            self.dot = [random.uniform(5, W - 5), random.uniform(4, 10), t]
+
+    def draw(self, f, now, t, dt):
+        if t >= self.until and not self.jump:
+            self.pick(t)
+        pal = {k: visible(v) for k, v in self.PAL.items()}
+        for x in range(W):
+            f.set(x, 11, visible((20, 14, 30)))  # podłoga
+        pose = "siedzi"
+        if self.jump:  # skok na kropkę: łuk
+            x0, x1, t0 = self.jump
+            p = (t - t0) / 0.6
+            if p >= 1:
+                self.x, self.jump = x1, None
+                if self.dot:
+                    self.dot = [random.uniform(5, W - 5), random.uniform(4, 10), t]  # kropka ucieka
+            else:
+                self.x = x0 + (x1 - x0) * p
+                sprite(f, CAT["skok"], self.x, 3 - 4 * math.sin(math.pi * p), pal, self.dirr < 0)
+                self.draw_dot(f, t)
+                return
+        if self.state == "laser" and self.dot:
+            if t - self.dot[2] > random.uniform(1.2, 2.5) and random.random() < 0.02:
+                self.dot = [clamp(self.dot[0] + random.uniform(-40, 40), 5, W - 5), random.uniform(4, 10), t]
+            target = self.dot[0] - (12 if self.dot[0] > self.x + 6 else -2)
+            if abs(target - self.x) > 14:
+                self.walk(f, t, dt, target, 34, pal)
+            else:
+                self.jump = (self.x, clamp(self.dot[0] - 8, -2, W - 14), t)
+                self.dirr = 1 if self.dot[0] > self.x + 6 else -1
+            self.draw_dot(f, t)
+            return
+        self.dot = None
+        if self.state == "idzie":
+            if abs(self.goal - self.x) > 1:
+                self.walk(f, t, dt, self.goal, 9, pal)
+                return
+            pose = "siedzi"
+        elif self.state in ("liże", "śpi"):
+            pose = "liże" if self.state == "liże" and int(t * 3) % 2 else self.state if self.state == "śpi" else "siedzi"
+        rows = CAT[pose]
+        w = len(rows[0])
+        sx = self.x + (16 - w if self.dirr > 0 else 0)
+        sprite(f, rows, sx, 11 - len(rows), pal, self.dirr < 0)
+        if pose == "śpi":  # Zzz
+            for k in range(3):
+                ph = (t * 0.5 + k / 3) % 1
+                zx = sx + (w if self.dirr > 0 else 0) + ph * 8 * self.dirr
+                f.text("Z", zx, 4 - ph * 6 - 2, mul((150, 150, 255), 1 - ph), SMALL)
+
+    def walk(self, f, t, dt, goal, v, pal):
+        self.dirr = 1 if goal > self.x else -1
+        self.x += min(abs(goal - self.x), v * dt) * self.dirr
+        sprite(f, CAT["idzie1" if int(t * v / 3) % 2 else "idzie2"], self.x, 3, pal, self.dirr < 0)
+
+    def draw_dot(self, f, t):
+        x, y, _ = self.dot
+        f.set(x, y, (255, 0, 0))
+        for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            f.add(x + ox, y + oy, (60, 0, 0))
+
+
+DOG = {
+    "biegnie1": ["...........OO...", "..........OOEOO.", "O.........DOOOOK", ".O........D.....", "..OOOOOOOOOO....",
+                 "..OOOOOOOOOO....", "..O.O.....O.O...", ".O...O...O...O.."],
+    "biegnie2": ["...........OO...", "..........OOEOO.", "..........DOOOOK", "OO........D.....", "..OOOOOOOOOO....",
+                 "..OOOOOOOOOO....", "...O.O...O.O....", "...O.O...O.O...."],
+    "siedzi": [".....OO...", "....OOEOO.", "....DOOOOK", "....DOO...", "...OOOO...", "..OOOOO...", ".OOOOOO...",
+               "OOO.OOO..."],
+    "kopie1": ["................", "................", "O...............", ".OOOOOOOOOO.....", "..OOOOOOOOOOO...",
+               "..OOOOOOOOOOEOO.", "..O.O.....DOOOOK", "..O.O.....O.O..."],
+    "kopie2": ["................", "................", ".O..............", ".OOOOOOOOOO.....", "..OOOOOOOOOOO...",
+               "..OOOOOOOOOOEOO.", "..O.O.....DOOOOK", "..O.O......O.O.."],
+}
+
+
+@reg("pies")
+class Dog(Clock):
+    """Pies: goni rzuconą piłkę, przynosi ją w pysku, siada i merda ogonem, czasem kopie dołek, aż leci ziemia."""
+    PAL = {"O": (170, 100, 40), "D": (90, 50, 20), "E": (20, 20, 20), "K": (10, 10, 10)}
+
+    def __init__(self):
+        self.x, self.dirr, self.state, self.t0 = W / 2, 1, "siedzi", 0.0
+        self.ball, self.dirt = None, []
+
+    def draw(self, f, now, t, dt):
+        pal = {k: visible(v) for k, v in self.PAL.items()}
+        pal["E"], pal["K"] = (230, 230, 230), (60, 30, 30)
+        for x in range(W):
+            f.set(x, 11, visible((20, 60, 10)))  # trawa
+        age = t - self.t0
+        if self.state == "siedzi" and age > 3:
+            self.state, self.t0 = random.choice(("rzut", "rzut", "kopie")), t
+            if self.state == "rzut":  # piłka wpada z boku łukiem i odbija się
+                side = random.choice((-1, 1))
+                self.ball = [W / 2 - side * 70, 2.0, side * random.uniform(30, 45), -6.0]
+        if self.state == "rzut":
+            b = self.ball
+            b[3] += 30 * dt
+            b[0] += b[2] * dt
+            b[1] += b[3] * dt
+            if b[1] > 9.5:
+                b[1], b[3], b[2] = 9.5, -abs(b[3]) * 0.55, b[2] * 0.8
+            if abs(b[2]) < 3 and abs(b[3]) < 3:
+                b[2] = 0
+            b[0] = clamp(b[0], 1, W - 2)
+            mouth = self.x + (15 if self.dirr > 0 else 0)
+            if abs(b[0] - mouth) > 2:
+                goal = b[0] - (15 if b[0] > self.x + 7 else 0)
+                self.run(f, t, dt, goal, 30, pal)
+            else:
+                self.state, self.goal = "niesie", random.uniform(20, W - 36)
+            disc(f, b[0], b[1], 1.3, (230, 255, 0))
+            return
+        if self.state == "niesie":
+            if abs(self.goal - self.x) > 1:
+                self.run(f, t, dt, self.goal, 18, pal)
+                disc(f, self.x + (16 if self.dirr > 0 else -1), 5.5, 1.3, (230, 255, 0))
+                return
+            self.state, self.t0 = "siedzi", t
+        if self.state == "kopie":
+            if age > 4:
+                self.state, self.t0 = "siedzi", t
+            pose = "kopie1" if int(t * 8) % 2 else "kopie2"
+            sprite(f, DOG[pose], self.x, 3, pal, self.dirr < 0)
+            if random.random() < 0.6:
+                bx = self.x + (2 if self.dirr > 0 else 13)
+                self.dirt.append([bx, 10, -self.dirr * random.uniform(8, 20), -random.uniform(6, 12)])
+        else:
+            sx = self.x + (6 if self.dirr > 0 else 0)
+            sprite(f, DOG["siedzi"], sx, 3, pal, self.dirr < 0)
+            wag = int(t * 10) % 2  # merda
+            tx = sx - 1 if self.dirr > 0 else sx + 10
+            f.set(tx, 8 + wag, pal["O"])
+            f.set(tx - self.dirr, 7 + 2 * wag, pal["O"])
+        keep = []
+        for p in self.dirt:
+            p[3] += 30 * dt
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            if p[1] < 11:
+                f.set(p[0], p[1], visible((110, 70, 30)))
+                keep.append(p)
+        self.dirt = keep[-60:]
+
+    def run(self, f, t, dt, goal, v, pal):
+        self.dirr = 1 if goal > self.x else -1
+        self.x += min(abs(goal - self.x), v * dt) * self.dirr
+        sprite(f, DOG["biegnie1" if int(t * v / 3) % 2 else "biegnie2"], self.x, 3, pal, self.dirr < 0)
+
+
+HERO = {"biegnie1": ["..RRR.", ".RRRRR", ".SSE..", ".SSSS.", "BRBBR.", ".BBBB.", ".B..B.", "KK..KK"],
+        "biegnie2": ["..RRR.", ".RRRRR", ".SSE..", ".SSSS.", ".RBBRB", ".BBBB.", "..BB..", "..KK.."],
+        "skok": ["..RRR.", ".RRRRR", ".SSE.S", ".SSSSS", "BRBBR.", ".BBBB.", "B...B.", "K....K"]}
+GOOMBA = [["..MMMM..", ".MMMMMM.", "MEMMMMEM", "MMMMMMMM", "..SSSS..", ".KK..KK."],
+          ["..MMMM..", ".MMMMMM.", "MEMMMMEM", "MMMMMMMM", "..SSSS..", "..KK.KK."]]
+
+
+@reg("platformowka")
+class Platformer(Clock):
+    """Platformówka: ludzik w czerwonej czapce biegnie przez przewijany świat, przeskakuje rury, dziury i grzyby,
+    zbiera monety i wybija je z bloków ze znakiem zapytania."""
+    SPEED, HX = 22, 24
+
+    def __init__(self):
+        self.y, self.vy, self.coins, self.got, self.pops = 2.0, 0.0, 0, set(), []
+
+    @staticmethod
+    def tile(i):
+        """Co jest w kolumnie świata nr i (co 8 px): None, ("rura", wys), ("dziura",), ("grzyb",), ("blok",)."""
+        if i < 6:
+            return None
+        h = hash1(i * 977)
+        if h < 0.14:
+            return ("rura", 3 + int(hash1(i * 31) * 3))
+        if h < 0.22 and Platformer.tile(i - 1) is None:
+            return ("dziura",)
+        if h < 0.32:
+            return ("grzyb",)
+        if h < 0.45:
+            return ("blok",)
+        return None
+
+    def draw(self, f, now, t, dt):
+        off = t * self.SPEED
+        sky = visible((10, 20, 60))
+        f.fill(sky)
+        for k in range(4):  # chmury
+            cx = (k * 37 - off * 0.3) % (W + 30) - 15
+            disc(f, cx, 2.5 + k % 2, 2.2, visible((80, 90, 120)))
+            disc(f, cx + 3, 2.5 + k % 2, 2.6, visible((80, 90, 120)))
+        brick, top = visible((150, 70, 20)), visible((40, 160, 30))
+        i0 = int(off // 8)
+        ground = {}
+        for i in range(i0 - 1, i0 + W // 8 + 2):
+            x0 = i * 8 - off
+            tl = self.tile(i)
+            for x in range(int(x0), int(x0) + 8):
+                if not 0 <= x < W:
+                    continue
+                if tl and tl[0] == "dziura":
+                    continue
+                ground[x] = True
+                f.set(x, 10, top)
+                f.set(x, 11, brick if (x + int(off)) % 4 else visible((90, 40, 10)))
+            if tl and tl[0] == "rura":
+                h = tl[1]
+                f.rect(x0 + 1, 10 - h, x0 + 6, 9, visible((0, 150, 30)))
+                f.rect(x0, 10 - h, x0 + 7, 10 - h, visible((60, 220, 60)))
+                f.rect(x0 + 2, 11 - h, x0 + 2, 9, visible((100, 255, 100)))
+            if tl and tl[0] == "blok":
+                hit = i in self.got
+                f.rect(x0 + 2, 2, x0 + 5, 4, visible((120, 70, 20)) if hit else (230, 160, 0))
+                if not hit:
+                    f.set(x0 + 3, 3, (90, 40, 0))
+                if not hit and abs(x0 + 3.5 - (self.HX + 3)) < 3 and self.y < 6:
+                    self.got.add(i)
+                    self.coins += 1
+                    self.pops.append([x0 + 3, 1.0, t])
+            if tl and tl[0] == "grzyb" and i not in self.got:
+                gx = x0 + 4 - ((t * 6) % 16 if hash1(i) > 0.5 else 0)
+                sprite(f, GOOMBA[int(t * 4) % 2], gx - 4, 4, {"M": visible((140, 70, 30)), "E": (255, 255, 255),
+                                                            "S": visible((230, 190, 140)), "K": visible((40, 20, 10))})
+                if abs(gx - (self.HX + 3)) < 4 and self.y > 0 and self.vy > 0 and self.y < 4:
+                    self.got.add(i)  # zgnieciony z góry
+                    self.vy = -9
+        # sterowanie: skacze, gdy przed nim przeszkoda (patrzy kilka kolumn naprzód)
+        ahead = [self.tile(int((off + self.HX + d) // 8)) for d in (6, 12, 18)]
+        on_ground = self.y >= 2 and all(ground.get(int(self.HX + k), False) for k in (1, 4))
+        if on_ground and any(a and a[0] in ("rura", "dziura", "grzyb", "blok") for a in ahead[:2]):
+            self.vy = -15
+        self.vy += 40 * dt
+        self.y += self.vy * dt
+        if self.y >= 2:
+            if any(ground.get(int(self.HX + k), False) for k in (1, 4)) or self.y > 12:
+                self.y, self.vy = 2.0, 0.0
+        if self.y < -6:
+            self.y, self.vy = -6, 0
+        pal = {"R": (230, 20, 20), "S": visible((240, 180, 130)), "E": (0, 0, 0), "B": (30, 60, 230), "K": visible((90, 40, 10))}
+        pose = "skok" if self.y < 1.8 else "biegnie1" if int(t * 8) % 2 else "biegnie2"
+        sprite(f, HERO[pose], self.HX, self.y, pal)
+        for p in list(self.pops):  # moneta wyskakuje z bloku
+            a = t - p[2]
+            if a > 0.6:
+                self.pops.remove(p)
+                continue
+            f.rect(p[0], p[1] - a * 6 - 1, p[0] + 1, p[1] - a * 6, (255, 220, 0))
+        self.got = {i for i in self.got if i >= i0 - 2}
+        f.rect(W - 15, 1, W - 14, 3, (255, 220, 0))  # moneta i licznik
+        f.text(str(self.coins % 1000), W - 12, 0, (255, 255, 255), SMALL)
+
+
+@reg("ptaki")
+class Birds(Clock):
+    """Ptaki: klucze ptaków lecą przez niebo o zachodzie słońca, machając skrzydłami; słońce chowa się za horyzont."""
+
+    def __init__(self):
+        self.flocks, self.next = [], 0.0
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):  # zachód: od fioletu u góry do pomarańczu nad horyzontem
+            c = lerp((25, 5, 45), (200, 70, 10), (y / (H - 1)) ** 1.4)
+            for x in range(W):
+                f.set(x, y, visible(c))
+        sx = W * 0.7
+        disc(f, sx, 10.5, 4.5, (255, 140, 20))
+        disc(f, sx, 10.5, 3.2, (255, 200, 60))
+        for x in range(W):
+            f.set(x, 11, visible((40, 10, 20)))
+        if t >= self.next:
+            n, d = random.choice((3, 5, 7)), random.choice((-1, 1))
+            self.flocks.append({"x": -20 if d > 0 else W + 20, "y": random.uniform(1, 3), "d": d, "n": n,
+                                "v": random.uniform(8, 14), "ph": random.random()})
+            self.next = t + random.uniform(4, 9)
+        dark = (5, 0, 10)
+        for fl in list(self.flocks):
+            fl["x"] += fl["d"] * fl["v"] * dt
+            if (fl["d"] > 0 and fl["x"] > W + 40) or (fl["d"] < 0 and fl["x"] < -40):
+                self.flocks.remove(fl)
+                continue
+            for k in range(fl["n"]):  # klucz: V, przewodnik z przodu
+                row = (k + 1) // 2
+                side = 1 if k % 2 else -1
+                bx = fl["x"] - fl["d"] * row * 6
+                by = fl["y"] + 2 + side * row * 1.6 * (0.85 + 0.15 * math.sin(t + k))
+                up = math.sin((t * 6 + fl["ph"] * 7 + k * 0.7)) > 0
+                f.set(bx, by, dark)
+                for s in (-1, 1):  # skrzydła: w górę „V”, w dół „Λ”
+                    f.set(bx + s, by - 1 if up else by, dark)
+                    f.set(bx + 2 * s, by - 2 if up else by + 1, dark)
+
+
+@reg("nietoperze")
+class Bats(Clock):
+    """Nietoperze: noc, wielki księżyc, gwiazdy; nietoperze trzepoczą zygzakiem po niebie, czasem przelatują
+    na tle księżyca."""
+
+    def __init__(self):
+        self.bats = [self.new(random.uniform(0, W)) for _ in range(6)]
+
+    @staticmethod
+    def new(x=None):
+        d = random.choice((-1, 1))
+        return {"x": (-5 if d > 0 else W + 5) if x is None else x, "y": random.uniform(2, 9), "d": d,
+                "v": random.uniform(10, 22), "ph": random.random() * 9, "f": random.uniform(10, 16)}
+
+    def draw(self, f, now, t, dt):
+        for k in range(30):
+            x, y = int(hash1(k * 17) * W), int(hash1(k * 29) * 10)
+            f.set(x, y, mul((160, 160, 200), 0.3 + 0.7 * noise1(t * 0.8 + k * 3)))
+        mx = W * 0.68
+        for y in range(H):  # księżyc z cieniami
+            for x in range(int(mx - 7), int(mx + 8)):
+                d = math.hypot(x + 0.5 - mx, (y + 0.5 - 6) * 1.0)
+                if d < 5.6:
+                    k = 0.75 + 0.25 * noise2(x * 0.6, y * 0.6)
+                    f.set(x, y, mul((240, 230, 170), clamp(5.9 - d) * k))
+                elif d < 8:
+                    f.add(x, y, mul((40, 40, 25), (8 - d) / 2.4))
+        for x in range(W):  # sylwetki drzew
+            h = 1 + int(noise1(x * 0.15) * 3 + (hash1(x // 5) > 0.85) * 2)
+            for y in range(H - h, H):
+                f.set(x, y, (0, 0, 0))
+        for b in self.bats:
+            b["x"] += b["d"] * b["v"] * dt
+            b["y"] = clamp(b["y"] + math.sin(t * 3 + b["ph"]) * 6 * dt + random.uniform(-3, 3) * dt, 1, 8)
+            if b["x"] < -8 or b["x"] > W + 8:
+                b.update(self.new())
+            x, y = int(b["x"]), int(b["y"])
+            up = math.sin(t * b["f"] + b["ph"]) > 0
+            col = (0, 0, 0) if abs(x - mx) < 7 else visible((70, 50, 90))
+            for ox, oy in ((0, 0), (0, 1)):
+                f.set(x + ox, y + oy, col)
+            for s in (-1, 1):
+                f.set(x + s, y + (0 if up else 1), col)
+                f.set(x + 2 * s, y + (-1 if up else 1), col)
+                f.set(x + 3 * s, y + (0 if up else 2), col)
+
+
+TURTLE = ["...........GGGGG.......", ".........GGHGGGHGG.....", "..F.....GGGGHGGGGGG....",
+          "..FF...GGHGGGGGGHGGG.SS", "...FF.GGGGGHGGGGGGGGSSSE", "....FSGGGHGGGGGHGGGGSSSS",
+          ".....SSSSSSSSSSSSSSSS.SS", "......FF.........FF....", ".......FF.........FF..."]
+
+
+@reg("zolw")
+class Turtle(Clock):
+    """Żółw morski: płynie powoli przez cały panel, macha płetwami; promienie światła z góry, bąbelki,
+    falujące wodorosty na dnie."""
+
+    def __init__(self):
+        self.bub = []
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                ray = max(0.0, math.sin(x * 0.12 + y * 0.35 - t * 0.6)) ** 6 * (1 - y / H)  # promienie
+                f.set(x, y, visible(lerp((0, 15, 45), (40, 110, 140), ray * 0.7 + 0.1 * (1 - y / H))))
+        for k in range(14):  # wodorosty
+            bx = (hash1(k * 7) * W)
+            hgt = 3 + int(hash1(k * 11) * 5)
+            for j in range(hgt):
+                f.set(bx + math.sin(t * 1.5 + k + j * 0.6) * j * 0.25, 11 - j, visible((20, 120 + j * 10, 40)))
+        span = W + 50
+        x = (t * 6) % span - 25
+        up = math.sin(t * 2.2)
+        pal = {"G": visible((60, 120, 40)), "H": visible((120, 90, 30)), "S": visible((140, 160, 90)),
+               "F": visible((110, 140, 80)), "E": (0, 0, 0)}
+        rows = [r for r in TURTLE]
+        if up > 0:  # płetwy w górę / w dół
+            rows = rows[:7] + [".....FF.........FF.....", "......................."]
+        sprite(f, rows, x, 1.5 + math.sin(t * 0.7) * 0.8, pal)
+        if random.random() < dt * 3:
+            self.bub.append([x + 22, 4.0, random.uniform(-0.5, 0.5)])
+        keep = []
+        for b in self.bub:
+            b[1] -= 4 * dt
+            b[0] += math.sin(t * 5 + b[2] * 9) * 0.3 * dt
+            if b[1] > -1:
+                f.add(b[0], b[1], (60, 90, 110))
+                keep.append(b)
+        self.bub = keep
+
+
+SNAIL = ["......E...E", ".......E.E.", "..SSSS..BB.", ".SPPPPS.BB.", "SPSSSPPS.B.", "SPSPSSPSBB.",
+         "SPPSSPS.BB.", ".SSSSSBBBB.", "BBBBBBBBBBB"]
+
+
+@reg("slimak")
+class Snail(Clock):
+    """Ślimak: bardzo powoli pełznie przez łąkę, rusza czułkami, zostawia błyszczący ślad; kwiatki się kołyszą,
+    czasem przelatuje motyl."""
+
+    def draw(self, f, now, t, dt):
+        for x in range(W):
+            f.set(x, 11, visible((20, 70, 10)))
+            gh = int(1 + noise1(x * 0.7) * 2)
+            for j in range(gh):
+                f.set(x + math.sin(t + x) * 0.3 * j, 10 - j, visible((30, 110 + 30 * j, 20)))
+        for k in range(7):  # kwiatki
+            fx = hash1(k * 13) * W
+            sway = math.sin(t * 1.3 + k) * 0.8
+            for j in range(4):
+                f.set(fx + sway * j / 4, 10 - j, visible((40, 140, 30)))
+            c = [(255, 60, 60), (255, 220, 0), (200, 80, 255), (255, 255, 255)][k % 4]
+            for ox, oy in ((0, -1), (-1, 0), (1, 0), (0, 1)):
+                f.set(fx + sway + ox, 6 + oy, visible(c))
+            f.set(fx + sway, 6, (255, 200, 0))
+        span = W + 30
+        x = (t * 2.2) % span - 15
+        for k in range(int(max(0, x + 1))):  # ślad – błyszczy
+            if x - k < 0:
+                break
+            f.set(x - k, 10, mul((90, 110, 130), (0.3 + 0.7 * (math.sin(k * 1.7 + t * 2) > 0.7)) * max(0, 1 - k / 60)))
+        ant = int(t * 1.5) % 4 == 0
+        rows = SNAIL if not ant else [SNAIL[1], SNAIL[1]] + SNAIL[2:]
+        sprite(f, rows, x, 2, {"S": visible((150, 90, 30)), "P": visible((230, 170, 70)), "B": visible((170, 160, 120)),
+                               "E": (255, 255, 255)})
+        bx = (t * 15) % (W + 40) - 20  # motyl
+        by = 3 + math.sin(t * 2.5) * 2
+        up = int(t * 12) % 2
+        for s in (-1, 1):
+            f.set(bx + s, by - up, (255, 120, 220))
+        f.set(bx, by, (60, 30, 20))
+
+
+# ================================================================ światło (bez zegara)
+@reg("polarna")
+class AuroraCurtain(Clock):
+    """Zorza polarna z bliska: falujące kurtyny światła z pionowymi promieniami, zielone u dołu, fioletowe
+    u góry; pod nimi ośnieżone góry i gwiazdy."""
+
+    def draw(self, f, now, t, dt):
+        for k in range(25):
+            f.set(hash1(k * 5) * W, hash1(k * 9) * 7, mul((150, 150, 180), 0.4 + 0.6 * noise1(t + k)))
+        for x in range(W):
+            for band, (sp, amp, hue) in enumerate(((0.05, 1.0, 0.0), (0.08, 0.7, 0.4))):
+                base = 7.5 - band * 2 + math.sin(x * sp + t * 0.4 * (1 + band)) * 1.8 + noise1(x * 0.1 + t * 0.3) * 1.5
+                ray = (0.25 + 0.75 * noise2(x * 0.45, t * 0.8 + band * 9) ** 1.5) * amp * 1.8  # pionowe promienie
+                for y in range(H):
+                    h = base - y  # wysokość nad dolnym brzegiem kurtyny
+                    if h < -1 or h > 9:
+                        continue
+                    k = clamp(1 - abs(h - 0.5) * 0.9) if h < 0.5 else clamp(1 - (h - 0.5) / 8) ** 1.6
+                    c = lerp((0, 255, 90), (140, 40, 255), clamp(h / 7 + hue * 0.3))
+                    f.add(x, y, mul(c, k * ray * 0.9))
+        for x in range(W):  # góry
+            top = 9 + int(noise1(x * 0.06) * 2.5) - (hash1(x // 9) > 0.7)
+            for y in range(top, H):
+                f.set(x, y, visible((60, 70, 90)) if y == top else visible((15, 18, 28)))
+
+
+@reg("tesla")
+class PlasmaBall(Clock):
+    """Lampa plazmowa: szklane kule, w środku elektroda, z której biegną do szkła drżące fioletowe wyładowania;
+    co jakiś czas „dotyk” – wszystkie pioruny zbiegają się w jednym miejscu."""
+
+    def __init__(self):
+        self.touch, self.tx = None, 0
+
+    def draw(self, f, now, t, dt):
+        if self.touch is None or t > self.touch + random.uniform(4, 7):
+            self.touch, self.tx = t, random.choice((-1, 1))
+        touching = t - self.touch < 2.2
+        for cx in (W / 2 - 34, W / 2, W / 2 + 34):
+            r = 5.7
+            for y in range(H):  # szkło – lekka poświata
+                for x in range(int(cx - 7), int(cx + 8)):
+                    d = math.hypot(x + 0.5 - cx, y + 0.5 - 6)
+                    if d < r:
+                        f.set(x, y, visible((18, 0, 28)))
+                    elif d < r + 0.8:
+                        f.set(x, y, visible((40, 30, 60)))
+            n = 7
+            for k in range(n):
+                if touching and cx == W / 2:
+                    a = math.pi * (0.5 - 0.5 * self.tx) + noise1(t * 3 + k) * 0.3 - 0.15
+                else:
+                    a = k / n * 2 * math.pi + noise1(t * 0.6 + k * 5 + cx) * 2.5
+                x, y = cx, 6.0
+                steps = 9
+                for s in range(1, steps + 1):  # pierun: drży poprzecznie
+                    p = s / steps
+                    jit = (noise2(k * 3 + s, t * 9 + cx) - 0.5) * 1.6 * math.sin(math.pi * p)
+                    nx = cx + math.cos(a) * r * p - math.sin(a) * jit
+                    ny = 6.0 + math.sin(a) * r * p + math.cos(a) * jit
+                    c = lerp((255, 200, 255), (150, 0, 255), p)
+                    f.add(nx, ny, mul(c, 0.8))
+                    x, y = nx, ny
+                f.add(x, y, (255, 120, 255))  # rozbłysk na szkle
+            disc(f, cx + 0.5, 6.5, 1.6, (255, 230, 255))
+            f.rect(cx - 3, 11, cx + 3, 11, visible((50, 50, 55)))  # podstawka
+
+
+NEON_SIGNS = [("OPEN", (255, 30, 60)), ("BAR", (0, 200, 255)), ("CAFE", (255, 160, 0)), ("24H", (0, 255, 120)),
+              ("LIVE", (255, 0, 200)), ("PIZZA", (255, 220, 0))]
+
+
+@reg("szyld")
+class NeonSign(Clock):
+    """Neonowy szyld: świecące rurki z napisem (OPEN, BAR, CAFE, PIZZA…) i ikonką (serce, kubek, strzałka),
+    z poświatą; jarzeniówka się zapala z migotaniem, czasem jedna litera przerywa."""
+    ICONS = {"serce": [".RR.RR.", "RRRRRRR", "RRRRRRR", ".RRRRR.", "..RRR..", "...R..."],
+             "kubek": ["..R.R..", ".R.R...", "RRRRR..", "R...RR.", "R...R.R", "R...RR.", ".RRR..."],
+             "strzałka": ["...R...", "...RR..", "RRRRRR.", "RRRRRRR", "RRRRRR.", "...RR..", "...R..."]}
+
+    def __init__(self):
+        self.i, self.t0, self.bad = 0, None, 0
+
+    def draw(self, f, now, t, dt):
+        if self.t0 is None or t - self.t0 > 12:
+            self.i = (self.i + (self.t0 is not None)) % len(NEON_SIGNS)
+            self.t0, self.bad = t, random.randint(0, 9)
+        word, col = NEON_SIGNS[self.i]
+        icon = list(self.ICONS)[self.i % len(self.ICONS)]
+        age = t - self.t0
+        on = age > 0.8 or hash1(int(t * 20)) > 0.5  # zapalanie z migotaniem
+        if age > 11.4:
+            on = False
+        ic = self.ICONS[icon]
+        font = TXT
+        tw = text_w(word, font)
+        total = tw + 4 + len(ic[0])
+        x0 = (W - total) // 2
+        glow = Persist()
+        pts = text_px(word, x0, 0, font)
+        letters = []
+        x = x0
+        for ch in word:
+            letters.append(x)
+            x += text_w(ch, font) + 1
+        for px, py in pts:
+            li = sum(1 for lx in letters if lx <= px) - 1
+            dead = li == self.bad % len(word) and hash1(int(t * 6)) < 0.25  # jedna litera przerywa
+            if on and not dead:
+                f.set(px, py, lerp(col, (255, 255, 255), 0.35))
+                for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    glow.add(px + ox, py + oy, mul(col, 0.12))
+            else:
+                f.set(px, py, visible(mul(col, 0.06)))
+        ix = x0 + tw + 4
+        c2 = (255, 255, 255) if icon == "kubek" else col
+        for r, row in enumerate(ic):
+            for k, ch in enumerate(row):
+                if ch == "R":
+                    f.set(ix + k, 3 + r, mul(c2, 0.9) if on else visible(mul(c2, 0.06)))
+        if on:
+            for y in range(H):
+                for x in range(W):
+                    if f.px[y][x] == (0, 0, 0):
+                        g = glow.b[y][x]
+                        f.px[y][x] = (min(g[0], 60), min(g[1], 60), min(g[2], 60))
+        for x in range(x0 - 4, x0 + total + 4):  # rama szyldu
+            f.set(x, 11, visible((30, 30, 35)))
+
+
+@reg("witraz")
+class StainedGlass(Clock):
+    """Witraż: kolorowe szybki w ołowianych ramkach, przez które przesuwa się słońce – po kolei rozjaśnia
+    szkło, a szybki mienią się delikatnie."""
+    COLS = [(200, 20, 30), (20, 60, 200), (230, 170, 0), (20, 150, 60), (140, 30, 170), (0, 150, 170)]
+
+    def draw(self, f, now, t, dt):
+        sun = (t * 7) % (W + 60) - 30
+        for y in range(H):
+            for x in range(W):
+                # komórki: przesunięta siatka romboidalna z ołowiem na brzegach
+                u, v = x / 9 + y / 6, x / 9 - y / 6
+                iu, iv = math.floor(u), math.floor(v)
+                fu, fv = u - iu, v - iv
+                if min(fu, fv, 1 - fu, 1 - fv) < 0.07 or y in (0, 11):
+                    f.set(x, y, visible((25, 22, 20)))
+                    continue
+                c = self.COLS[int(hash1(iu * 131 + iv * 71) * len(self.COLS))]
+                light = 0.35 + 0.75 * math.exp(-((x - sun) / 24) ** 2) + 0.1 * noise2(x * 0.3, t * 0.5)
+                f.set(x, y, mul(c, clamp(light, 0.08, 1.1)))
+
+
+@reg("basen")
+class Caustics(Clock):
+    """Dno basenu w słońcu: falujące świetliste sieci kaustyk na turkusowych kafelkach."""
+
+    def draw(self, f, now, t, dt):
+        for y in range(H):
+            for x in range(W):
+                u, v = x * 0.18, y * 0.3
+                a = math.sin(u + t * 1.1 + math.sin(v * 1.3 + t * 0.7) * 1.5)
+                b = math.sin(v * 1.7 - t * 0.9 + math.sin(u * 0.8 - t * 0.6) * 1.5)
+                c = math.sin((u + v) * 0.9 + t * 0.8)
+                k = (1 - abs(a + b + c) / 3) ** 6  # jasne linie tam, gdzie fale się spotykają
+                base = (0, 70, 110) if (x // 6 + y // 6) % 2 else (0, 60, 100)
+                if x % 6 == 0 or y % 6 == 0:
+                    base = (0, 45, 80)  # fugi
+                f.set(x, y, lerp(visible(base), (200, 255, 255), clamp(k * 1.3)))
+
+
+@reg("iskry")
+class Sparks(Clock):
+    """Szlifierka: tarcza się kręci, strumień rozżarzonych iskier leci łukiem, odbija się od podłogi i gaśnie;
+    szlifierka przesuwa się po stalowym pręcie."""
+
+    def __init__(self):
+        self.sp, self.acc = [], 0.0
+
+    def draw(self, f, now, t, dt):
+        gx = W * 0.25 + math.sin(t * 0.3) * W * 0.15
+        f.rect(0, 6, W * 0.45, 7, visible((70, 70, 80)))  # pręt
+        for x in range(W):
+            f.set(x, 11, visible((25, 25, 30)))
+        burst = 0.6 + 0.4 * noise1(t * 2)
+        self.acc += 260 * dt * burst
+        while self.acc >= 1:
+            self.acc -= 1
+            a = random.uniform(-0.35, 0.2)
+            s = random.uniform(30, 80)
+            self.sp.append([gx + 2, 5.5, math.cos(a) * s, math.sin(a) * s - 8, random.uniform(0.5, 1.4)])
+        keep = []
+        for p in self.sp:
+            p[3] += 60 * dt
+            ox, oy = p[0], p[1]
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            p[4] -= dt
+            if p[1] > 10.5:
+                p[1], p[3], p[2] = 10.5, -abs(p[3]) * 0.35, p[2] * 0.6
+            if p[4] > 0 and p[0] < W + 2:
+                heat = clamp(p[4])
+                c = lerp((255, 40, 0), (255, 200, 60), heat)
+                f.line(ox, oy, p[0], p[1], mul(c, heat), add=True)
+                keep.append(p)
+        self.sp = keep[-500:]
+        disc(f, gx, 5.5, 3.5, visible((60, 60, 70)))  # tarcza z kręcącymi się szprychami
+        for k in range(3):
+            a = t * 25 + k * 2.09
+            f.set(gx + math.cos(a) * 2.2, 5.5 + math.sin(a) * 2.2, visible((150, 150, 160)))
+        f.rect(gx - 9, 1, gx - 1, 3, visible((20, 80, 160)))  # obudowa
+        f.rect(gx - 14, 2, gx - 9, 2, visible((40, 40, 40)))
+
+
+@reg("swieca")
+class Candles(Clock):
+    """Świece: kilka świec różnej wysokości, żywe płomienie drżą i chwieją się jak od przeciągu, ciepła poświata;
+    wosk powoli spływa."""
+
+    def draw(self, f, now, t, dt):
+        cs = [(W * k / 7 + W / 14, 3 + int(hash1(k * 3) * 4), hash1(k * 7)) for k in range(7)]
+        for x in range(W):  # ciepła poświata całości
+            for y in range(H):
+                g = sum(math.exp(-((x - cx) / 9) ** 2 - ((y - (11 - h - 3)) / 5) ** 2) for cx, h, _ in cs)
+                f.set(x, y, mul((50, 22, 4), min(1, g) * (0.85 + 0.15 * noise1(t * 4))))
+        draft = noise1(t * 0.7) - 0.5
+        for k, (cx, h, ph) in enumerate(cs):
+            top = 11 - h
+            f.rect(cx - 1, top, cx + 1, 11, visible((200, 190, 170)))
+            f.set(cx - 1, top + 1 + int(ph * h * 0.6), visible((235, 225, 210)))  # zaciek wosku
+            f.set(cx, top - 1, visible((40, 30, 20)))  # knot
+            sway = (draft + (noise1(t * 3 + k * 5) - 0.5) * 0.6) * 1.6
+            fl = 3.2 + noise1(t * 6 + k) * 1.2
+            for j in range(int(fl) + 1):
+                p = j / fl
+                x = cx + sway * p * p
+                c = lerp((255, 240, 160), (255, 90, 0), p)
+                f.set(x, top - 1 - j, mul(c, 1 - p * 0.5))
+                if j < fl * 0.6:
+                    f.add(x - 1, top - 1 - j, mul((120, 40, 0), 0.6))
+                    f.add(x + 1, top - 1 - j, mul((120, 40, 0), 0.6))
+            f.set(cx, top - 1, (90, 140, 255))  # niebieska nasada płomienia
+
+
+@reg("lampa")
+class LavaLamp(Clock):
+    """Lampa lava: w szklanych lampach wielkie krople wosku powoli wznoszą się, łączą, rozciągają i opadają."""
+
+    def __init__(self):
+        self.lamps = [[{"x": random.uniform(-3, 3), "y": random.uniform(0, 11), "ph": random.random() * 9,
+                        "r": random.uniform(1.6, 2.6)} for _ in range(5)] for _ in range(4)]
+
+    def draw(self, f, now, t, dt):
+        cols = [((255, 40, 0), (60, 0, 40)), ((255, 0, 160), (20, 0, 60)), ((0, 255, 120), (0, 20, 50)),
+                ((255, 200, 0), (60, 10, 0))]
+        for li, blobs in enumerate(self.lamps):
+            cx = W * (li + 0.5) / 4
+            wax, liquid = cols[li]
+            for b in blobs:  # ciepło od dołu: wznoszą się, stygną u góry i opadają
+                b["y"] = 5.5 + 6.5 * math.sin(t * 0.25 + b["ph"])
+                b["x"] = math.sin(t * 0.3 + b["ph"] * 2) * 3
+            for y in range(H):
+                half = 4 + 3.5 * (1 - abs(y - 6) / 7)  # kształt lampy: szersza w środku
+                for x in range(int(cx - half), int(cx + half) + 1):
+                    dx = x + 0.5 - cx
+                    if abs(dx) > half:
+                        continue
+                    field = sum(b["r"] ** 2 / ((dx - b["x"]) ** 2 + ((y + 0.5 - b["y"]) * 0.8) ** 2 + 0.3) for b in blobs)
+                    field += 1.4 if y >= 11 else 0  # kałuża wosku na dnie
+                    k = clamp((field - 1.0) * 1.5)
+                    f.set(x, y, lerp(visible(liquid), mul(wax, 0.6 + 0.4 * clamp(field / 3)), k))
+            f.rect(cx - 3, 0, cx + 3, 0, visible((80, 80, 90)))
+
+
+# ================================================================ fizyka (bez zegara)
+@reg("wahadla")
+class PendulumWave(Clock):
+    """Fala wahadeł: rząd kulek, każda waha się odrobinę wolniej od sąsiadki – powstają węże, fale i chaos, a co
+    minutę wszystkie znów zgrywają się w jedną linię. Widok z góry, z tęczowymi smugami."""
+    N, CYCLE = 40, 60.0  # w CYCLE sekund wahadło i robi 30 + i wahnięć
+
+    def __init__(self):
+        self.buf = Persist()
+
+    def draw(self, f, now, t, dt):
+        self.buf.fade(math.exp(-dt * 9))
+        step = W / self.N
+        for i in range(self.N):
+            w = 2 * math.pi * (30 + i) / self.CYCLE
+            y = 5.5 + 5 * math.cos(w * t)
+            x = step * (i + 0.5)
+            c = hsv(i / self.N, 0.85, 1)
+            self.buf.add(x, y + 0.5, mul(c, 0.5))
+            f.set(x, y + 0.5, lerp(c, (255, 255, 255), 0.3))
+        self.buf.blit(f)
+
+
+@reg("newton")
+class NewtonsCradle(Clock):
+    """Kołyska Newtona: trzy kołyski z błyszczącymi kulkami na niciach – odchylona kulka uderza w rząd, a z drugiej
+    strony odskakuje tyle samo; w każdej kołysce inna liczba kulek w ruchu."""
+
+    def draw(self, f, now, t, dt):
+        f.rect(0, 0, W - 1, 0, visible((60, 60, 70)))
+        for k, (cx, lift, col) in enumerate(((W / 6, 1, (200, 200, 210)), (W / 2, 2, (230, 180, 60)),
+                                             (W * 5 / 6, 3, (120, 200, 255)))):
+            n, r, L = 5, 2.0, 7.5
+            T = 1.6
+            ph = ((t + k * 0.37) % T) / T
+            amp = 0.75
+            a = amp * math.sin(2 * math.pi * ph)  # >0: lewe uniesione (pierwsza połowa), <0: prawe
+            for i in range(n):
+                px = cx + (i - (n - 1) / 2) * (2 * r)
+                th = 0.0
+                if a > 0 and i < lift:
+                    th = -a
+                elif a < 0 and i >= n - lift:
+                    th = -a
+                bx, by = px + math.sin(th) * L, 0.5 + math.cos(th) * L
+                f.line(px, 0, bx, by - r + 0.5, visible((70, 70, 80)))
+                for y in range(int(by - r - 1), int(by + r + 2)):
+                    for x in range(int(bx - r - 1), int(bx + r + 2)):
+                        d = math.hypot(x + 0.5 - bx, y + 0.5 - by)
+                        if d < r + 0.3:
+                            sh = clamp(1.1 - math.hypot(x + 0.5 - (bx - 0.7), y + 0.5 - (by - 0.7)) / (r + 0.5))
+                            f.set(x, y, mul(col, (0.25 + 0.75 * sh) * clamp(r + 0.3 - d + 0.5)))
+
+
+@reg("kostki")
+class DominoRun(Clock):
+    """Domino: długi rząd kolorowych kostek przewraca się jedna po drugiej przez cały panel; po ostatniej kostki
+    same wstają (cofnięcie filmu) i od nowa."""
+    N, GAP, HGT = 38, 3.1, 7.0
+
+    def draw(self, f, now, t, dt):
+        spd = 9.0  # kostek/s
+        run = self.N / spd
+        cyc = (t % (run + 1.5 + run * 0.5 + 1)) - 1
+        rewind = cyc > run + 1.5
+        for x in range(W):
+            f.set(x, 11, visible((40, 30, 20)))
+        for i in range(self.N):
+            x0 = 2 + i * self.GAP
+            if rewind:
+                p = 1 - (cyc - run - 1.5) / (run * 0.5)
+                fall = clamp((p * self.N - i) * 1.0)
+            else:
+                fall = clamp((cyc * spd - i) * 1.4)
+            # kąt: do momentu oparcia o następną (asin(GAP/HGT)), ostatnia leży płasko
+            lim = math.pi / 2 if i == self.N - 1 else math.asin(min(1, (self.GAP - 0.5) / self.HGT))
+            a = fall * lim
+            c = hsv(i / self.N, 0.8, 1)
+            bx, by = x0 + 1, 10.5
+            tx, ty = bx + math.sin(a) * self.HGT, by - math.cos(a) * self.HGT
+            f.line(bx - 1, by, tx - 1, ty, mul(c, 0.55))
+            f.line(bx, by, tx, ty, c)
+            f.set(tx, ty, (255, 255, 255) if fall > 0 and fall < 1 else c)
+
+
+@reg("kulodrom")
+class MarbleRun(Clock):
+    """Tor kulkowy: kolorowe kulki toczą się po falistej rynnie, spadają na dół, wracają po podłodze, a winda
+    zabiera je z powrotem na górę."""
+
+    def __init__(self):
+        self.m = [{"s": -i * 26.0, "c": hsv(i / 8, 0.85, 1)} for i in range(8)]
+
+    @staticmethod
+    def top(x):
+        return 4.5 + math.sin(x * 0.13) * 1.3
+
+    def pos(self, s):
+        """Położenie po drodze s (px): rynna w prawo, spadek, podłoga w lewo, winda w górę."""
+        L = W - 8
+        if s < 0:
+            return None
+        if s < L:
+            return 4 + s, self.top(4 + s)
+        s -= L
+        y0 = self.top(W - 4)
+        if s < 10.5 - y0:
+            return W - 3, y0 + s
+        s -= 10.5 - y0
+        if s < L:
+            return W - 4 - s, 10.5
+        s -= L
+        return 1.5, max(self.top(4), 10.5 - s)  # winda
+
+    def draw(self, f, now, t, dt):
+        rail = visible((90, 75, 55))
+        for x in range(4, W - 3):
+            f.set(x, self.top(x) + 1, rail)
+        for x in range(W):
+            f.set(x, 11, rail)
+        f.rect(0, 2, 0, 11, visible((50, 50, 60)))
+        f.rect(3, 2, 3, 11, visible((50, 50, 60)))
+        L = W - 8
+        total = 2 * L + (10.5 - self.top(W - 4)) + (10.5 - self.top(4)) + 3
+        for mb in self.m:
+            mb["s"] += 28 * dt
+            if mb["s"] > total:
+                mb["s"] -= total
+            p = self.pos(mb["s"])
+            if p:
+                x, y = p
+                f.set(x, y, mb["c"])
+                f.set(x + 1, y, mul(mb["c"], 0.6))
+                f.set(x, y - 1, mul(mb["c"], 0.6))
+                f.set(x + 1, y - 1, lerp(mb["c"], (255, 255, 255), 0.5))
+
+
+@reg("pileczki")
+class BouncyBalls(Clock):
+    """Piłeczki: kolorowe kauczukowe kulki wpadają z góry, odbijają się od podłogi i od siebie nawzajem,
+    tracą energię; co jakiś czas ktoś podrzuca je wszystkie naraz."""
+
+    def __init__(self):
+        self.b, self.kick = [], 0.0
+
+    def draw(self, f, now, t, dt):
+        if len(self.b) < 22 and random.random() < dt * 3:
+            self.b.append([random.uniform(2, W - 2), -1.0, random.uniform(-15, 15), 0.0, random.uniform(1.0, 1.6),
+                           hsv(random.random(), 0.85, 1)])
+        if t > self.kick:
+            for p in self.b:
+                p[3] -= random.uniform(14, 22)
+            self.kick = t + random.uniform(7, 12)
+        for _ in range(2):
+            h = dt / 2
+            for p in self.b:
+                p[3] += 50 * h
+                p[0] += p[2] * h
+                p[1] += p[3] * h
+                if p[1] > 11 - p[4]:
+                    p[1], p[3] = 11 - p[4], -abs(p[3]) * 0.82
+                    p[2] *= 0.97
+                if p[0] < p[4] or p[0] > W - p[4]:
+                    p[2] = -p[2]
+                    p[0] = clamp(p[0], p[4], W - p[4])
+            for i, a in enumerate(self.b):
+                for c in self.b[i + 1:]:
+                    dx, dy = c[0] - a[0], c[1] - a[1]
+                    d = math.hypot(dx, dy)
+                    if 0 < d < a[4] + c[4]:  # sprężyste zderzenie równych mas
+                        nx, ny = dx / d, dy / d
+                        rel = (a[2] - c[2]) * nx + (a[3] - c[3]) * ny
+                        if rel > 0:
+                            a[2] -= rel * nx
+                            a[3] -= rel * ny
+                            c[2] += rel * nx
+                            c[3] += rel * ny
+                        push = (a[4] + c[4] - d) / 2
+                        a[0] -= nx * push
+                        a[1] -= ny * push
+                        c[0] += nx * push
+                        c[1] += ny * push
+        for p in self.b:
+            disc(f, p[0], p[1], p[4] + 0.3, p[5])
+            f.set(p[0] - 0.5, p[1] - 0.6, lerp(p[5], (255, 255, 255), 0.6))
+
+
+@reg("slinky")
+class Slinky(Clock):
+    """Slinky: tęczowa sprężynka schodzi po schodach – przelewa się łukiem stopień po stopniu, a na końcu
+    wraca na górę."""
+    STEP_W, STEP_H, N = 15, 0.85, 18
+
+    def draw(self, f, now, t, dt):
+        steps = int((W - 8) / self.STEP_W)
+        for k in range(steps + 1):  # schody
+            x0, y0 = 2 + k * self.STEP_W, 5 + k * self.STEP_H
+            f.rect(x0, y0 + 0.5, x0 + self.STEP_W - 1, y0 + 0.5, visible((90, 70, 50)))
+            f.rect(x0 + self.STEP_W - 1, y0 + 0.5, x0 + self.STEP_W - 1, min(11, y0 + self.STEP_H), visible((60, 45, 30)))
+        T = 1.3
+        k, p = int(t / T) % steps, (t / T) % 1
+        ax, ay = 2 + k * self.STEP_W + 5, 5 + k * self.STEP_H
+        bx, by = ax + self.STEP_W, ay + self.STEP_H
+        e, s, h = p * p * (3 - 2 * p), 0.55, 0.17
+        for i in range(self.N):  # zwój i przelatuje łukiem ze stosu A na stos B (górny pierwszy)
+            g = clamp((e - i / (self.N - 1) * (1 - s)) / s)
+            y_a, y_b = ay - (self.N - 1 - i) * h, by - i * h
+            x = ax + (bx - ax) * (1 - math.cos(math.pi * g)) / 2
+            y = y_a + (y_b - y_a) * g - math.sin(math.pi * g) * 2.5
+            c = hsv(i / self.N, 0.9, 1)
+            f.set(x - 1, y, mul(c, 0.5))
+            f.set(x, y, c)
+            f.set(x + 1, y, mul(c, 0.5))
+
+
+# ================================================================ sceny (bez zegara)
+@reg("okno")
+class TrainWindow(Clock):
+    """Nocą z okna pociągu: daleko powoli suną góry i księżyc, bliżej światła miasteczek, a tuż za szybą migają
+    słupy i drzewa (paralaksa); co jakiś czas mija nas oświetlony pociąg z naprzeciwka."""
+
+    def __init__(self):
+        self.other = None
+
+    def draw(self, f, now, t, dt):
+        for k in range(20):
+            f.set((hash1(k * 3) * W * 2 - t * 0.5) % W, hash1(k * 7) * 5, visible((90, 90, 120)))
+        mx = (W * 0.8 - t * 0.4) % (W + 20) - 10
+        disc(f, mx, 2.5, 1.8, (220, 210, 160))
+        for x in range(W):  # góry – bardzo daleko
+            h = 3 + noise1((x + t * 2) * 0.04) * 4
+            for y in range(int(H - h), H):
+                f.set(x, y, visible((18, 18, 35)))
+        for k in range(60):  # światła miasteczek – średnio daleko
+            wx = k * 23.0
+            x = (wx - t * 12) % (60 * 23.0) - 10
+            if 0 <= x < W and hash1(k) > 0.35:
+                for j in range(int(1 + hash1(k * 5) * 4)):
+                    c = (255, 200, 90) if hash1(k * 9 + j) > 0.3 else (180, 220, 255)
+                    f.set(x + j * 2, 8 + hash1(k + j) * 2, mul(c, 0.6 + 0.4 * noise1(t * 2 + k + j)))
+        for k in range(40):  # drzewa i słupy – tuż za szybą, szybko
+            x = (k * 31 - t * 70) % (40 * 31) - 10
+            if not -3 <= x < W + 3:
+                continue
+            if hash1(k * 3) > 0.5:
+                f.rect(x, 0, x + 1, 11, visible((25, 22, 20)))  # słup
+                f.rect(x - 3, 1, x + 4, 1, visible((25, 22, 20)))
+            else:
+                for y in range(3, H):
+                    hw = (y - 2) * 0.7
+                    f.rect(x - hw, y, x + hw, y, visible((5, 20, 8)))
+        if self.other is None and random.random() < dt * 0.06:
+            self.other = t
+        if self.other is not None:  # pociąg z naprzeciwka: rząd okien przelatuje w 2 s
+            a = t - self.other
+            if a > 2.2:
+                self.other = None
+            else:
+                for x in range(W):
+                    f.set(x, 4, visible((40, 40, 45)))
+                    f.set(x, 9, visible((40, 40, 45)))
+                    lit = ((x + a * 400) % 9) < 6
+                    for y in range(5, 9):
+                        f.set(x, y, (200, 180, 120) if lit and y < 8 else visible((50, 50, 55)))
+        for y in range(H):  # rama okna i odbicie
+            f.set(0, y, visible((50, 50, 55)))
+            f.set(W - 1, y, visible((50, 50, 55)))
+
+
+@reg("szyba")
+class RainWindow(Clock):
+    """Deszcz na szybie: za szybą rozmyte kolorowe światła miasta, po szybie spływają krople – stoją, nabierają
+    wody, ruszają zygzakiem, zostawiają ślad i łykają mniejsze krople po drodze."""
+
+    def __init__(self):
+        self.still = [[random.uniform(0, W), random.uniform(0, H), random.uniform(0.3, 0.8)] for _ in range(70)]
+        self.runs, self.trail = [], Persist()
+
+    def draw(self, f, now, t, dt):
+        for k in range(14):  # bokeh: duże miękkie plamy
+            bx = (hash1(k * 3) * W + math.sin(t * 0.1 + k) * 3)
+            by = hash1(k * 7) * H
+            c = hsv(hash1(k * 11) * 0.2 + (0.55 if k % 3 == 0 else 0.05), 0.7, 1)
+            r = 3 + hash1(k * 13) * 4
+            pulse = 0.18 + 0.08 * noise1(t * 0.5 + k)
+            for y in range(H):
+                for x in range(int(bx - r), int(bx + r) + 1):
+                    d = math.hypot(x + 0.5 - bx, (y + 0.5 - by) * 1.2)
+                    if d < r:
+                        f.add(x, y, mul(c, pulse * (1 - (d / r) ** 4)))
+        if random.random() < dt * 1.2:
+            self.runs.append([random.uniform(0, W), -1.0, random.uniform(0.6, 1.0), 0.0])
+        self.trail.fade(math.exp(-dt * 0.8))
+        for d in self.still:
+            f.add(d[0], d[1], mul((140, 160, 190), d[2] * 0.5))
+        keep = []
+        for r in self.runs:
+            r[3] += dt
+            if r[3] > 0.3:  # rusza szarpnięciami i trochę w bok
+                v = 10 + 10 * noise1(t * 3 + r[0])
+                r[1] += v * dt
+                r[0] += (noise1(t * 2 + r[0] * 3) - 0.5) * 6 * dt
+            for d in list(self.still):  # łyka mniejsze krople
+                if abs(d[0] - r[0]) < 1 and abs(d[1] - r[1]) < 1:
+                    self.still.remove(d)
+                    self.still.append([random.uniform(0, W), random.uniform(0, H), random.uniform(0.3, 0.8)])
+                    r[2] = min(1.3, r[2] + 0.1)
+            self.trail.add(r[0], r[1], (25, 30, 40))
+            if r[1] < H + 1:
+                f.add(r[0], r[1], mul((200, 220, 255), r[2]))
+                f.add(r[0], r[1] - 1, mul((120, 140, 170), r[2] * 0.6))
+                keep.append(r)
+        self.runs = keep
+        self.trail.blit(f)
+
+
+@reg("latarnia")
+class Lighthouse(Clock):
+    """Latarnia morska: biało-czerwona wieża na skale, snop światła obraca się nad ciemnym morzem i omiata niebo,
+    fale błyszczą w jego blasku, w oddali przepływa statek."""
+
+    def draw(self, f, now, t, dt):
+        lx, ly = W * 0.18, 2.5
+        a = t * 1.1  # obrót: snop widać, gdy świeci w bok, przez chwilę świeci prosto na nas
+        side = math.cos(a)
+        toward = math.sin(a)
+        for k in range(20):
+            f.set(hash1(k * 5) * W, hash1(k * 3) * 6, visible((70, 70, 100)))
+        for y in range(H):
+            for x in range(W):
+                if y >= 8:  # morze z falami
+                    w = math.sin(x * 0.4 + t * 1.5 + y) * math.sin(x * 0.13 - t * 0.7)
+                    c = visible((0, 15 + 10 * w, 40 + 15 * w))
+                    f.set(x, y, c)
+                dx, dy = x + 0.5 - lx, y + 0.5 - ly
+                if dx * side > 0:  # snop: wąski stożek w stronę, w którą świeci
+                    ang = abs(math.atan2(dy, abs(dx)) - 0.04)
+                    k = clamp(1.2 - ang / (0.1 + abs(dx) * 0.0015)) * clamp(1 - abs(dx) / W) * abs(side) ** 0.5
+                    if k > 0:
+                        f.add(x, y, mul((255, 240, 180), k * (0.8 if y < 8 else 0.45)))
+        glare = clamp(1 - abs(side) * 3) * (toward > 0)  # świeci na nas – rozbłysk
+        for x in range(int(lx - 5), int(lx + 6)):  # skała
+            f.set(x, 11, visible((40, 35, 30)))
+            f.set(x, 10, visible((40, 35, 30)) if abs(x - lx) < 4 else f.get(x, 10))
+        for y in range(4, 10):  # wieża w paski
+            for x in range(int(lx - 1), int(lx + 2)):
+                f.set(x, y, visible((200, 30, 30)) if (y // 2) % 2 else visible((200, 200, 200)))
+        f.rect(lx - 1, 2, lx + 1, 3, (255, 240, 180))
+        f.rect(lx - 1, 1, lx + 1, 1, visible((60, 60, 60)))
+        if glare:
+            disc(f, lx + 0.5, 2.5, 1 + 3 * glare, mul((255, 250, 220), glare), add=True)
+        sx = (W + 20) - (t * 3) % (W + 40)  # statek w oddali
+        f.rect(sx, 7, sx + 6, 7, visible((60, 60, 70)))
+        f.rect(sx + 2, 6, sx + 3, 6, visible((60, 60, 70)))
+        f.set(sx + 5, 6, (255, 200, 80) if int(t) % 2 else visible((60, 60, 70)))
+
+
+@reg("wulkan")
+class Volcano(Clock):
+    """Wulkan: stożek na tle nocnego nieba, z krateru tryska lawa, rozżarzone bomby lecą łukiem, strumienie
+    lawy spływają po zboczach, w górę bucha dym; co chwilę silniejsza erupcja."""
+
+    def __init__(self):
+        self.p, self.boom = [], 0.0
+
+    def draw(self, f, now, t, dt):
+        cx = W / 2
+        strong = (t % 14) < 2.5
+        for y in range(H):  # łuna
+            for x in range(W):
+                g = math.exp(-((x - cx) / 30) ** 2 - (y / 8) ** 2)
+                f.set(x, y, mul((60, 12, 0), g * (1.5 if strong else 1)))
+        for x in range(W):  # stożek
+            top = 3 + abs(x + 0.5 - cx) * 0.22
+            if abs(x + 0.5 - cx) < 3:
+                top = 3.5
+            for y in range(int(top), H):
+                f.set(x, y, visible((70, 40, 30)) if y == int(top) else visible((40, 26, 20)))
+        for k in range(5):  # strumienie lawy
+            side = 1 if k % 2 else -1
+            for j in range(40):
+                x = cx + side * (2 + j * 1.0) + math.sin(j * 0.5 + k) * 1.2
+                y = 3.5 + j * 0.22 * (1 + k * 0.08)
+                if y > 11 or j > (t * 6 + k * 13) % 50:
+                    break
+                flow = 0.6 + 0.4 * math.sin(j * 0.8 - t * 4 + k)
+                f.set(x, y, mul((255, 90, 0), flow))
+        rate = 120 if strong else 25
+        for _ in range(int(rate * dt + random.random())):
+            self.p.append([cx + random.uniform(-1.5, 1.5), 3.0, random.uniform(-14, 14), -random.uniform(8, 20 if strong else 12),
+                           random.uniform(1, 2.5), random.random() < 0.3])
+        keep = []
+        for q in self.p:
+            q[4] -= dt
+            if q[5]:  # dym: wznosi się i rozpływa
+                q[0] += q[2] * 0.2 * dt
+                q[1] -= 3 * dt
+                if q[4] > 0 and q[1] > -2:
+                    f.add(q[0], q[1], mul((50, 45, 45), min(1, q[4])))
+                    keep.append(q)
+                continue
+            q[3] += 22 * dt
+            q[0] += q[2] * dt
+            q[1] += q[3] * dt
+            if q[4] > 0 and q[1] < 11:
+                f.set(q[0], q[1], lerp((255, 60, 0), (255, 230, 120), clamp(q[4] - 1)))
+                keep.append(q)
+        self.p = keep[-400:]
+        f.rect(cx - 2, 3, cx + 2, 3, (255, 160, 30))
+
+
+@reg("start")
+class Launch(Clock):
+    """Start rakiety z bliska: rakieta na wyrzutni, odliczanie, zapłon, kłęby dymu rozlewają się po ziemi,
+    rakieta wznosi się z ognistym ogonem i znika u góry; potem następna."""
+    T = 22.0
+
+    def __init__(self):
+        self.smoke = []
+
+    def draw(self, f, now, t, dt):
+        p = t % self.T
+        cx = W / 2
+        lift = max(0.0, p - 6) ** 2 * 1.4  # od 6 s w górę z przyspieszeniem
+        shake = (random.uniform(-0.4, 0.4) if 5 < p < 9 else 0)
+        for y in range(H):
+            for x in range(W):
+                f.set(x, y, visible((5, 8, 25)))
+        f.rect(cx + 8, 1, cx + 9, 11, visible((70, 60, 50)))  # wieża
+        for y in range(1, 11, 2):
+            f.set(cx + 7, y, visible((70, 60, 50)))
+        ry = 1 - lift
+        x0 = cx - 2 + shake
+        if ry > -14:
+            f.rect(x0, ry + 2, x0 + 3, ry + 8, visible((200, 200, 210)))  # kadłub
+            f.rect(x0 + 1, ry, x0 + 2, ry + 1, visible((200, 40, 40)))  # czubek
+            f.set(x0 - 1, ry + 7, visible((200, 40, 40)))
+            f.set(x0 + 4, ry + 7, visible((200, 40, 40)))
+            f.set(x0 + 1, ry + 4, (80, 160, 255))
+        if p < 5:  # odliczanie
+            n = 5 - int(p)
+            f.text(str(n), cx - 30, 0, (255, 220, 0), BIG)
+        fire = 4.5 < p < 16
+        if fire:
+            for k in range(int(10 * (1 + (p > 6)))):
+                fx = x0 + 1.5 + random.uniform(-1.2, 1.2)
+                fy = ry + 9 + random.uniform(0, 3 + min(6, p - 4.5))
+                f.add(fx, fy, lerp((255, 240, 150), (255, 60, 0), random.random()))
+            if ry + 9 < 12:  # dym rozlewa się po ziemi
+                for _ in range(3):
+                    self.smoke.append([cx + random.uniform(-2, 2), 10.5, random.choice((-1, 1)) * random.uniform(6, 25),
+                                       -random.uniform(0, 3), random.uniform(2, 4)])
+        keep = []
+        for s in self.smoke:
+            s[0] += s[2] * dt
+            s[1] += s[3] * dt
+            s[2] *= math.exp(-dt * 0.7)
+            s[4] -= dt
+            if s[4] > 0:
+                k = min(1, s[4] / 2)
+                disc(f, s[0], s[1], 1.6, mul((150, 140, 130), k * 0.7))
+                keep.append(s)
+        self.smoke = keep[-300:]
+        for x in range(W):
+            f.set(x, 11, visible((40, 40, 40)))
+
+
+@reg("saturn")
+class Saturn(Clock):
+    """Przelot obok planety z pierścieniami: wielki pasiasty glob z cieniem przesuwa się powoli przez panel,
+    pierścienie z przerwą przecinają go ukośnie, w tle gwiazdy w paralaksie."""
+
+    def draw(self, f, now, t, dt):
+        for k in range(50):  # gwiazdy dwiema warstwami
+            sp = 1.5 if k % 2 else 4
+            x = (hash1(k * 7) * W * 2 - t * sp) % (W + 4) - 2
+            f.set(x, hash1(k * 3) * H, visible((120, 120, 150) if k % 2 else (200, 200, 230)))
+        cx = W + 30 - (t * 3 + W / 2 + 10) % (W + 60)  # zaczyna blisko środka
+        cy, R = 6.0, 9.0
+        tilt = -0.18
+        for y in range(H):
+            for x in range(int(cx - 26), int(cx + 27)):
+                dx, dy = x + 0.5 - cx, y + 0.5 - cy
+                ry = dy - dx * tilt
+                rr = math.hypot(dx, ry * 6)  # pierścienie: płaska elipsa
+                ring = 12 < rr < 22 and not 16.5 < rr < 17.5
+                front = ry > 0
+                d = math.hypot(dx, dy)
+                if d < R and not (ring and front):
+                    lat = dy / R
+                    band = 0.75 + 0.25 * math.sin(lat * 14 + math.sin(dx * 0.2 + t * 0.2))
+                    light = clamp(0.25 + 0.75 * (dx / R + 0.6))  # słońce z prawej
+                    c = lerp((200, 160, 100), (240, 210, 150), band)
+                    if ring and not front and abs(ry) < 1.2:  # cień pierścieni na globie
+                        light *= 0.5
+                    f.set(x, y, mul(c, light * clamp(R - d + 0.5)))
+                elif ring:
+                    shade = 0.45 if (not front and d < R + 1) else 1
+                    k = 0.7 + 0.3 * math.sin(rr * 0.7)
+                    f.set(x, y, mul((210, 190, 150), k * shade * 0.8))
+
+
+# ================================================================ impreza (bez zegara)
+@reg("disco")
+class Disco(Clock):
+    """Disco: obracająca się kula lustrzana z migoczącymi lusterkami, kolorowe plamki światła wędrują po
+    panelu, reflektory zmieniają kolor do rytmu."""
+
+    def draw(self, f, now, t, dt):
+        beat = (t * 2.1) % 1
+        cx, R = W / 2, 4.6
+        for k in range(36):  # plamki światła krążą po „ścianach”
+            a = k * 2.399 + t * 0.6
+            x = (cx + math.cos(a) * (14 + (k * 7) % 46) * 1.0) % W
+            y = 6 + math.sin(a * 1.3 + k) * 5
+            c = hsv(k / 9 + t * 0.05, 0.6, 1)
+            f.add(x, y, mul(c, 0.5 + 0.5 * (hash1(k + int(t * 8)) > 0.3)))
+        for side in (-1, 1):  # reflektory z dołu
+            sx = cx + side * 45
+            c = hsv(int(t * 2.1) * 0.17 + (side > 0) * 0.5, 1, 1)
+            ang = math.sin(t * 1.3 * side) * 0.7
+            for j in range(12):
+                x = sx + math.sin(ang) * j * 2.5
+                f.add(x, 11 - j, mul(c, (1 - j / 12) * (0.9 - 0.5 * beat)))
+                f.add(x + 1, 11 - j, mul(c, (1 - j / 12) * 0.3))
+        f.line(cx, 0, cx, 1, visible((80, 80, 80)))
+        for y in range(H):  # kula: lusterka w siatce, obracają się
+            for x in range(int(cx - R - 1), int(cx + R + 2)):
+                dx, dy = x + 0.5 - cx, y + 0.5 - 6.5
+                if math.hypot(dx, dy) < R:
+                    lon = math.asin(clamp(dx / math.sqrt(max(0.01, R * R - dy * dy)), -1, 1)) + t * 1.5
+                    cell = int(lon * 3) * 7 + int(dy + 10) * 13
+                    sparkle = hash1(cell + int(t * 6)) ** 6
+                    base = 60 + 60 * hash1(cell)
+                    c = lerp((base, base, base + 10), (255, 255, 255), sparkle)
+                    f.set(x, y, visible(c))
+
+
+@reg("vumetr")
+class VuMeter(Clock):
+    """VU-metry retro: dwa podświetlone wskaźniki wychyłowe ze skalą i czerwonym polem, wskazówki tańczą do
+    muzyki (symulowanej), obok słupkowe wskaźniki LED."""
+
+    def __init__(self):
+        self.n = [0.0, 0.0]
+        self.peak = [0.0, 0.0]
+
+    @staticmethod
+    def level(t, ch):
+        beat = max(0.0, math.sin(t * 2 * math.pi * 2.0)) ** 8  # stopa
+        return clamp(0.35 + 0.35 * noise1(t * 3 + ch * 7) + 0.4 * beat + 0.15 * (noise1(t * 11 + ch) - 0.5))
+
+    def draw(self, f, now, t, dt):
+        for ch in (0, 1):
+            lv = self.level(t, ch)
+            self.n[ch] += (lv - self.n[ch]) * (1 - math.exp(-dt * (12 if lv > self.n[ch] else 4)))  # balistyka
+            cx = W * (0.22 + 0.56 * ch)
+            for y in range(H):  # podświetlona tarcza
+                for x in range(int(cx - 20), int(cx + 21)):
+                    f.set(x, y, visible((120, 90, 30)))
+            for k in range(21):  # skala łukiem, czerwone pole na końcu
+                a = -0.95 + 1.9 * k / 20
+                px, py = cx + math.sin(a) * 17, 13.5 - math.cos(a) * 12
+                c = (255, 40, 20) if k > 15 else (20, 15, 5)
+                f.set(px, py, c)
+                if k % 5 == 0:
+                    f.set(px, py + 1, c)
+            a = -0.95 + 1.9 * self.n[ch]
+            for j in range(30):  # wskazówka
+                r = j / 29 * 11.5
+                f.set(cx + math.sin(a) * r * 1.4, 13.5 - math.cos(a) * r, (0, 0, 0))
+            f.rect(cx - 2, 11, cx + 2, 11, visible((30, 30, 30)))
+            bx = int(W / 2 - 4 + ch * 6)  # słupki LED
+            if self.n[ch] > self.peak[ch]:
+                self.peak[ch] = self.n[ch]
+            self.peak[ch] -= dt * 0.3
+            for j in range(12):
+                on = j / 12 < self.n[ch]
+                c = (0, 255, 60) if j < 7 else (255, 200, 0) if j < 10 else (255, 30, 0)
+                if on or abs(j / 12 - self.peak[ch]) < 0.05:
+                    f.rect(bx, 11 - j, bx + 1, 11 - j, c)
+                else:
+                    f.rect(bx, 11 - j, bx + 1, 11 - j, visible(mul(c, 0.08)))
+
+
+@reg("sylwester")
+class NewYear(Clock):
+    """Sylwester: wielkie odliczanie 10… 3, 2, 1, potem fajerwerki i napis z nowym rokiem; w kółko, jak pokaz.
+    W ostatniej minucie roku odlicza naprawdę do północy."""
+
+    def __init__(self):
+        self.pt, self.buf = [], Persist()
+
+    def draw(self, f, now, t, dt):
+        real = now.month == 12 and now.day == 31 and now.hour == 23 and now.minute == 59
+        p = (now.second + now.microsecond / 1e6 - 49) if real else t % 24
+        year = now.year if (now.month, now.day) == (1, 1) else now.year + 1  # nadchodzący (1 stycznia – już ten)
+        self.buf.fade(math.exp(-dt * 5))
+        if p < 10:  # odliczanie: cyfra rośnie i gaśnie
+            n = 10 - int(p)
+            k = p % 1
+            s = str(n)
+            c = hsv(n / 10, 0.8, 1)
+            x = (W - text_w(s, BIG)) // 2
+            f.text(s, x, 1, mul(c, 1 - k * 0.7))
+            for j in range(10 - n + 1):  # kropki postępu
+                f.set(W / 2 - 30 + j * 6, 6, (80, 80, 80))
+        else:
+            if random.random() < dt * 4:
+                x, y = random.uniform(10, W - 10), random.uniform(2, 7)
+                hue = random.random()
+                for _ in range(40):
+                    a, sp = random.uniform(0, 2 * math.pi), random.uniform(4, 15)
+                    self.pt.append([x, y, math.cos(a) * sp, math.sin(a) * sp * 0.6, random.uniform(0.8, 1.6),
+                                    hsv(hue + random.uniform(-0.05, 0.05), 0.8, 1)])
+            if p < 15:
+                txt = str(year)
+                f.text(txt, (W - text_w(txt, BIG)) // 2, 1, hsv(t * 0.3, 0.6, 1))
+            else:
+                scroll_segs(f, [("HAPPY NEW YEAR   ", (255, 220, 120)), ("SZCZĘŚLIWEGO NOWEGO ROKU", (120, 220, 255))],
+                            t, 30, 0)
+        keep = []
+        for q in self.pt:
+            q[3] += 8 * dt
+            q[0] += q[2] * dt
+            q[1] += q[3] * dt
+            q[4] -= dt
+            if q[4] > 0:
+                self.buf.add(q[0], q[1], mul(q[5], min(1, q[4])))
+                keep.append(q)
+        self.pt = keep
+        self.buf.blit(f)
+
+
+@reg("bsod")
+class Bsod(Clock):
+    """Żart dla widzów: panel „ładuje się” z kręcącym się kółkiem i paskiem postępu, który zwalnia przy 99%,
+    potem niebieski ekran :( „your panel ran into a problem”, aktualizacja 0% … i od nowa."""
+
+    def draw(self, f, now, t, dt):
+        p = t % 30
+        if p < 12:  # ładowanie: pasek postępu, przy końcu zwalnia
+            prog = 99 * (1 - math.exp(-p / 3)) if p < 10 else 99
+            for k in range(8):  # kółko z kropek
+                a = k / 8 * 2 * math.pi + t * 5
+                c = mul((200, 200, 255), (k / 8) ** 1.5)
+                f.set(8 + math.cos(a) * 3.2, 5.5 + math.sin(a) * 3.2, c)
+            f.text("LOADING", 16, 0, (200, 200, 220), SMALL)
+            pct = f"{int(prog)}%"
+            end = W - text_w(pct, SMALL) - 4
+            f.rect(16, 8, end, 9, visible((40, 40, 50)))
+            f.rect(16, 8, 16 + (end - 16) * prog / 100, 9, (0, 160, 255))
+            f.text(pct, end + 2, 6, (200, 200, 220), SMALL)
+            return
+        blue = (0, 60, 170)
+        f.fill(blue)
+        if p < 22:  # niebieski ekran
+            f.text(":(", 4, 0, (255, 255, 255), TXT)
+            scroll_segs(f, [("YOUR PANEL RAN INTO A PROBLEM AND NEEDS TO RESTART. WE'RE JUST COLLECTING SOME LEDS",
+                             (255, 255, 255))], t, 26, 0, 22, gap=40)
+            f.rect(22, 11, 22 + (p - 12) / 10 * (W - 23), 11, (255, 255, 255))
+            return
+        q = (p - 22) / 8  # „aktualizacja”
+        for k in range(5):
+            a = k * 0.5 - t * 4
+            f.set(10 + math.cos(a) * 3, 5.5 + math.sin(a) * 3, (255, 255, 255))
+        f.text(f"UPDATING {int(q * q * 37)}%", 20, 3, (255, 255, 255), SMALL)
+
+
 # ================================================================ oczy (bez zegara): kocie, ludzkie, bajkowe, sowa…
 EYES = {"col": None}  # kolor oczu z ustawień (tęczówka, świecenie); None = naturalny dla każdego efektu
 EYE_PRESETS = [None, (255, 0, 0), (255, 90, 0), (255, 170, 0), (255, 240, 0), (120, 255, 0), (0, 220, 60),
@@ -6275,14 +7673,18 @@ CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lis
                                    "neon radar obwod kalendarz postep lustro cien"),
     ("Inne zapisy czasu", "🔢", "binarny hex kolor dziesietny beaty unix rzymski morse slownie domino strefy odliczanie"),
     ("Pogoda", "🌦", "pogoda prognoza opady wiatr termometr smog slonce uv barometr"),
-    ("Niebo i kosmos", "🌌", "niebo doba ksiezyc planety iss kosmonauci rakieta zorza gwiazdy hiperskok"),
+    ("Niebo i kosmos", "🌌", "niebo doba ksiezyc planety iss kosmonauci rakieta zorza gwiazdy hiperskok start saturn"),
     ("Wiadomości i finanse", "📰", "kursy zloto krypto bloki hackernews wiadomosci imieniny zart trzesienia"),
     ("Sceny i przyroda", "🌄", "akwarium swietliki snieg burza ocean miasto las gory pory fajerwerki synthwave pociag "
-                              "ogien fala"),
+                              "ogien fala okno szyba latarnia wulkan"),
     ("Gry", "🎮", "pong waz arkanoid najezdzcy pacman dino flappy wyscig labirynt tetris"),
     ("Abstrakcje i symulacje", "🌀", "roj matrix skaner tecza glitch zycie mrowka plazma kalejdoskop wir dna oscyloskop "
                                     "equalizer ekg kule kregi piasek lawa dym"),
     ("Oczy", "👀", "kot czlowiek bajka sowa robot sauron hal mrok"),
+    ("Postacie i zwierzęta", "🐾", "kotek pies platformowka ptaki nietoperze zolw slimak"),
+    ("Światło", "💡", "polarna tesla szyld witraz basen iskry swieca lampa"),
+    ("Fizyka", "⚙", "wahadla newton kostki kulodrom pileczki slinky"),
+    ("Impreza", "🎉", "disco vumetr sylwester bsod"),
     ("Narzędzia", "🔧", "kolory"),
 ]
 _ALL = {"licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "niebo": Sky, "doba": DayRibbon,

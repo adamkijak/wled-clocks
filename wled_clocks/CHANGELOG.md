@@ -1,5 +1,23 @@
 # Zmiany
 
+## 1.16.0
+
+31 nowych efektów bez zegara (razem 143):
+
+- **Postacie i zwierzęta**: kotek (goni kropkę lasera, myje się, śpi), pies (aportuje piłkę, kopie dołek),
+  platformowka (bieg z przeskakiwaniem rur, dziur i grzybów, monety z bloków), ptaki (klucze o zachodzie słońca),
+  nietoperze (na tle księżyca), zolw (żółw morski w promieniach światła), slimak (z błyszczącym śladem).
+- **Światło**: polarna (kurtyny zorzy z promieniami), tesla (lampy plazmowe, „dotyk”), szyld (neony z migotaniem),
+  witraz (słońce za witrażem), basen (kaustyki na dnie), iskry (szlifierka), swieca (świece na przeciągu),
+  lampa (lampy lava).
+- **Fizyka**: wahadla (fala wahadeł zgrywająca się co minutę), newton (kołyski Newtona), kostki (domino
+  z cofaniem), kulodrom (tor kulkowy z windą), pileczki (zderzenia i odbicia), slinky (sprężynka po schodach).
+- **Sceny**: okno (nocą z okna pociągu, paralaksa), szyba (deszcz na szybie i światła miasta), latarnia (snop
+  światła nad morzem), wulkan (erupcje); w kosmosie: start (start rakiety z bliska), saturn (przelot obok planety).
+- **Impreza**: disco (kula lustrzana i reflektory), vumetr (wskaźniki wychyłowe i słupki LED), sylwester
+  (odliczanie i fajerwerki; 31 grudnia o 23:59 odlicza naprawdę do północy), bsod (żart: ładowanie, niebieski
+  ekran, aktualizacja).
+
 ## 1.15.0
 
 - Nowa kategoria „Oczy” – 8 efektów bez zegara: kot (pionowa źrenica, kocie przymykanie), czlowiek (białka,
