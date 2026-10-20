@@ -192,6 +192,9 @@ main > *, .cols > * { min-width: 0; }
 .meter { flex: 0 0 70px; height: 6px; border-radius: 3px; background: var(--btn); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--accent); }
 
+.lstat { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  display: grid; gap: 2px; font-size: 13px; }
+.lstat .k { display: inline-block; min-width: 9ch; color: var(--muted); }
 .acts { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
 .arow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0; }
 .seg { display: inline-flex; }

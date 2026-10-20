@@ -486,6 +486,24 @@ function renderActs() {
     if (len) len.disabled = !lvl;
   }
 }
+// co ludzik robi teraz i co zrobi następnie (z częstością i długością), jak przestawi godzinę
+function renderLudzikStatus() {
+  const st = state.ludzik_status;
+  $("#lstat").hidden = !st || !st.now || !(state.setting_fx || []).includes("ludzik");
+  if ($("#lstat").hidden) return;
+  const lvlOf = (a) => (a in state.ludzik ? clocks.ludzik_lvl[state.ludzik[a]] : "");
+  const lenOf = (a) => (a in state.ludzik_len ? clocks.ludzik_len[state.ludzik_len[a]] : "");
+  const extra = (a, ...more) => ["", lvlOf(a) && `częstość: ${lvlOf(a)}`, lenOf(a) && `długość: ${lenOf(a)}`, ...more]
+    .filter((x, i) => !i || x).join("  ·  ");
+  const busy = st.now === "przestawia godzinę";
+  setText($("#lstat-now"), busy ? `przestawia godzinę: ${st.how_now}` : st.now);
+  setText($("#lstat-now-x"), busy ? "" : extra(st.now));
+  setText($("#lstat-next"), st.next || "—");
+  setText($("#lstat-next-x"), !st.next ? (st.never ? "  ·  „ludzik co ile”: nigdy" : "")
+    : extra(st.next, st.forced ? "▶ wymuszone" : st.eta != null ? `za ok. ${st.eta} s` : "po bieżącym"));
+  setText($("#lstat-how"), st.how_next);
+  setText($("#lstat-how-x"), `  ·  ${busy ? "następna zmiana" : "zmiana"} o ${st.how_at}`);
+}
 $("#acts-close").onclick = () => ($("#acts").hidden = true);
 
 // ------------------------------------------------------------ wiadomości od widzów (efekt „napisz”)
@@ -642,6 +660,7 @@ function render(s) {
   renderList();
   renderSettings();
   renderActs();
+  renderLudzikStatus();
   renderInbox(s.inbox);
 }
 

@@ -4748,7 +4748,8 @@ LUDZIK_CHARS = [
 ]
 
 
-THUMB = threading.local()  # .on = rysujemy podgląd na listę efektów: bez skutków ubocznych (wiadomości, ▶)
+THUMB = threading.local()
+LUDZIK_STATUS = {}  # co ludzik robi teraz i co będzie następne (do panelu WWW), pisze Worker.report()  # .on = rysujemy podgląd na listę efektów: bez skutków ubocznych (wiadomości, ▶)
 
 
 def ludzik_next():
@@ -4758,6 +4759,11 @@ def ludzik_next():
 
 def ludzik_lvl(name):
     return LUDZIK["lvl"].get(name, 2)
+
+
+def ludzik_off():
+    """Wyłączone zajęcia."""
+    return {a for a in LUDZIK_ACTS if not ludzik_lvl(a)}
 
 
 def ludzik_len(name):
@@ -4884,7 +4890,7 @@ class Worker(Clock):
     def __init__(self):
         self.shown, self.job, self.x = None, None, None
         self.goal, self.wait, self.moon = None, 0.0, False
-        self.trick, self.next_trick, self.pending = None, None, None
+        self.trick, self.next_trick, self.upcoming = None, None, None  # upcoming: wylosowane następne zajęcie
         self.banner, self.banner_at = None, None
         self.rate, self.prev = None, None
         self.ride, self.left, self.free = None, 60.0, 0.0  # free: s animacji do przestawiania cyfr
@@ -5508,84 +5514,93 @@ class Worker(Clock):
         self.trick = (n, t, fl, dur, forced)
         self.next_trick = t + dur + (random.uniform(*pause) if pause else 0)
 
-    def start_forced(self, n, t, xs, xr, pause):
-        """Zajęcie wymuszone przyciskiem ▶: zaraz po bieżącym, bez przerwy i losowania (także wyłączone). Gdy tu się
-        nie mieści – idzie tam, gdzie się zmieści; gdy brak czasu do przestawiania cyfr – czeka na następną minutę."""
+    def report(self, t, nxt_t, xr):
+        """Co robi teraz, co zrobi następnie i jak przestawi godzinę – do LUDZIK_STATUS (panel WWW)."""
+        j, busy = self.job, self.banner or self.job or self.trick or self.ride
+        if self.banner:
+            now = "transparent z pogodą"
+        elif j:
+            now = "przestawia godzinę"
+        elif self.ride or self.trick:
+            now = (self.ride or {}).get("n") or self.trick[0]
+        elif self.goal is not None and abs(self.x - self.goal) >= 0.5:
+            now = "na drugą stronę" if (self.goal > xr) != (self.x > xr) else "spacer"
+        else:
+            now = "stoi"
+        nxt = LUDZIK["next"] or (self.upcoming if LUDZIK_FREQ[LUDZIK["freq"]][1] else None)
+        at = j["new"] if j else nxt_t.strftime("%H:%M")  # najbliższa zmiana godziny
+        after = (dtm.datetime.strptime(at, "%H:%M") + dtm.timedelta(minutes=1)).strftime("%H:%M")
+        LUDZIK_STATUS.update(now=now, next=nxt, forced=bool(LUDZIK["next"]), never=not LUDZIK_FREQ[LUDZIK["freq"]][1],
+                             eta=None if busy or LUDZIK["next"] or not nxt else max(0, round(self.next_trick - t)),
+                             how_now=j["how"] if j else None, how_at=after if j else at,
+                             how_next=self.pick_how(after if j else at))
+
+    def roll(self, off):
+        """Losuje następne zajęcie (częstsze częściej) – z góry, żeby panel WWW mógł je pokazać."""
+        opts = [n for n in (*self.TRICKS, *self.RIDES) if n not in off]
+        return random.choices(opts, [LVL_WEIGHT[ludzik_lvl(n)] for n in opts])[0] if opts else None
+
+    def start_act(self, n, t, xs, xr, pause, forced):
+        """Zaczyna zajęcie: wymuszone przyciskiem ▶ (także wyłączone) albo wylosowane wcześniej. Gdy tu się nie mieści –
+        idzie tam, gdzie się zmieści. -> "start", "go" (idzie na miejsce), "wait" (brak czasu do przestawiania cyfr –
+        czeka na następną minutę) albo "never" (nigdzie się nie mieści)."""
         zs, mine = self.zones(xs, xr), self.side_zones(xs, xr)
         here = next((z for z in zs if z[0] - 1 <= self.x <= z[1] + 1), zs[0])
+        stay = not forced and "na drugą stronę" in ludzik_off()  # bez przechodzenia – tylko po tej stronie
         if n in ("spacer", "na drugą stronę"):
             other = [z for z in zs if z != here]
             z = random.choice(other) if n == "na drugą stronę" and other else here if here in mine else mine[0]
-            self.goal, self.wait, self.moon, LUDZIK["next"] = self.spot(z, xr), t, False, None
-            return
+            self.goal, self.wait, self.moon = self.spot(z, xr), t, False
+            return "start"
         if n in self.RIDES:
-            dur = self.start_ride(n, t, xs, xr, False)
-            if dur is not None:
-                self.ride["forced"], LUDZIK["next"] = True, None
-                self.next_trick = t + dur + (random.uniform(*pause) if pause else 0)
-            return
-        if n not in self.TRICKS or not self.trick_len(n):  # transparent rysuje draw(); brak czasu – czeka
-            return
+            if self.free <= self.ride_time(n) + 2:
+                return "wait"
+            dur = self.start_ride(n, t, xs, xr, stay)
+            if dur is None:
+                return "wait"
+            self.ride["forced"] = forced
+            self.next_trick = t + dur + (random.uniform(*pause) if pause else 0)
+            return "start"
+        if n not in self.TRICKS:  # transparent rysuje draw()
+            return "never"
+        if not self.trick_len(n):
+            return "wait"
         tr, away = self.TRICKS[n], self.x > xr
         dirs = lambda x: (x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
         fl = next((fl for fl in dirs(self.x) if self.fits(tr, fl, xs, xr)), None) if self.at_side(xs, xr) else None
         if fl is not None:
-            self.begin_trick(n, t, fl, pause, forced=True)
-            LUDZIK["next"] = None
-            return
+            self.begin_trick(n, t, fl, pause, forced)
+            return "start"
         ok = lambda zs: [x for z in zs for x in range(z[0], z[1] + 1) if any(self.fits(tr, fl, xs, xr, x) for fl in dirs(x))]
-        spots = ok(mine) or ok(zs)  # najpierw na swojej stronie
-        if spots:  # tu się nie mieści – idzie tam, gdzie się zmieści (i wtedy zaczyna)
-            self.goal, self.wait = min(spots, key=lambda x: abs(x - self.x)), t
+        spots = ok([here]) if stay else ok(mine) or ok(zs)  # najpierw na swojej stronie
+        if not spots:
+            return "never"
+        self.goal, self.wait = min(spots, key=lambda x: abs(x - self.x)), t
+        return "go"
 
     def idle(self, f, t, dt, xs, xr, blink):
         """Bez roboty: spaceruje po obu stronach zegara (przechodzi za cyframi), a z nudów coś robi."""
         pause = LUDZIK_FREQ[LUDZIK["freq"]][1]
-        off = {a for a in LUDZIK_ACTS if not ludzik_lvl(a)}
-        weight = lambda n: LVL_WEIGHT[ludzik_lvl(n)]
+        off = ludzik_off()
         if self.next_trick is None:
             self.next_trick = t + (random.uniform(*pause) if pause else 0)
         standing = self.goal is None or abs(self.x - self.goal) < 0.5
         if self.trick and self.trick[0] in off and not self.trick[4]:  # właśnie wyłączone w ustawieniach
             self.trick = None
-        if self.pending in off or not pause:
-            self.pending = None
+        if self.upcoming in off or self.upcoming is None:
+            self.upcoming = self.roll(off)
         forced = ludzik_next()
-        if forced and self.trick is None and self.ride is None and standing:
-            self.pending = None
-            self.start_forced(forced, t, xs, xr, pause)
+        if self.trick is None and self.ride is None and standing:
+            if forced:
+                if self.start_act(forced, t, xs, xr, pause, True) == "start":
+                    LUDZIK["next"] = None
+            elif pause and self.upcoming and t >= self.next_trick and self.at_side(xs, xr):  # po drugiej stronie
+                r = self.start_act(self.upcoming, t, xs, xr, pause, False)                 # jest tylko na chwilę
+                if r in ("start", "never"):
+                    self.upcoming = self.roll(off)
+                if r == "never":
+                    self.next_trick = t + 3
             standing = self.goal is None or abs(self.x - self.goal) < 0.5
-        if self.trick is None and self.ride is None and standing and t >= self.next_trick and pause and not forced \
-                and self.at_side(xs, xr):  # po drugiej stronie jest tylko na chwilę – zajęcia u siebie
-            away = self.x > xr  # rzeczy (książka, kubek, miotła) najlepiej po stronie z dala od cyfr
-            dirs = lambda n: (self.x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
-            opts = [(n, fl) for n, tr in self.TRICKS.items() if n not in off and self.trick_len(n)
-                    for fl in [next((fl for fl in dirs(n) if self.fits(tr, fl, xs, xr)), None)] if fl is not None]
-            if self.pending in [n for n, _ in opts]:  # doszedł na stanowisko strzeleckie
-                opts = [o for o in opts if o[0] == self.pending]
-            elif self.pending is None and not any(n in self.SHOTS for n, _ in opts) and \
-                    random.random() < min(0.8, 0.1 * max(weight(n) for n in self.SHOTS)):
-                zs = self.side_zones(xs, xr) if "na drugą stronę" not in off else \
-                    [z for z in self.zones(xs, xr) if z[0] - 1 <= self.x <= z[1] + 1]
-                spots = [(n, x) for n in self.SHOTS if n not in off for z in zs for x in range(z[0], z[1] + 1)
-                         if self.fits(self.TRICKS[n], x < xs[0], xs, xr, x)]
-                if spots:  # strzelanie się tu nie mieści – idzie tam, skąd się da
-                    self.pending, self.goal = random.choices(spots, [weight(n) for n, _ in spots])[0]
-                    self.wait, self.next_trick = t, t
-                    standing = False
-                    opts = []
-            if self.pending is None:  # przejażdżki – tylko gdy zdąży przed przestawianiem cyfr
-                opts += [(n, None) for n in self.RIDES if n not in off and self.free > self.ride_time(n) + 2]
-            self.pending = None if opts else self.pending
-            self.next_trick = t + 3 if self.pending is None else t
-            if opts:  # częstsze zajęcia losują się częściej
-                n, fl = random.choices(opts, [weight(n) for n, _ in opts])[0]
-                if n in self.RIDES:
-                    dur = self.start_ride(n, t, xs, xr, "na drugą stronę" in off)
-                    if dur is not None:  # inaczej nie zdąży dojechać – za 3 s losuje znowu
-                        self.next_trick = t + dur + random.uniform(*pause)
-                else:
-                    self.begin_trick(n, t, fl, pause)
         if self.ride and self.ride["n"] in off and not self.ride.get("forced"):  # właśnie wyłączone w ustawieniach
             self.ride = None
         if self.ride and self.draw_ride(f, t, blink):
@@ -5646,6 +5661,8 @@ class Worker(Clock):
                 self.banner_at = now
                 if ludzik_next() == "transparent z pogodą":
                     LUDZIK["next"] = None
+        if not getattr(THUMB, "on", False):
+            self.report(t, nxt_t, xr)
         if self.banner:
             for x in range(W):
                 f.set(x, 11, visible((40, 26, 12)))
@@ -6671,7 +6688,7 @@ class Engine:
             "setting_fx": sorted(self.setting_fx()),
             "heavy": [n for n in CLOCKS if self.heavy(n)],
             "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS}, "ludzik_len": {a: ludzik_len(a) for a in LUDZIK_TIMED},
-            "ludzik_next": LUDZIK["next"],
+            "ludzik_next": LUDZIK["next"], "ludzik_status": dict(LUDZIK_STATUS),
             "inbox": INBOX.snapshot(),
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
                       "psu": POWER["psu"], "auto": POWER["auto"]},

@@ -21,6 +21,9 @@ os.environ["WLED_W"] = "120"
 sys.path.insert(0, APP)
 import wled_clocks as wc  # noqa: E402
 
+_locate = wc.Inbox.locate
+wc.Inbox.locate = lambda self, ip: ip and self.geo.setdefault(ip, "?")  # w testach bez pytania ipwho.is
+
 
 def args(**kw):
     a = dict(host="", tempo=0.75, text_speed=2.0, fps=20, every=60, mode="zycie", speed=1.0, start=None)
@@ -380,6 +383,37 @@ class EngineTest(unittest.TestCase):
         self.assertTrue(t.paused)
         t.on_key("right")
         self.assertNotEqual(t.mode, "zycie")
+
+
+class LudzikStatusTest(unittest.TestCase):
+    def test_status_announces_next(self):
+        """Pole stanu: teraz / następne / sposób zmiany godziny; zapowiedziane zajęcie to to, które się zaczyna."""
+        import random
+        random.seed(3)
+        w, t, last, pred, ok = wc.CLOCKS["ludzik"](), 0.0, None, None, 0
+        now = wc.dtm.datetime(2026, 1, 1, 12, 0, 5).astimezone()
+        acts = (*w.TRICKS, *w.RIDES)
+        for _ in range(int(240 / 0.1)):
+            w.draw(wc.Frame(), now + wc.dtm.timedelta(seconds=t), t, 0.1)
+            t += 0.1
+            st = dict(wc.LUDZIK_STATUS)
+            if st["now"] != last and st["now"] in acts:
+                self.assertEqual(st["now"], pred)
+                ok += 1
+            last = st["now"]
+            if st["now"] not in acts:
+                pred = st["next"]
+            self.assertIn(st["how_next"], wc.LUDZIK_HOWS)
+        self.assertGreater(ok, 3)
+        e = wc.Engine(args(), {})
+        self.assertIn("ludzik_status", e.snapshot(e.tick()[1]))
+
+    def test_geo_private(self):
+        ib = wc.Inbox()
+        with ib.lock:
+            _locate(ib, "192.168.1.5")
+            _locate(ib, "zły")
+        self.assertEqual(ib.geo, {"192.168.1.5": "sieć lokalna", "zły": "?"})
 
 
 class WebTest(unittest.TestCase):

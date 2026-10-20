@@ -1,5 +1,11 @@
 # Zmiany
 
+## 1.14.0
+
+- Ludzik: w ustawieniach efektu pole stanu – co robi teraz i co zrobi następnie (z częstością, długością i za ile
+  sekund), jak przestawi najbliższą godzinę. Następne zajęcie losuje się z góry, więc zapowiedź zawsze się sprawdza;
+  gdy tu się nie mieści, ludzik idzie tam, gdzie się zmieści.
+
 ## 1.13.0
 
 - Skrzynka „napisz” w panelu WWW: adres stoi osobno, z przyciskiem 📋 Kopiuj, i da się go zaznaczyć (wcześniej tekst
