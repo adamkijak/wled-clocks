@@ -4852,7 +4852,98 @@ LUDZIK_CHARS = [
                 "M": (200, 40, 50), "B": (240, 240, 240), "P": (40, 180, 150), "O": (235, 235, 235)}),  # biały kitel
     ("superbohater", {"Y": (70, 70, 95), "S": (255, 180, 130), "E": (30, 70, 200), "C": (150, 90, 60),
                       "M": (200, 40, 50), "B": (30, 90, 235), "P": (230, 30, 30), "O": (230, 30, 30)}),
+    # inne sylwetki (trzeci element – kształt, shape_pose): włosy zamiast kasku, sukienka, brzuch, czapka z daszkiem
+    ("dziewczyna", {"Y": (215, 95, 25), "S": (255, 185, 140), "E": (40, 150, 70), "C": (150, 90, 60),
+                    "M": (230, 50, 90), "B": (255, 80, 170), "P": (150, 60, 230), "O": (230, 40, 120)}, "dziewczyna"),
+    ("brzuchacz", {"Y": (215, 215, 225), "S": (255, 175, 125), "E": (30, 70, 200), "C": (150, 90, 60),
+                   "M": (120, 75, 40), "B": (50, 175, 90), "P": (120, 90, 60), "O": (110, 75, 50)}, "brzuchacz"),
+    ("chłopak", {"Y": (230, 40, 40), "S": (255, 185, 140), "E": (30, 70, 200), "C": (150, 90, 60),
+                 "M": (200, 40, 50), "B": (255, 150, 0), "P": (40, 90, 230), "O": (240, 240, 240)}, "chłopak"),
 ]
+
+
+def _runs(row, chars):
+    """Ciągi znaków z chars w wierszu -> [(od, do)] (włącznie)."""
+    out, a = [], None
+    for j, ch in enumerate(row + "."):
+        if ch in chars and a is None:
+            a = j
+        elif ch not in chars and a is not None:
+            out.append((a, j - 1))
+            a = None
+    return out
+
+
+def shape_pose(rows, shape):
+    """Inna sylwetka ludzika z tej samej pozy (pozy są twarzą w lewo, kolumna 0 = przód): reguły na literach –
+    Y kask/włosy, S skóra, E/C oczy, M usta, B koszulka, P spodnie. Rozmiar pozy się nie zmienia.
+    dziewczyna: bez kasku, długie włosy, małe usta, spódniczka i gołe nogi;
+    brzuchacz: łysy z siwymi bokami, wąs, szerszy brzuch; chłopak: czapka z daszkiem do przodu, uśmiech, spodenki."""
+    g = [list(r) for r in rows]
+    h, w = len(g), len(g[0])
+    eyes = [i for i, r in enumerate(rows) if "E" in r or "C" in r]
+
+    def put(i, j, ch):
+        if 0 <= i < h and 0 <= j < w and g[i][j] == ".":
+            g[i][j] = ch
+
+    for i, r in enumerate(rows):  # kask -> włosy / łysina / czapka z daszkiem
+        e = min(eyes, key=lambda k: abs(k - i)) if eyes else None
+        for a, b in _runs(r, "Y"):
+            if b - a + 1 >= 7:  # rondo kasku
+                if shape == "chłopak":  # daszek tylko z przodu
+                    g[i][b] = g[i][b - 1] = "."
+                    put(i, a - 1, "Y")
+                    continue
+                g[i][a] = g[i][b] = "."
+                a, b = a + 1, b - 1
+            if shape == "brzuchacz" and e is not None:
+                if abs(i - e) >= 2:  # czubek głowy – łysina
+                    for j in range(a, b + 1):
+                        g[i][j] = "S"
+                    if b - a >= 3:
+                        g[i][a] = g[i][b] = "."
+                elif abs(i - e) == 1:  # siwe boki
+                    for j in range(a + 1, b):
+                        g[i][j] = "S"
+    for i, r in enumerate(rows):  # usta
+        line = "".join(g[i])
+        if shape == "dziewczyna":
+            line = line.replace("MMM", "SMS")
+        elif shape == "brzuchacz":
+            line = line.replace("SMMMS", "MMMMM").replace("SRRRS", "MRRRM")  # wąs
+        elif shape == "chłopak":
+            line = line.replace("MMM", "RRR")
+        g[i] = list(line)
+    if shape == "dziewczyna" and eyes:  # długie włosy po bokach twarzy, do ramion
+        e = eyes[0]
+        up = any("Y" in rows[k] for k in range(e))
+        cols = {j for j, ch in enumerate(rows[e]) if ch in "EC"}
+        for k in range(3):
+            i = e + (k if up else -k)
+            if not 0 <= i < h:
+                continue
+            for a, b in _runs("".join(g[i]), "SECMR"):
+                if any(a <= j <= b for j in cols):
+                    put(i, a - 1, "Y")
+                    put(i, b + 1, "Y")
+    for i, r in enumerate(rows):  # sylwetka: brzuch, spódniczka, gołe nogi
+        if shape == "brzuchacz" and "B" in r and not set(r) & set("YEC"):
+            for a, b in _runs(r, "B"):
+                if b - a >= 3:  # tułów, nie rękawy
+                    put(i, a - 1, "B")
+                    put(i, b + 1, "B")
+        if shape in ("dziewczyna", "chłopak") and "P" in r and "B" not in r:
+            hip = any(0 <= k < h and "B" in rows[k] for k in (i - 1, i + 1))
+            for a, b in _runs(r, "P"):
+                if hip:  # spódniczka (szersza) albo spodenki
+                    if shape == "dziewczyna":
+                        put(i, a - 1, "P")
+                        put(i, b + 1, "P")
+                else:  # nogi
+                    for j in range(a, b + 1):
+                        g[i][j] = "S"
+    return ["".join(r) for r in g]
 
 
 THUMB = threading.local()
@@ -5405,6 +5496,20 @@ class Worker(Clock):
             for px_, py in text_px(s[i], xs[i], 1):
                 f.set(round(cx + (px_ - cx) * k), py, shade)
 
+    SHAPED = {}  # (kształt, poza) -> wiersze
+
+    def rows(self, pose, char=None):
+        """Wiersze pozy w kształcie postaci (zwykła sylwetka albo shape_pose)."""
+        if char is None:
+            char = LUDZIK["char"] if self.char is None else self.char
+        shape = LUDZIK_CHARS[char][2] if len(LUDZIK_CHARS[char]) > 2 else None
+        if shape is None:
+            return self.POSES[pose]
+        key = (shape, pose)
+        if key not in self.SHAPED:
+            self.SHAPED[key] = shape_pose(self.POSES[pose], shape)
+        return self.SHAPED[key]
+
     def man(self, f, pose, x, flip=False, blink=False, char=None, dy=0):
         """char: inna postać niż w ustawieniach (strażak przy pożarze); dy: podskok."""
         if char is None:
@@ -5412,7 +5517,7 @@ class Worker(Clock):
         pal = dict(self.PAL, **LUDZIK_CHARS[char][1])
         if blink:
             pal["E"] = pal["S"]
-        sprite(f, self.POSES[pose], x, round(dy), pal, flip)
+        sprite(f, self.rows(pose, char), x, round(dy), pal, flip)
 
     def pose(self, f, pose, x, flip=False, blink=False, char=None, dy=0):
         """Poza ustawiona po twarzy w x (jak w spacerze)."""
@@ -5420,14 +5525,14 @@ class Worker(Clock):
 
     def place(self, pose, flip):
         """O ile przesunąć pozę, żeby środek twarzy był zawsze w x + 4 (głowa nie skacze między pozami)."""
-        rows = self.POSES[pose]
+        rows = self.rows(pose)
         eyes = next(([i for i, ch in enumerate(r) if ch in "EC"] for r in rows if "E" in r or "C" in r), [4])
         c = (min(eyes) + max(eyes)) / 2
         return round(4 - (len(rows[0]) - 1 - c if flip else c))
 
     def span(self, pose, x, flip):
         """Pierwsza i ostatnia zapalona kolumna pozy narysowanej przy x (ustawionej po twarzy)."""
-        rows = self.POSES[pose]
+        rows = self.rows(pose)
         lit = [i for r in rows for i, ch in enumerate(r) if ch != "."]
         a, b = (len(rows[0]) - 1 - max(lit), len(rows[0]) - 1 - min(lit)) if flip else (min(lit), max(lit))
         d = x + self.place(pose, flip)
@@ -10401,7 +10506,7 @@ def main():
     LUDZIK["len"] = {n: int(clamp(v, 0, len(LUDZIK_LEN) - 1)) for n, v in (cfg.get("ludzik_len") or {}).items()
                      if n in LUDZIK_TIMED}
     LUDZIK["freq"] = int(clamp(cfg.get("ludzik_freq", 2), 0, len(LUDZIK_FREQ) - 1))
-    LUDZIK["char"] = next((i for i, (n, _) in enumerate(LUDZIK_CHARS) if n == cfg.get("ludzik_postac")), 0)
+    LUDZIK["char"] = next((i for i, c in enumerate(LUDZIK_CHARS) if c[0] == cfg.get("ludzik_postac")), 0)
     hows = ["losowo"] + LUDZIK_HOWS
     LUDZIK["how"] = hows.index(cfg["ludzik_zmiana"]) if cfg.get("ludzik_zmiana") in hows else 0
     EYES["col"] = eye_rgb(cfg.get("oczy_kolor") or "")

@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.22.0
+
+- Ludzik: 3 postacie o innej sylwetce (nie tylko kolorach) – we wszystkich pozach, pojazdach i zajęciach:
+  - **dziewczyna**: bez kasku, długie włosy do ramion, małe usta, spódniczka i gołe nogi;
+  - **brzuchacz**: łysy z siwymi bokami, wąs, szerszy brzuch;
+  - **chłopak**: czapka z daszkiem do przodu, uśmiech, krótkie spodenki.
+
 ## 1.21.0
 
 - Ludzik: nowe przejazdy – karetka (biała, czerwony pas i krzyż, niebieskie koguty) i radiowóz (granatowo-biały,

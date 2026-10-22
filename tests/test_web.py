@@ -129,7 +129,7 @@ class EngineTest(unittest.TestCase):
             e.cmds.put(wc.web_cmd(e, {"op": "ludzik", "act": "łuk", "next": True}))  # drugi raz – anuluj
             e.run_cmds()
             self.assertIsNone(wc.LUDZIK["next"])
-            for name, pal in wc.LUDZIK_CHARS:
+            for name, pal, *_ in wc.LUDZIK_CHARS:
                 self.assertTrue(all(max(pal[k]) >= 90 for k in "EMSYBPO"), name)    # nic w postaci nie jest zgaszone
             e.pick("ludzik postać", 3)
             self.assertEqual(wc.LUDZIK["char"], 3)
