@@ -1,5 +1,11 @@
 # Zmiany
 
+## 1.22.1
+
+- Ludzik: nowa postać „chłopak zielony” – ta sama sylwetka co chłopak, w zielonej bluzie i ciemnozielonych
+  spodenkach.
+- Chłopak: czapka bez dziury – daszek z tyłu kończy się równo z czubkiem czapki.
+
 ## 1.22.0
 
 - Ludzik: 3 postacie o innej sylwetce (nie tylko kolorach) – we wszystkich pozach, pojazdach i zajęciach:

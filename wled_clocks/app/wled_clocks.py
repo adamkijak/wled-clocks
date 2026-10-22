@@ -4859,6 +4859,8 @@ LUDZIK_CHARS = [
                    "M": (120, 75, 40), "B": (50, 175, 90), "P": (120, 90, 60), "O": (110, 75, 50)}, "brzuchacz"),
     ("chłopak", {"Y": (230, 40, 40), "S": (255, 185, 140), "E": (30, 70, 200), "C": (150, 90, 60),
                  "M": (200, 40, 50), "B": (255, 150, 0), "P": (40, 90, 230), "O": (240, 240, 240)}, "chłopak"),
+    ("chłopak zielony", {"Y": (230, 40, 40), "S": (255, 185, 140), "E": (30, 70, 200), "C": (150, 90, 60),
+                         "M": (200, 40, 50), "B": (40, 200, 70), "P": (20, 120, 45), "O": (240, 240, 240)}, "chłopak"),
 ]
 
 
@@ -4891,8 +4893,8 @@ def shape_pose(rows, shape):
         e = min(eyes, key=lambda k: abs(k - i)) if eyes else None
         for a, b in _runs(r, "Y"):
             if b - a + 1 >= 7:  # rondo kasku
-                if shape == "chłopak":  # daszek tylko z przodu
-                    g[i][b] = g[i][b - 1] = "."
+                if shape == "chłopak":  # daszek tylko z przodu (z tyłu równo z czubkiem czapki)
+                    g[i][b] = "."
                     put(i, a - 1, "Y")
                     continue
                 g[i][a] = g[i][b] = "."
