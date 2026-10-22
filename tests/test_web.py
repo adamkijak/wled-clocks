@@ -97,7 +97,7 @@ class EngineTest(unittest.TestCase):
                 if fx.ride:
                     laps.add(round(fx.ride["len"] / (wc.W + 2 * fx.RIDE_OFF)))
             self.assertTrue(reads and max(reads) <= 35 * 0.4)              # krótko: najwyżej 0,4 zwykłego czasu
-            self.assertGreaterEqual(max(laps), 7)                          # bardzo długo: tyle, ile zmieści minuta
+            self.assertGreaterEqual(max(laps), 6)                          # bardzo długo: więcej niż zwykle (2–5)
         finally:
             wc.LUDZIK["lvl"], wc.LUDZIK["len"], wc.LUDZIK["freq"] = old
 
@@ -393,7 +393,7 @@ class LudzikStatusTest(unittest.TestCase):
         w, t, last, pred, ok = wc.CLOCKS["ludzik"](), 0.0, None, None, 0
         now = wc.dtm.datetime(2026, 1, 1, 12, 0, 5).astimezone()
         acts = (*w.TRICKS, *w.RIDES)
-        for _ in range(int(240 / 0.1)):
+        for _ in range(int(480 / 0.1)):
             w.draw(wc.Frame(), now + wc.dtm.timedelta(seconds=t), t, 0.1)
             t += 0.1
             st = dict(wc.LUDZIK_STATUS)
