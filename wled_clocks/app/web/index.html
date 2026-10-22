@@ -57,6 +57,11 @@
 
     <section class="card">
       <div class="card-head"><h2>Ustawienia efektu: <span id="fx-name"></span></h2></div>
+      <div id="lstat" class="lstat" hidden> <!-- na samej górze: co ludzik robi -->
+        <div><span class="k">teraz</span><b id="lstat-now"></b><span id="lstat-now-x" class="muted"></span></div>
+        <div><span class="k">następne</span><b id="lstat-next"></b><span id="lstat-next-x" class="muted"></span></div>
+        <div><span class="k">godzinę</span><b id="lstat-how"></b><span id="lstat-how-x" class="muted"></span></div>
+      </div>
       <div id="fx-settings" class="settings"></div>
       <div id="wled-settings" class="settings"></div>
       <p id="fx-none" class="muted">Ten efekt nie ma własnych ustawień.</p>
@@ -95,11 +100,6 @@
         <ul id="inbox-queue" class="msgs"></ul>
         <h3>Pokazane</h3>
         <ul id="inbox-shown" class="msgs"></ul>
-      </div>
-      <div id="lstat" class="lstat" hidden>
-        <div><span class="k">teraz</span><b id="lstat-now"></b><span id="lstat-now-x" class="muted"></span></div>
-        <div><span class="k">następne</span><b id="lstat-next"></b><span id="lstat-next-x" class="muted"></span></div>
-        <div><span class="k">godzinę</span><b id="lstat-how"></b><span id="lstat-how-x" class="muted"></span></div>
       </div>
       <div id="acts" class="acts" hidden>
         <div class="card-head">

@@ -1,5 +1,16 @@
 # Zmiany
 
+## 1.20.0
+
+- Ludzik: zajęcia nie urywają się nagle.
+  - Jazda rowerem, autem, traktorem i kombajnem dzieje się poza kadrem na początku i na końcu: ludzik schodzi za
+    krawędź po swojej stronie, pojazd wjeżdża z drugiej strony, przejeżdża cały panel (kilka razy) i znika za tą
+    samą krawędzią, a ludzik wraca piechotą – pojazd nie pojawia się ani nie znika na środku panelu.
+  - Rzeczy po zajęciach: nuty z gitary dolatują, ostatnie podbicie wybija piłkę górą poza kadr, piłeczki
+    z żonglowania wypadają z rąk i toczą się na boki, tarcza chowa się w podłogę, zamek z piasku i zaścielone
+    łóżko powoli gasną.
+- Panel WWW: stan ludzika (teraz / następne / godzinę) na samej górze ustawień efektu.
+
 ## 1.19.3
 
 - Ludzik: nowa gitara – pudło z otworem, gryf ukośnie w górę z główką, ręka uderza w struny; nuty lecą falując

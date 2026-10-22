@@ -5010,6 +5010,9 @@ class Worker(Clock):
     # sceny: ludzik się w nich przemieszcza -> (najmniejsza szerokość miejsca po jego stronie w px, najkrótszy czas w s)
     SCENES = {"balon": (26, 12), "pożar": (40, 32), "zwierzak": (21, 10)}
     SCENE_FN = {"balon": "balon", "pożar": "pozar", "zwierzak": "zwierzak"}
+    # zakończenia zajęć – rzeczy nie znikają w jednej klatce: ile s trwa i czy gaśnie (FADE)
+    OUTRO = {"gitara": 3.6, "żonglerka": 1.6, "piasek": 2.0, "spanie": 1.5, "łuk": 0.6, "pistolet": 0.6, "bazooka": 0.6}
+    FADE = {"piasek", "spanie"}
     REACH = {"piłka": 3, "piasek": 16, "gitara": 14}  # ile px przed ludzikiem zajmują rzeczy (piłka, piaskownica)
     CASTLE = ["#.#...#.#", "###...###", "###.#.###", "#########", "####.####", "###...###"]  # rzędy 4–9
     RIDES = {"rower": (("rower1", "rower2"), 14, (2, 4)), "auto": (("auto",), 22, (2, 5)),
@@ -5054,6 +5057,7 @@ class Worker(Clock):
         self.how_seed = random.random()  # losowy sposób przestawiania: inny w każdym uruchomieniu
         self.char = None  # postać na sztywno (podgląd postaci); None = z ustawień
         self.sc = {}  # stan bieżącej sceny (balon, pożar, zwierzak)
+        self.outro, self.last = None, None  # zakończenie ostatniego zajęcia; last: (poza, sx, flip) z ostatniej klatki
 
     @staticmethod
     def layout(s):
@@ -5445,21 +5449,29 @@ class Worker(Clock):
         k = round((z[1] - z[0]) * random.random() ** 2)
         return z[1] - k if z[0] > xr else z[0] + k
 
-    def props(self, f, name, pose, e, sx, flip, dur):
-        """Rzeczy przy niektórych zajęciach: piłeczki, nuty, piłka, piaskownica z zamkiem, „Z” nad śpiącym."""
+    def props(self, f, name, pose, e, sx, flip, dur, out=None):
+        """Rzeczy przy niektórych zajęciach: piłeczki, nuty, piłka, piaskownica z zamkiem, „Z” nad śpiącym.
+        out: ile s minęło od końca zajęcia (zakończenie: piłeczki spadają, nuty dolatują, tarcza się chowa)."""
         w = len(self.POSES[pose][0])
         cx = lambda c: sx + (w - 1 - c if flip else c)
         if name == "żonglerka":
             for i, c in enumerate(((0, 200, 255), (255, 0, 200), (90, 255, 60))):
-                ph = (e / 1.5 + i / 3) % 1
+                ph = ((dur if out is not None else e) / 1.5 + i / 3) % 1
                 if ph < 0.65:  # wysoko łukiem z lewej ręki do prawej, nisko z powrotem
                     a = ph / 0.65
-                    f.set(cx(1 + 6 * a), 6 - 6 * math.sin(math.pi * a), c)
+                    x, y = cx(1 + 6 * a), 6 - 6 * math.sin(math.pi * a)
                 else:
-                    f.set(cx(7 - 6 * (ph - 0.65) / 0.35), 7, c)
+                    x, y = cx(7 - 6 * (ph - 0.65) / 0.35), 7
+                if out is not None:  # po końcu wypadają mu z rąk, toczą się na boki i gasną
+                    x += (-9, 6, 12)[i] * out
+                    y = min(10, y + 30 * out * out)
+                    c = mul(c, clamp(1.4 - out))
+                f.set(x, y, c)
         elif name == "gitara":
             for k in range(4):  # nuty ulatują znad gitary daleko przed niego, falując
                 ph = (e / 3.6 + k / 4) % 1
+                if e - ph * 3.6 > dur:  # po końcu nowe nuty już nie wylatują, te w powietrzu lecą dalej
+                    continue
                 x, y = cx(1 - 17 * ph), 4 - 5 * ph + math.sin(ph * 11 + k * 2) * 1.2
                 c = mul(hsv(k / 4 + int(e / 3.6 + k / 4) * 0.37, 0.7, 1), 1 - 0.7 * ph * ph)
                 for dx, dy in ((0, 2), (1, 2), (1, 1), (1, 0), (2, 0)):
@@ -5468,6 +5480,8 @@ class Worker(Clock):
             n, ph = int(e / 0.7), (e / 0.7) % 1  # podbicie co 0.7 s, co trzecie wysoko
             top = 0 if n % 3 == 2 else 4
             y = 7 - (7 - top) * 4 * ph * (1 - ph)
+            if e >= dur - 0.7:  # ostatnie podbicie: piłka wylatuje górą poza kadr
+                y = 7 - 20 * ph
             x = min(cx(-1), cx(0))
             dark = (n + int(ph * 4)) % 4  # łata kręci się
             for i, (dx, dy) in enumerate(((0, 0), (1, 0), (1, 1), (0, 1))):
@@ -5494,7 +5508,9 @@ class Worker(Clock):
                 f.set(cx(-7), 1, (230, 30, 30))
                 f.set(cx(-6), 1 + wave, (230, 30, 30))
                 f.set(cx(-7), 2, (230, 30, 30))
-            if pose == "kuca2":  # łopatka w piasku
+            if out is not None:  # po końcu zostaje sam zamek (gaśnie)
+                pass
+            elif pose == "kuca2":  # łopatka w piasku
                 f.set(cx(-1), 9, wood)
                 f.set(cx(-2), 10, (170, 180, 200))
                 f.set(cx(-1), 10, (170, 180, 200))
@@ -5508,6 +5524,8 @@ class Worker(Clock):
                         f.set(cx(-2 - 6 * a), 7 - 3 * math.sin(math.pi * a) + 2 * a, sand)
         elif name in self.SHOTS:
             self.shoot(f, name, e, flip, cx, dur)
+        elif name == "spanie" and out is not None:  # wstał: zostaje zaścielone łóżko (gaśnie)
+            sprite(f, [r.translate(str.maketrans("YSCE", "....")) for r in self.POSES["spi1"]], sx, 0, self.PAL, flip)
         elif name == "spanie":
             for k in (0, 1):
                 ph = (e / 2.4 + k / 2) % 1
@@ -5577,18 +5595,20 @@ class Worker(Clock):
             return
         wob = (1 if int(e * 25) % 2 else -1) if any(name == "łuk" and h < 0.4 for _, h in hits) else 0
         y0 = 2 + round((1 - clamp(pop / 0.4)) * 9)  # tarcza wyskakuje z podłogi
+        if e > dur:  # i po końcu się w nią chowa
+            y0 = 2 + round(clamp((e - dur) / 0.5) * 9)
         sprite(f, self.TARGET, tx + wob, y0, self.TARGET_PAL)
         if name == "bazooka":
             return
         for i, h in hits:
             if name == "łuk":                       # strzała wbita w tarczę
-                ay = my + self.ARROW_DY[i % len(self.ARROW_DY)]
+                ay = my + self.ARROW_DY[i % len(self.ARROW_DY)] + y0 - 2
                 for q in range(0, 3):
                     f.set(face - d * q + wob, ay, (170, 110, 50))
                 f.set(face - d * 3 + wob, ay, (230, 40, 40))
             else:                                   # dziura po kuli (i błysk przy trafieniu)
                 hx, hy = self.HOLES[i % len(self.HOLES)]
-                f.set(tx + hx, my + hy, (255, 255, 255) if h < 0.1 else (20, 10, 10))
+                f.set(tx + hx, my + hy + y0 - 2, (255, 255, 255) if h < 0.1 else (20, 10, 10))
 
     BANNER_SPEED = 18  # px/s przy tempie tekstu 1 – wolno, żeby dało się przeczytać
 
@@ -5658,26 +5678,28 @@ class Worker(Clock):
         return True
 
     def start_ride(self, name, t, xs, xr, here_only):
-        """Wsiada i jedzie: za krawędź panelu i z powrotem z drugiej strony (za cyframi), kilka okrążeń, aż do
-        nowego miejsca. Okrążeń tyle, ile się zmieści przed przestawianiem cyfr. -> czas jazdy albo None."""
+        """Jazda bez znikania na środku panelu: schodzi za krawędź po swojej stronie, pojazd wjeżdża z drugiej
+        strony i przejeżdża cały panel (za cyframi) kilka razy, znika za tą samą krawędzią, a ludzik wraca piechotą
+        na nowe miejsce. Okrążeń tyle, ile się zmieści przed przestawianiem cyfr. -> czas całości albo None."""
         zs = self.side_zones(xs, xr)
         if here_only:
             zs = [z for z in zs if z[0] - 1 <= self.x <= z[1] + 1] or zs
         z = random.choice(zs)
         goal, o = self.spot(z, xr), self.ride_off(name)
-        d = -1 if goal >= self.x else 1  # odjeżdża od celu i wraca zza drugiej krawędzi: trasa najwyżej W + 2*o
-        out = W + o - self.x if d > 0 else self.x + o
-        back = goal + o if d > 0 else W + o - goal
+        d = 1 if z[0] > xr else -1                 # krawędź po jego stronie
+        edge = W + 1 if d > 0 else -9              # tam ludzik (8 px) jest już całkiem za kadrem
+        walk = even_speed(self.WALK)
+        t_out, t_in = abs(edge - self.x) / walk, abs(edge - goal) / walk
         _, v, laps_range = self.RIDES[name]
         v = even_speed(v)
         lo, hi = (max(1, round(n * LEN_MUL[ludzik_len(name)])) for n in laps_range)
-        free = self.free - 2 - (abs(goal - xr - 1) - abs(self.x - xr - 1)) / self.WALK  # do roboty pójdzie od celu
-        if (out + back) / v > free:  # out + back to najwyżej jedno okrążenie
+        free = self.free - 2 - t_out - t_in - (abs(goal - xr - 1) - abs(self.x - xr - 1)) / self.WALK
+        laps = min(random.randint(lo, hi), int(free / self.ride_time(name)))
+        if laps < 1:
             return None
-        laps = min(random.randint(lo, hi), 1 + int((free - (out + back) / v) / self.ride_time(name)))
-        self.ride = {"n": name, "t0": t, "x0": self.x, "d": d, "goal": goal, "out": out,
-                     "len": out + (laps - 1) * (W + 2 * o) + back}
-        return self.ride["len"] / v
+        self.ride = {"n": name, "t0": t, "x0": self.x, "d": d, "goal": goal, "edge": edge, "t_out": t_out,
+                     "t_in": t_in, "len": laps * (W + 2 * o)}
+        return t_out + self.ride["len"] / v + t_in
 
     def ride_time(self, name):
         """Czas jednego okrążenia."""
@@ -5701,18 +5723,27 @@ class Worker(Clock):
         return dur if dur >= (lo if name in self.SCENES else min(lo, 3)) and dur >= cycle else None
 
     def draw_ride(self, f, t, blink):
-        """-> False, gdy dojechał."""
+        """-> False, gdy wrócił na miejsce."""
         r = self.ride
         poses, v, _ = self.RIDES[r["n"]]
-        k = min(r["len"], round((t - r["t0"]) * even_speed(v), 6))  # round: 0,9999999 to jeszcze nie krok wstecz
-        if k >= r["len"]:
-            self.x, self.goal, self.ride = r["goal"], None, None
-            return False
-        d = r["d"]
+        v, walk, d = even_speed(v), even_speed(self.WALK), r["d"]
+        e = t - r["t0"]
+        t_ride = r["len"] / v
+        if e < r["t_out"] or e >= r["t_out"] + t_ride:  # idzie za krawędź albo wraca zza niej
+            back = e >= r["t_out"]
+            q = e - r["t_out"] - t_ride if back else e
+            if back and q >= r["t_in"]:
+                self.x, self.goal, self.ride = r["goal"], None, None
+                return False
+            x = r["edge"] - d * walk * q if back else r["x0"] + d * walk * q
+            self.x = clamp(round(x, 6), -10, W)
+            pose = "idzie1" if int(q * 6) % 2 else "idzie2"
+            self.man(f, pose, self.x + self.place(pose, (d > 0) != back), (d > 0) != back, blink)
+            return True
+        k = round((e - r["t_out"]) * v, 6)  # round: 0,9999999 to jeszcze nie krok wstecz
         o = self.ride_off(r["n"])
-        lap = W + 2 * o
-        x = r["x0"] + d * k if k < r["out"] else (-o if d > 0 else W + o) + d * ((k - r["out"]) % lap)
-        self.x = clamp(x, -10, W)  # gdyby przerwało przestawianie cyfr – idzie do roboty stąd
+        x = (-o if d > 0 else W + o) + d * (k % (W + 2 * o))  # wjeżdża z drugiej strony, znika za jego krawędzią
+        self.x = clamp(r["edge"], -10, W)  # gdyby przerwało przestawianie cyfr – idzie do roboty zza krawędzi
         pose, flip = poses[int(k / 3) % len(poses)], d > 0
         sx = x + self.place(pose, flip)
         self.man(f, pose, sx, flip, blink)
@@ -6074,6 +6105,20 @@ class Worker(Clock):
                 if r == "never":
                     self.next_trick = t + 3
             standing = self.goal is None or abs(self.x - self.goal) < 0.5
+        if self.outro:  # rzeczy po skończonym zajęciu dolatują, spadają albo gasną
+            name, t0, dur, pose, sx, flip = self.outro
+            q = t - t0 - dur
+            if q > self.OUTRO[name]:
+                self.outro = None
+            else:
+                g = Frame() if name in self.FADE else f
+                self.props(g, name, pose, t - t0, sx, flip, dur, out=q)
+                if g is not f:
+                    k = 1 - q / self.OUTRO[name]
+                    for y, row in enumerate(g.px):
+                        for x, c in enumerate(row):
+                            if c != (0, 0, 0):
+                                f.set(x, y, mul(c, k))
         if self.ride and self.ride["n"] in off and not self.ride.get("forced"):  # właśnie wyłączone w ustawieniach
             self.ride = None
         if self.ride and self.draw_ride(f, t, blink):
@@ -6092,7 +6137,10 @@ class Worker(Clock):
                 sx = self.x + self.place(poses[i], flip)
                 self.man(f, poses[i], sx, flip, blink)
                 self.props(f, name, poses[i], t - t0, sx, flip, dur)
+                self.last = (poses[i], sx, flip)
                 return
+            if name in self.OUTRO and self.last:
+                self.outro = (name, t0, dur, *self.last)
             self.trick, self.wait = None, max(self.wait, t + 1)
         away = not self.at_side(xs, xr)  # po drugiej stronie niż ustawiona – zaraz wraca (także bez spacerów)
         if t >= self.wait and standing and ("spacer" not in off or away):
