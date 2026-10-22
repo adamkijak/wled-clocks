@@ -4774,8 +4774,8 @@ def ludzik_len(name):
 class Worker(Clock):
     """Robotnik w kasku sam przestawia cyfry, na jeden z 11 sposobów (przepycha, maluje wałkiem, zapadnia, bazooka,
     kopniak, zamiatanie, czary, spawanie laserem, lina, holowanie autem, obrót korbą) – nowe cyfry wchodzą równo z pełną
-    minutą; z nudów spaceruje po obu stronach zegara, czyta, śpi, je, pije kawę, żongluje, zamiata, robi pajacyki i pompki,
-    strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem i autem (kilka okrążeń:
+    minutą; z nudów spaceruje po obu stronach zegara, czyta, śpi w łóżku, je, gra na gitarze, podbija piłkę, buduje
+    zamek z piasku, żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem i autem (kilka okrążeń:
     wyjeżdża za krawędź i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą.
     Zajęcia trwają tyle, ile zostało do przestawiania cyfr (najwyżej górna granica z TRICKS)."""
 
@@ -4810,8 +4810,18 @@ class Worker(Clock):
                    "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
         "czyta2": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", ".W.SMMMS.", "W.WSBBBBB", "KKKSBBBBB", "....BBBBS",
                    "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
-        "spi1": ["............"] * 9 + ["YYSSBBBBPPP.", "YYCSBBBBPPOO"],
-        "spi2": ["............"] * 8 + [".....BB.....", "YYSSBBBBPPP.", "YYCSBBBBPPOO"],
+        "spi1": ["................"] * 5 + ["T...............", "T.YYY...........", "T.YSCS..........",
+                                            "TWYSSSJJJJJJJJ.T", "TWWWJJJJJJJJJJJT", "TTTTTTTTTTTTTTTT"],
+        "spi2": ["................"] * 5 + ["T...............", "T.YYY...........", "T.YSCS..JJJJJ...",
+                                            "TWYSSSJJJJJJJJ.T", "TWWWJJJJJJJJJJJT", "TTTTTTTTTTTTTTTT"],
+        "gitara1": [".....YYYYY.", "....YYYYYYY", ".....SESES.", ".....SSSSS.", "Q....SMMMS.", ".TSBBBBBBB.",
+                    "..TTUUUBBBB", "...UUUUUSBB", "....UUUPPP.", ".....PP.PP.", "....OOO.OOO"],
+        "gitara2": [".....YYYYY.", "....YYYYYYY", ".....SESES.", ".....SSSSS.", "Q....SRRRS.", ".TSBBBBBBB.",
+                    "..TTUUUBBBB", "...UUUUUBBB", "....UUUSPP.", ".....PP.PP.", "....OOO.OOO"],
+        "kopie": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", ".BBBBBBB", ".SBBBBBS",
+                  "..PPPPP.", "OOPP.PP.", ".....OOO"],
+        "kuca2": ["........", "........", "..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SSMSS.", "..BBBBB.",
+                  "SSBBBBB.", ".PPPPPPP", ".OO...OO"],
         "je1": ["...YYYYY.", "..YYYYYYY", "...SESES.", ".AASSSSS.", ".AASRRRS.", "..SBBBBBB", "...BBBBBB", "...BBBBBS",
                 "...PPPPP.", "...PP.PP.", "..OOO.OOO"],
         "je2": ["...YYYYY.", "..YYYYYYY", "...SESES.", "...SSSSS.", "...SMMMS.", ".AABBBBBB", ".AASBBBBB", "...BBBBBS",
@@ -4848,8 +4858,6 @@ class Worker(Clock):
                  "....NXXXSESESXXN....", "...NXXXXSSSSSXXXN...", ".NNNNNNNNNNNNNNNNNN.", "LNNNNNNNNNNNNNNNNNNN",
                  "NNNQQQNNNNNNNNQQQNNR", "..QQHQQ......QQHQQ..", "...QQQ........QQQ..."],
     }.items()}
-    POSES["kawa1"] = [r.replace("A", "W") for r in POSES["je1"]]  # kubek zamiast jabłka
-    POSES["kawa2"] = [r.replace("A", "W") for r in POSES["je2"]]
     POSES["glowa1"], POSES["glowa2"] = POSES["stoi"][::-1], POSES["idzie1"][::-1]  # stanie na głowie, nogi machają
     # nudzi się: nazwa -> (czas od–do w s, pozy jednej rundy, czas jednej pozy, co druga odbita w lustrze);
     # czas zaokrągla się do pełnych rund, a gdy do przestawiania cyfr zostało mniej – tyle rund, ile się zmieści
@@ -4860,15 +4868,19 @@ class Worker(Clock):
         "pompki": ((6, 14), ("pompka1", "pompka2"), 0.45, False),
         "na głowie": ((4, 9), ("glowa1", "glowa2"), 0.3, False),
         "czytanie": ((15, 35), ("czyta1",) * 7 + ("czyta2",), 0.25, False),
-        "spanie": ((20, 40), ("spi1", "spi2"), 0.9, False),
+        "spanie": ((20, 40), ("spi1", "spi2"), 0.9, False),  # w łóżku
         "jedzenie": ((10, 20), ("je1", "je2", "je3", "je2", "je3"), 0.35, False),
-        "kawa": ((12, 25), ("kawa2",) * 5 + ("kawa1",) * 2, 0.4, False),
+        "gitara": ((12, 30), ("gitara1", "gitara2"), 0.25, False),
+        "piłka": ((10, 22), ("kopie", "stoi"), 0.35, False),        # runda = jedno podbicie
+        "piasek": ((20, 40), ("kuca2", "kuca"), 0.4, False),        # buduje zamek z piasku
         "żonglerka": ((10, 22), ("zongl1", "zongl2"), 0.25, False),
         "zamiatanie": ((10, 20), ("zamiata1", "zamiata2"), 0.4, False),
         "łuk": ((11, 25), ("luk1",) * 4 + ("luk2",) * 8, 0.3, False),  # runda = jedna strzała
         "pistolet": ((8, 20), ("pist1",) * 3 + ("pist2", "pist1", "pist1", "pist1") * 3 + ("pist1",) * 4, 0.2, False),
         "bazooka": ((11, 22), ("baz1",) * 4 + ("baz2",) * 2 + ("baz1",) * 12, 0.3, False),
     }
+    REACH = {"piłka": 3, "piasek": 16}  # ile px przed ludzikiem zajmują rzeczy (piłka, piaskownica)
+    CASTLE = ["#.#...#.#", "###...###", "###.#.###", "#########", "####.####", "###...###"]  # rzędy 4–9
     RIDES = {"rower": (("rower1", "rower2"), 24, (2, 5)), "auto": (("auto",), 45, (3, 8))}  # pozy, px/s, okrążenia
     RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony
     # strzelanie przez zegar do tarczy po drugiej stronie: poza strzału (pierwsza z serii = strzał) i prędkość pocisku (px/s)
@@ -4882,9 +4894,10 @@ class Worker(Clock):
            "B": (230, 40, 40), "P": (40, 90, 230), "O": (210, 210, 210), "C": (150, 90, 60), "W": (235, 235, 235),
            "K": (40, 170, 90), "A": (110, 220, 40), "T": (150, 90, 40), "G": (230, 180, 60), "D": (130, 130, 145),
            "V": (100, 125, 40), "F": (0, 200, 255), "Q": (110, 110, 120), "H": (220, 220, 230), "N": (30, 160, 60),
-           "X": (110, 170, 230), "L": (255, 255, 170)}  # D broń/grot, V rura bazooki
+           "X": (110, 170, 230), "L": (255, 255, 170), "U": (215, 120, 30), "J": (70, 110, 220)}
+    # D broń/grot, V rura bazooki, U pudło gitary, J kołdra
     # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech (w aucie: tylne światło), W kartki/kubek, K okładka,
-    # A jabłko, T kij, G miotła, F rama roweru, Q opony, H piasty/kołpaki, N karoseria, X szyby, L reflektor
+    # A jabłko, T kij/gryf/łóżko, G miotła, F rama roweru, Q opony, H piasty/kołpaki, N karoseria, X szyby, L reflektor
     WALK, MOVE = 10, 9  # px/s: chód i przesuwanie cyfr
 
     def __init__(self):
@@ -5246,8 +5259,11 @@ class Worker(Clock):
 
     def fits(self, trick, fl, xs, xr, x=None):
         """Czy sztuczka mieści się tu, gdzie ludzik stoi (albo w x): w panelu i nie na cyfrach."""
+        r = self.REACH.get(next((n for n, v in self.TRICKS.items() if v is trick), None), 0)
         for i, pose in enumerate(trick[1]):
-            a, b = self.span(pose, self.x if x is None else x, fl != (trick[3] and i % 2 == 1))
+            flip = fl != (trick[3] and i % 2 == 1)
+            a, b = self.span(pose, self.x if x is None else x, flip)
+            a, b = (a, b + r) if flip else (a - r, b)
             if a < 0 or b > W - 1 or (b >= xs[0] and a <= xr):
                 return False
         return True
@@ -5278,7 +5294,7 @@ class Worker(Clock):
         return z[1] - k if z[0] > xr else z[0] + k
 
     def props(self, f, name, pose, e, sx, flip, dur):
-        """Rzeczy przy niektórych zajęciach: piłeczki, para z kubka, „Z” nad śpiącym."""
+        """Rzeczy przy niektórych zajęciach: piłeczki, nuty, piłka, piaskownica z zamkiem, „Z” nad śpiącym."""
         w = len(self.POSES[pose][0])
         cx = lambda c: sx + (w - 1 - c if flip else c)
         if name == "żonglerka":
@@ -5289,16 +5305,61 @@ class Worker(Clock):
                     f.set(cx(1 + 6 * a), 6 - 6 * math.sin(math.pi * a), c)
                 else:
                     f.set(cx(7 - 6 * (ph - 0.65) / 0.35), 7, c)
-        elif name == "kawa" and pose == "kawa2":
-            steam = visible((90, 90, 100), 4)
-            for k in range(3):
-                f.add(cx(1 + (int(e * 3) + k) % 2), 4 - k - (e * 2) % 1, mul(steam, 1 - k * 0.25))
+        elif name == "gitara":
+            for k in range(3):  # nuty ulatują znad gitary
+                ph = (e / 2.1 + k / 3) % 1
+                x, y = cx(1 - 3 * ph), 3 - 7 * ph + math.sin(ph * 9 + k) * 0.6
+                c = mul(hsv(k / 3 + int(e / 2.1 + k / 3) * 0.37, 0.7, 1), 1 - 0.6 * ph)
+                for dx, dy in ((0, 2), (1, 2), (1, 1), (1, 0), (2, 0)):
+                    f.set(x + dx, y + dy, c)
+        elif name == "piłka":
+            n, ph = int(e / 0.7), (e / 0.7) % 1  # podbicie co 0.7 s, co trzecie wysoko
+            top = 0 if n % 3 == 2 else 4
+            y = 7 - (7 - top) * 4 * ph * (1 - ph)
+            x = min(cx(-1), cx(0))
+            dark = (n + int(ph * 4)) % 4  # łata kręci się
+            for i, (dx, dy) in enumerate(((0, 0), (1, 0), (1, 1), (0, 1))):
+                f.set(x + dx, y + dy, (40, 40, 45) if i == dark else (235, 235, 235))
+        elif name == "piasek":
+            sand, wood = (220, 175, 95), (150, 90, 40)
+            for c in range(-15, 0):  # piaskownica przed nim
+                f.set(cx(c), 10, wood if c == -15 else sand)
+            f.set(cx(-15), 9, wood)
+            f.set(cx(0), 10, wood)
+            f.set(cx(0), 9, wood)
+            for c in (-14, -13):  # wiaderko
+                for y in (8, 9):
+                    f.set(cx(c), y, (230, 40, 40) if y == 9 or c == -14 else (255, 90, 70))
+            f.set(cx(-13.5), 7, (200, 200, 200))
+            px = [(c, y) for y in range(9, 3, -1) for c in range(9) if self.CASTLE[y - 4][c] == "#"]  # od dołu
+            g = clamp(e / max(1.0, dur * 0.85))
+            for i, (c, y) in enumerate(px[:int(g * len(px))]):
+                f.set(cx(-12 + c), y, lerp(sand, (255, 230, 170), 0.35 * (c < 4) + 0.15 * hash1(i)))
+            if g >= 1:  # gotowe: chorągiewka
+                for y in (1, 2, 3):
+                    f.set(cx(-8), y, (150, 150, 160))
+                wave = int(e * 4) % 2
+                f.set(cx(-7), 1, (230, 30, 30))
+                f.set(cx(-6), 1 + wave, (230, 30, 30))
+                f.set(cx(-7), 2, (230, 30, 30))
+            if pose == "kuca2":  # łopatka w piasku
+                f.set(cx(-1), 9, wood)
+                f.set(cx(-2), 10, (170, 180, 200))
+                f.set(cx(-1), 10, (170, 180, 200))
+            else:  # łopatka w górze, piasek leci na zamek
+                f.set(cx(-1), 7, wood)
+                f.set(cx(-2), 7, (170, 180, 200))
+                q = (e / 0.4) % 1
+                for k in range(3):
+                    a = clamp(q * 1.4 - k * 0.15)
+                    if 0 < a < 1:
+                        f.set(cx(-2 - 6 * a), 7 - 3 * math.sin(math.pi * a) + 2 * a, sand)
         elif name in self.SHOTS:
             self.shoot(f, name, e, flip, cx, dur)
         elif name == "spanie":
             for k in (0, 1):
                 ph = (e / 2.4 + k / 2) % 1
-                f.draw(text_px("Z", cx(7 + 3 * ph) if flip else cx(3 + 3 * ph), 3 - 5 * ph, SMALL),
+                f.draw(text_px("Z", cx(3) - 5 * flip + 3 * ph, 3 - 5 * ph, SMALL),  # nad głową na poduszce
                        mul((150, 180, 255), 1 - 0.7 * ph))
 
     def shot_times(self, name, dur):

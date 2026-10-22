@@ -1,5 +1,11 @@
 # Zmiany
 
+## 1.17.0
+
+- Ludzik: zamiast kawy (z daleka wyglądała jak papieros) gra na gitarze (nuty ulatują w górę), podbija piłkę
+  (co trzecie podbicie wysoko) i buduje w piaskownicy zamek z piasku, który rośnie aż do chorągiewki.
+- Ludzik śpi w łóżku: na poduszce, pod kołdrą, która unosi się przy oddechu.
+
 ## 1.16.0
 
 31 nowych efektów bez zegara (razem 143):
