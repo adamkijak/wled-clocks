@@ -64,6 +64,7 @@ import hmac
 import html
 import ipaddress
 import http.server as httpd  # „http” to w tym pliku funkcja pobierająca dane
+import itertools
 import json
 import threading
 import unicodedata
@@ -4775,7 +4776,8 @@ class Worker(Clock):
     """Robotnik w kasku sam przestawia cyfry, na jeden z 11 sposobów (przepycha, maluje wałkiem, zapadnia, bazooka,
     kopniak, zamiatanie, czary, spawanie laserem, lina, holowanie autem, obrót korbą) – nowe cyfry wchodzą równo z pełną
     minutą; z nudów spaceruje po obu stronach zegara, czyta, śpi w łóżku, je, gra na gitarze, podbija piłkę, buduje
-    zamek z piasku, żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem i autem (kilka okrążeń:
+    zamek z piasku, goni balonik, głaszcze kota albo psa, gasi płonący śmietnik (przyjeżdża wozem strażackim),
+    żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem, autem, traktorem z przyczepami i kombajnem (kilka okrążeń:
     wyjeżdża za krawędź i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą.
     Zajęcia trwają tyle, ile zostało do przestawiania cyfr (najwyżej górna granica z TRICKS)."""
 
@@ -4858,6 +4860,27 @@ class Worker(Clock):
                  "....NXXXSESESXXN....", "...NXXXXSSSSSXXXN...", ".NNNNNNNNNNNNNNNNNN.", "LNNNNNNNNNNNNNNNNNNN",
                  "NNNQQQNNNNNNNNQQQNNR", "..QQHQQ......QQHQQ..", "...QQQ........QQQ..."],
     }.items()}
+    TRACTOR = [".................", "........NNNNNNNN.", "...D....X.YYY..N.", "...D....XESSY..N.", "...D....XSSSS..N.",
+               ".NNDNNNNNBBBBBBN.", "LNNNNNNNQQQQQNNN.", "NNNNNNN{a}NN.", ".QQ.NNNQGGHGGQNT.", "Q{c}Q...{b}.TT",
+               ".QQ.....QQQQQ...."]
+    HAY = ["..............", "..............", "..............", "....GGGGGG....", "..GGTGGTGGTGG.",
+           ".NNNNNNNNNNNNN", ".NNNNNNNNNNNNN", ".DDDDDDDDDDDDD", "...QQQ...QQQ..", "TT.Q{h}Q...Q{h}Q..", "...QQQ...QQQ.."]
+    PUMPKINS = HAY[:3] + ["....UU..UU....", "..UUUUUUUUUU.."] + HAY[5:]
+    COMBINE = ["........NNNNNNN...........", "........X.YYY.NNNNNNNNN...", "........XESSY.NNNNNNNNNDDD",
+               "........XSSSS.NNNNNNNNN...", "........XBBBBNNNNNNNNNN...", "......NNNNNNNNNNNNNNNNNN..",
+               "....NNNQQQQQNNNNNNNNNNNNN.", "....NN{a}NNNNNNNNNNNN.", "DDDDDDQGGHGGQNNNNNNN.QQ...",
+               "DDDDDD{b}.......Q{c}Q..", ".......QQQQQ.........QQ..."]
+    for i, f_ in enumerate((dict(a="QQHGGQQ", b="QQGGHQQ", c="GG", h="H"), dict(a="QQGGHQQ", b="QQHGGQQ", c="GH", h="G"))):
+        POSES[f"traktor{i + 1}"], POSES[f"kombajn{i + 1}"] = [], []  # dwie klatki: kręcące się koła
+        for x_, y_, z_ in zip(TRACTOR, HAY, PUMPKINS):  # traktor z przyczepą siana i przyczepą dyń
+            POSES[f"traktor{i + 1}"].append((x_ + y_ + z_).format(**f_))
+        for x_ in COMBINE:
+            POSES[f"kombajn{i + 1}"].append(x_.format(**f_))
+    POSES["woz"] = ["......................", "..ZZZZ................", ".ZXYYYZ.WWWWWWWWWWWWW.",
+                    ".ZXSESZ.W.W.W.W.W.W.W.", ".ZXSSSZZZZZZZZZZZZZZZ.", "LZZZZZZZWWWWWWWWWWWWZ.",
+                    "ZZZZZZZZZZZZZZZZZZZZZ.", "ZZZZZZZZZZZZZZZZZZZZZD", ".ZQQQZZZZZZZZZZZQQQZZ.",
+                    "..QHQ...........QHQ...", "..QQQ...........QQQ..."]  # wóz strażacki
+    del TRACTOR, HAY, PUMPKINS, COMBINE, i, f_, x_, y_, z_
     POSES["glowa1"], POSES["glowa2"] = POSES["stoi"][::-1], POSES["idzie1"][::-1]  # stanie na głowie, nogi machają
     # nudzi się: nazwa -> (czas od–do w s, pozy jednej rundy, czas jednej pozy, co druga odbita w lustrze);
     # czas zaokrągla się do pełnych rund, a gdy do przestawiania cyfr zostało mniej – tyle rund, ile się zmieści
@@ -4873,31 +4896,50 @@ class Worker(Clock):
         "gitara": ((12, 30), ("gitara1", "gitara2"), 0.25, False),
         "piłka": ((10, 22), ("kopie", "stoi"), 0.35, False),        # runda = jedno podbicie
         "piasek": ((20, 40), ("kuca2", "kuca"), 0.4, False),        # buduje zamek z piasku
+        "balon": ((15, 30), ("stoi",), 1.0, False),                   # sceny: rysuje je scene_*()
+        "pożar": ((26, 34), ("stoi",), 1.0, False),
+        "zwierzak": ((14, 26), ("stoi",), 1.0, False),
         "żonglerka": ((10, 22), ("zongl1", "zongl2"), 0.25, False),
         "zamiatanie": ((10, 20), ("zamiata1", "zamiata2"), 0.4, False),
         "łuk": ((11, 25), ("luk1",) * 4 + ("luk2",) * 8, 0.3, False),  # runda = jedna strzała
         "pistolet": ((8, 20), ("pist1",) * 3 + ("pist2", "pist1", "pist1", "pist1") * 3 + ("pist1",) * 4, 0.2, False),
         "bazooka": ((11, 22), ("baz1",) * 4 + ("baz2",) * 2 + ("baz1",) * 12, 0.3, False),
     }
+    # sceny: ludzik się w nich przemieszcza -> (najmniejsza szerokość miejsca po jego stronie w px, najkrótszy czas w s)
+    SCENES = {"balon": (26, 12), "pożar": (40, 26), "zwierzak": (21, 10)}
+    SCENE_FN = {"balon": "balon", "pożar": "pozar", "zwierzak": "zwierzak"}
     REACH = {"piłka": 3, "piasek": 16}  # ile px przed ludzikiem zajmują rzeczy (piłka, piaskownica)
     CASTLE = ["#.#...#.#", "###...###", "###.#.###", "#########", "####.####", "###...###"]  # rzędy 4–9
-    RIDES = {"rower": (("rower1", "rower2"), 24, (2, 5)), "auto": (("auto",), 45, (3, 8))}  # pozy, px/s, okrążenia
-    RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony
+    RIDES = {"rower": (("rower1", "rower2"), 24, (2, 5)), "auto": (("auto",), 45, (3, 8)),
+             "traktor": (("traktor1", "traktor2"), 14, (1, 3)), "kombajn": (("kombajn1", "kombajn2"), 11, (1, 2))}  # pozy, px/s, okrążenia
+    RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony (długie – więcej, ride_off())
     # strzelanie przez zegar do tarczy po drugiej stronie: poza strzału (pierwsza z serii = strzał) i prędkość pocisku (px/s)
     SHOTS = {"łuk": ("luk2", 55), "pistolet": ("pist2", 120), "bazooka": ("baz2", 50)}
     ARROW_DY = (0, -1, 1, -2, 2, 0, 1, -1)  # strzały wbijają się w różne miejsca tarczy
     HOLES = ((1, 0), (1, -2), (1, 2), (0, -1), (2, 1), (0, 1), (2, -1), (1, -1), (1, 1), (0, 0), (2, 0), (0, -2),
              (2, 2), (1, -3), (1, 3))  # dziury po kulach (x w tarczy, y od środka)
+    PETS = {"kot": ({"idzie1": ["......O.O.", "O.....OOO.", "O.....OEON", ".OSOSOSOO.", ".OOOOOOO..", ".O.O..O.O."],
+                     "idzie2": ["......O.O.", ".O....OOO.", "O.....OEON", ".OSOSOSOO.", ".OOOOOOO..", "..OO..OO.."],
+                     "siedzi1": ["......O.O.", "......OOO.", "......OEON", "O....OOOO.", "O..OOOOOO.", ".OOOOO.OO."],
+                     "siedzi2": ["......O.O.", "......OOO.", "......OEON", ".....OOOO.", "O..OOOOOO.", "OOOOOO.OO."]},
+                    {"O": (230, 120, 25), "S": (150, 60, 10), "E": (60, 255, 60), "N": (255, 110, 150)}),
+            "pies": ({"idzie1": ["......OO...", ".....DOEOOK", "O....DOOO..", ".OOOOOOOO..", ".OOOOOOOO..", ".O.O...O.O."],
+                      "idzie2": ["......OO...", ".....DOEOOK", ".O...DOOO..", ".OOOOOOOO..", ".OOOOOOOO..", "..O.O.O.O.."],
+                      "siedzi1": ["......OO...", ".....DOEOOK", ".....DOOO..", "....OOOO...", "O..OOOOO...", ".OOOO.OO..."],
+                      "siedzi2": ["......OO...", ".....DOEOOK", ".....DOOO..", "O...OOOO...", ".O.OOOOO...", "..OOO.OO..."]},
+                     {"O": (170, 100, 40), "D": (90, 50, 20), "E": (230, 230, 230), "K": (60, 30, 30)})}
     TARGET = [".R.", "RWR", "WRW", "RYR", "WRW", "RWR", ".R.", "T.T", "T.T"]
     TARGET_PAL = {"R": (230, 30, 30), "W": (235, 235, 235), "Y": (255, 220, 0), "T": (150, 90, 40)}
     PAL = {"Y": (255, 200, 0), "S": (255, 180, 130), "E": (0, 0, 0), "M": (0, 0, 0), "R": (170, 0, 25),
            "B": (230, 40, 40), "P": (40, 90, 230), "O": (210, 210, 210), "C": (150, 90, 60), "W": (235, 235, 235),
            "K": (40, 170, 90), "A": (110, 220, 40), "T": (150, 90, 40), "G": (230, 180, 60), "D": (130, 130, 145),
            "V": (100, 125, 40), "F": (0, 200, 255), "Q": (110, 110, 120), "H": (220, 220, 230), "N": (30, 160, 60),
-           "X": (110, 170, 230), "L": (255, 255, 170), "U": (215, 120, 30), "J": (70, 110, 220)}
-    # D broń/grot, V rura bazooki, U pudło gitary, J kołdra
-    # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech (w aucie: tylne światło), W kartki/kubek, K okładka,
-    # A jabłko, T kij/gryf/łóżko, G miotła, F rama roweru, Q opony, H piasty/kołpaki, N karoseria, X szyby, L reflektor
+           "X": (110, 170, 230), "L": (255, 255, 170), "U": (215, 120, 30), "J": (70, 110, 220),
+           "Z": (220, 25, 20)}
+    # D broń/grot, V rura bazooki, U pudło gitary/dynie, J kołdra, Z wóz strażacki
+    # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech (w aucie: tylne światło), W kartki/poduszka/drabina,
+    # K okładka, A jabłko, T kij/gryf/łóżko/dyszel, G miotła/siano/felgi, F rama roweru, Q opony, H piasty/kołpaki,
+    # N karoseria (auto, traktor, kombajn), X szyby, L reflektor
     WALK, MOVE = 10, 9  # px/s: chód i przesuwanie cyfr
 
     def __init__(self):
@@ -4909,6 +4951,7 @@ class Worker(Clock):
         self.ride, self.left, self.free = None, 60.0, 0.0  # free: s animacji do przestawiania cyfr
         self.how_seed = random.random()  # losowy sposób przestawiania: inny w każdym uruchomieniu
         self.char = None  # postać na sztywno (podgląd postaci); None = z ustawień
+        self.sc = {}  # stan bieżącej sceny (balon, pożar, zwierzak)
 
     @staticmethod
     def layout(s):
@@ -5236,11 +5279,18 @@ class Worker(Clock):
             for px_, py in text_px(s[i], xs[i], 1):
                 f.set(round(cx + (px_ - cx) * k), py, shade)
 
-    def man(self, f, pose, x, flip=False, blink=False):
-        pal = dict(self.PAL, **LUDZIK_CHARS[LUDZIK["char"] if self.char is None else self.char][1])
+    def man(self, f, pose, x, flip=False, blink=False, char=None, dy=0):
+        """char: inna postać niż w ustawieniach (strażak przy pożarze); dy: podskok."""
+        if char is None:
+            char = LUDZIK["char"] if self.char is None else self.char
+        pal = dict(self.PAL, **LUDZIK_CHARS[char][1])
         if blink:
             pal["E"] = pal["S"]
-        sprite(f, self.POSES[pose], x, 0, pal, flip)
+        sprite(f, self.POSES[pose], x, round(dy), pal, flip)
+
+    def pose(self, f, pose, x, flip=False, blink=False, char=None, dy=0):
+        """Poza ustawiona po twarzy w x (jak w spacerze)."""
+        self.man(f, pose, x + self.place(pose, flip), flip, blink, char, dy)
 
     def place(self, pose, flip):
         """O ile przesunąć pozę, żeby środek twarzy był zawsze w x + 4 (głowa nie skacze między pozami)."""
@@ -5512,7 +5562,7 @@ class Worker(Clock):
         if here_only:
             zs = [z for z in zs if z[0] - 1 <= self.x <= z[1] + 1] or zs
         z = random.choice(zs)
-        goal, o = self.spot(z, xr), self.RIDE_OFF
+        goal, o = self.spot(z, xr), self.ride_off(name)
         d = -1 if goal >= self.x else 1  # odjeżdża od celu i wraca zza drugiej krawędzi: trasa najwyżej W + 2*o
         out = W + o - self.x if d > 0 else self.x + o
         back = goal + o if d > 0 else W + o - goal
@@ -5528,20 +5578,24 @@ class Worker(Clock):
 
     def ride_time(self, name):
         """Czas jednego okrążenia."""
-        return (W + 2 * self.RIDE_OFF) / self.RIDES[name][1]
+        return (W + 2 * self.ride_off(name)) / self.RIDES[name][1]
+
+    def ride_off(self, name):
+        """Ile px za krawędzią pojazd całkiem znika (traktor z przyczepami jest długi)."""
+        return max(self.RIDE_OFF, max(len(self.POSES[p][0]) for p in self.RIDES[name][0]) + 4)
 
     def trick_spec(self, name):
         """TRICKS[name] z czasem od–do według ustawionej długości."""
         (lo, hi), *rest = self.TRICKS[name]
-        k = LEN_MUL[ludzik_len(name)]
-        return ((lo * k, hi * k), *rest)
+        k, need = LEN_MUL[ludzik_len(name)], self.SCENES.get(name, (0, 0))[1]
+        return ((max(lo * k, need), max(hi * k, need)), *rest)
 
     def trick_len(self, name):
         """Ile pełnych rund zajęcia zmieści się przed przestawianiem cyfr -> najdłuższy czas albo None."""
         (lo, hi), poses, step, _ = self.trick_spec(name)
         cycle = len(poses) * step
         dur = int(min(hi, self.free - 2) / cycle) * cycle
-        return dur if dur >= min(lo, 3) and dur >= cycle else None
+        return dur if dur >= (lo if name in self.SCENES else min(lo, 3)) and dur >= cycle else None
 
     def draw_ride(self, f, t, blink):
         """-> False, gdy dojechał."""
@@ -5552,14 +5606,28 @@ class Worker(Clock):
             self.x, self.goal, self.ride = r["goal"], None, None
             return False
         d = r["d"]
-        lap = W + 2 * self.RIDE_OFF
-        x = r["x0"] + d * k if k < r["out"] else (-self.RIDE_OFF if d > 0 else W + self.RIDE_OFF) + d * ((k - r["out"]) % lap)
+        o = self.ride_off(r["n"])
+        lap = W + 2 * o
+        x = r["x0"] + d * k if k < r["out"] else (-o if d > 0 else W + o) + d * ((k - r["out"]) % lap)
         self.x = clamp(x, -10, W)  # gdyby przerwało przestawianie cyfr – idzie do roboty stąd
         pose, flip = poses[int(k / 3) % len(poses)], d > 0
         sx = x + self.place(pose, flip)
         self.man(f, pose, sx, flip, blink)
-        if r["n"] == "auto":
-            w = len(self.POSES[pose][0])
+        w = len(self.POSES[pose][0])
+        cx = lambda c: sx + (w - 1 - c if flip else c)
+        if r["n"] == "traktor":
+            for q in range(3):  # dym z rury wydechowej
+                ph = (t * 1.6 + q / 3) % 1
+                f.add(cx(3) - d * ph * 5, 1.5 - ph * 2.5, mul(visible((90, 90, 95), 4), 1 - ph))
+        elif r["n"] == "kombajn":
+            for q in range(4):  # nagarniacz kręci się nad hederem
+                a = q * math.pi / 2 + t * 5 * (1 if flip else -1)
+                f.line(cx(2.5), 5.5, cx(2.5 + math.cos(a) * 2.4), 5.5 + math.sin(a) * 2.4, visible((120, 100, 30)))
+                f.set(cx(2.5 + math.cos(a) * 2.4), 5.5 + math.sin(a) * 2.4, (240, 210, 60))
+            for q in range(5):  # sieczka i kurz z tyłu
+                ph = (t * 1.8 + q / 5) % 1
+                f.add(cx(25 + ph * 7), 8 + (hash1(q) - 0.5) * 2 - ph * 2, mul((200, 170, 90), (1 - ph) * 0.8))
+        elif r["n"] == "auto":
             front, back = (sx + w, sx - 1) if flip else (sx - 1, sx + w)
             for q in range(6):  # snop światła przed maską
                 f.add(front + d * q, 7 + (q > 2), mul((90, 85, 50), 1 - q / 6))
@@ -5596,6 +5664,234 @@ class Worker(Clock):
                              how_now=j["how"] if j else None, how_at=after if j else at,
                              how_next=self.pick_how(after if j else at))
 
+    def scene_xs(self, n, z, xr):
+        """Gdzie musi stać, żeby zacząć scenę: kot/pies podchodzi od krawędzi panelu, a przy pożarze śmietnik stoi
+        od strony zegara."""
+        lo, hi = z
+        o = 1 if z[0] > xr else -1
+        if n == "zwierzak":
+            lo, hi = (lo, min(hi, W - 20)) if o > 0 else (max(lo, 12), hi)
+        elif n == "pożar":
+            lo, hi = (lo + 9, hi) if o > 0 else (lo, hi - 9)
+        return lo, hi
+
+    def scene_init(self, n, z, xr):
+        o, p0, p1 = (1 if z[0] > xr else -1), max(0, z[0]), min(W - 1, z[1] + 7)
+        self.sc = {"o": o, "p0": p0, "p1": p1, "x0": self.x, "seed": random.uniform(0, 100)}
+        if n == "balon":
+            self.sc.update(mx=self.x, bx=self.x + 4 - 3 * o, by=2.5, vx=0.0, vy=0.0, fl=o > 0, jump=-9.0,
+                           gust=-9.0, caught=None)
+        elif n == "zwierzak":
+            kind = random.choice(list(self.PETS))
+            wa = len(self.PETS[kind][0]["idzie1"][0])
+            ax = self.x + 8 if o > 0 else self.x - 1 - wa
+            a0 = W + 1 if o > 0 else -wa - 1
+            run = random.choice((o, -o))  # ucieka tam, skąd przyszedł, albo za zegarem na drugą stronę
+            ra = W + 1 if run > 0 else -wa - 1
+            self.sc.update(kind=kind, ax=ax, a0=a0, ra=ra, run=run, tin=abs(ax - a0) / 12, trun=abs(ra - ax) / 32)
+        elif n == "pożar":
+            be = p0 + 4 if o > 0 else p1 - 4  # zewnętrzna krawędź śmietnika; u rośnie od niej na zewnątrz
+            far = be if o > 0 else W - 1 - be
+            self.sc.update(be=be, xout=W + 1 if o > 0 else -9, u_in=(W - be if o > 0 else be + 1) + 1,
+                           u_end=-(far + 23))
+
+    def scene_end(self, n, t):
+        if n == "pożar":  # odjechał wozem za zegar – wraca piechotą zza drugiej krawędzi
+            self.x, self.goal, self.wait = (-9 if self.sc["o"] > 0 else W + 1), self.sc["x0"], t
+        self.sc = {}
+
+    @staticmethod
+    def balloon(f, x, y, e):
+        """Pomarańczowy balonik ze sznurkiem; (x, y) – środek."""
+        for dy in range(-3, 4):
+            for dx in range(-2, 3):
+                if (dx / 1.7) ** 2 + (dy / 2.3) ** 2 <= 1:
+                    c = (255, 185, 90) if (dx, dy) == (-1, -1) else (255, 120, 0) if dx < 1 else (210, 85, 0)
+                    f.set(x + dx, y + dy, c)
+        f.set(x, y + 2.6, (190, 70, 0))
+        for k in range(1, 4):  # sznurek faluje
+            f.set(x + math.sin(e * 4 + k) * 0.5 * k / 3, y + 2.6 + k, (150, 150, 160))
+
+    def scene_balon(self, f, e, dt, dur, blink):
+        """Goni pomarańczowy balonik: wiatr go unosi, ludzik biegnie i podskakuje; pod koniec łapie go… i balon pęka."""
+        s = self.sc
+        lo_b, hi_b = s["p0"] + 2, s["p1"] - 2
+        pop = dur - 0.7
+        if s["caught"] is None and e > 1.0:  # balon lata
+            wind = (noise1(e * 0.6 + s["seed"]) - 0.5) * 18
+            tgt = 1.8 + 3.2 * noise1(e * 0.45 + s["seed"] + 9)
+            gap = s["bx"] - s["mx"] - 4
+            if e > 0.7 * dur:  # opada w stronę ludzika
+                wind, tgt = wind * 0.3 - gap * 1.2, 4.5
+            elif abs(gap) < 8:  # ucieka mu sprzed nosa (pęd powietrza), przy ścianie – górą nad nim
+                stuck = not lo_b + 3 < s["bx"] < hi_b - 3
+                wind += (1 if gap > 0 else -1) * 30 * (-0.6 if stuck else 1)
+                tgt = 0 if stuck else tgt
+            s["vx"] += (wind - s["vx"] * 0.9) * dt
+            s["vy"] += ((tgt - s["by"]) * 2.5 - s["vy"] * 1.6) * dt
+            s["bx"] += s["vx"] * dt
+            s["by"] = clamp(s["by"] + s["vy"] * dt, -1, 5.5)
+            if not lo_b <= s["bx"] <= hi_b:
+                s["bx"], s["vx"] = clamp(s["bx"], lo_b, hi_b), -s["vx"] * 0.6
+        jp = (e - s["jump"]) / 0.6
+        if s["caught"] is None and e > 1.0:
+            if jp >= 1:  # biegnie pod balon
+                dx = s["bx"] - 4 - s["mx"]
+                if abs(dx) > 0.3:
+                    s["fl"] = dx > 0
+                s["mx"] = clamp(s["mx"] + min(abs(dx), 13 * dt) * (1 if dx > 0 else -1), s["p0"], s["p1"] - 7)
+                if abs(dx) < 4 and e - s["jump"] > 1.0:
+                    s["jump"], jp = e, 0
+            if 0.5 <= jp < 1 and s["gust"] < s["jump"]:  # w najwyższym punkcie: łapie albo balon ucieka
+                s["gust"] = e
+                if e > 0.7 * dur:
+                    s["caught"] = e
+                else:
+                    away = 1 if s["bx"] < (lo_b + hi_b) / 2 else -1
+                    s["vx"], s["vy"] = away * random.uniform(8, 14), -6
+            if e > dur - 2.4:
+                s["caught"] = e
+        x = s["mx"]
+        self.x = x
+        hand = x + (6 if s["fl"] else 1)
+        if e >= pop:  # pęka: strzępki i zaskoczony ludzik
+            self.pose(f, "pajac", x, s["fl"], blink)
+            r = (e - pop) * 12
+            for k in range(10):
+                a = k / 10 * 2 * math.pi
+                f.add(s["bx"] + math.cos(a) * r, s["by"] + math.sin(a) * r * 0.7, mul((255, 140, 30), 1 - (e - pop) / 0.7))
+            if e - pop < 0.1:
+                disc(f, s["bx"], s["by"], 2.5, (255, 255, 220))
+            return
+        if s["caught"] is not None or e <= 1.0:  # trzyma za sznurek
+            k = clamp((e - s["caught"]) / 0.4) if s["caught"] is not None else 1
+            s["bx"] += (hand + (2 if s["fl"] else -2) - s["bx"]) * k
+            s["by"] += (2.5 - s["by"]) * k
+            self.pose(f, "macha" if s["caught"] is not None and int(e * 3) % 2 else "stoi", x, s["fl"], blink)
+            f.line(hand, 7, s["bx"], s["by"] + 3, (150, 150, 160))
+            self.balloon(f, s["bx"], s["by"], e)
+            return
+        if jp < 1:
+            self.pose(f, "pajac", x, s["fl"], blink, dy=-3 * math.sin(math.pi * jp))
+        else:
+            moving = abs(s["bx"] - 4 - x) > 0.5
+            self.pose(f, ("idzie1" if int(e * 8) % 2 else "idzie2") if moving else "stoi", x, s["fl"], blink)
+        self.balloon(f, s["bx"], s["by"], e)
+
+    def scene_zwierzak(self, f, e, dt, dur, blink):
+        """Przychodzi kot albo pies, ludzik kuca i go głaszcze (serduszka), a potem zwierzak ucieka."""
+        s = self.sc
+        o, ax = s["o"], s["ax"]
+        poses, pal = self.PETS[s["kind"]]
+        pet = max(3.0, dur - s["tin"] - s["trun"] - 1.2)
+        out = o > 0  # ludzik patrzy w stronę zwierzaka
+        if e < s["tin"]:  # podchodzi
+            a = s["a0"] + (ax - s["a0"]) * e / s["tin"]
+            sprite(f, poses["idzie1" if int(a / 2) % 2 else "idzie2"], round(a), 5, pal, o > 0)
+            self.pose(f, "kuca" if e > s["tin"] - 0.8 else "stoi", self.x, out, blink)
+        elif e < s["tin"] + pet:  # głaskanie
+            q = e - s["tin"]
+            sprite(f, poses["siedzi1" if int(q * 3) % 2 else "siedzi2"], round(ax), 5, pal, o > 0)
+            self.pose(f, "kuca2" if int(q / 0.45) % 2 else "kuca", self.x, out, blink)
+            wa = len(poses["idzie1"][0])
+            hx = ax + (1 if o > 0 else wa - 4)  # nad łebkiem
+            for k in range(2):
+                ph = (q / 1.6 + k / 2) % 1
+                c = mul((255, 60, 130), 1 - ph * 0.8)
+                for dx, dy in ((0, 0), (2, 0), (0, 1), (1, 1), (2, 1), (1, 2)):
+                    f.set(hx + dx + math.sin(ph * 6 + k) * 0.8, 3 - ph * 5 + dy, c)
+        else:  # ucieka
+            q = e - s["tin"] - pet
+            if q < s["trun"]:
+                a = ax + (s["ra"] - ax) * q / s["trun"]
+                sprite(f, poses["idzie1" if int(a / 3) % 2 else "idzie2"], round(a), 5, pal, s["run"] < 0)
+                self.pose(f, "stoi", self.x, s["run"] > 0, blink)
+            else:
+                self.pose(f, "macha", self.x, s["run"] < 0, blink)
+
+    def scene_pozar(self, f, e, dt, dur, blink):
+        """Pali się śmietnik: ludzik się przeraża i ucieka, wraca wozem strażackim na sygnale jako strażak, gasi
+        z węża, a potem odjeżdża (zabierając spalony śmietnik) za zegar i wraca piechotą."""
+        s = self.sc
+        o, be = s["o"], s["be"]
+        pix = lambda u: be + o * u
+        if "T" not in s:  # długości etapów
+            t_run = abs(s["xout"] - s["x0"]) / 18
+            dist = 13 - s["u_end"]
+            t_dep = 1.25 + max(0, dist - 18.75) / 30
+            fixed = 1.5 + 1.5 + t_run + 3.0 + 0.4 + 2.5 + 0.4 + t_dep
+            s["T"] = list(itertools.accumulate((1.5, 1.5, t_run, 3.0, 0.4, max(3.0, dur - fixed), 2.5, 0.4, t_dep)))
+        T = s["T"]
+        ph = next((i for i, v in enumerate(T) if e < v), len(T) - 1)
+        p = (e - (T[ph - 1] if ph else 0)) / ((T[ph] - (T[ph - 1] if ph else 0)) or 1)
+        fire = clamp(e / 1.5) if ph < 5 else clamp(1 - p * 1.2) if ph == 5 else 0
+        uf = None  # przód wozu
+        if ph == 3:  # wóz przyjeżdża, zwalnia
+            uf = 13 + (s["u_in"] - 13) * (1 - p) ** 2
+        elif 3 < ph < 8:
+            uf = 13
+        elif ph == 8:
+            tt = e - T[7]
+            uf = 13 - (12 * tt * tt if tt < 1.25 else 18.75 + 30 * (tt - 1.25))
+        if uf is None or uf > -3:  # śmietnik (wóz go zabiera)
+            for c in range(-3, 1):
+                f.set(pix(c), 7, (140, 140, 150))
+                for y in (8, 9, 10):
+                    f.set(pix(c), y, (120, 125, 135) if c % 2 else (85, 90, 100))
+        mid = pix(-1.5)
+        if fire > 0:  # płomienie, iskry, dym
+            for i, x in enumerate(sorted(pix(c) for c in range(-4, 2))):  # języki ognia, na brzegach niższe
+                edge = i in (0, 5)
+                h = fire * (2 + 5 * noise1(e * 7 + i * 2.3 + s["seed"])) * (0.45 if edge else 1)
+                for j in range(int(h) + 1):
+                    fr = j / max(h, 1)
+                    c = (255, 235, 140) if fr < 0.3 and not edge else lerp((255, 180, 20), (220, 25, 0), fr)
+                    f.set(x, 6 - j, mul(c, min(1, h - j)) if j == int(h) else c)
+            for i in range(3):
+                q = (e * 1.3 + i / 3) % 1
+                f.add(mid + math.sin(e * 3 + i * 2) * 1.5, 4 - 6 * q, mul((255, 150, 30), (1 - q) * fire))
+                q = (e * 0.5 + i / 3) % 1
+                f.add(mid + q * 3 * math.sin(i + s["seed"]), 2 - 5 * q, mul(visible((70, 70, 70), 4), (1 - q) * fire))
+        if ph in (5, 6):  # para po gaszeniu
+            for i in range(4):
+                q = (e * 0.7 + i / 4) % 1
+                k = 1 - fire if ph == 5 else 1 - p
+                f.add(mid + math.sin(e + i * 1.7) * 1.5, 6 - 7 * q, mul(visible((140, 140, 150), 4), (1 - q) * k))
+        if uf is not None:
+            sx = min(pix(uf), pix(uf + 21))
+            self.man(f, "woz", sx, o < 0, char=1)
+            if ph < 8:  # koguty
+                w = 22
+                cx = lambda c: sx + (w - 1 - c if o < 0 else c)
+                on = int(e * 6) % 2
+                f.set(cx(2), 0, (0, 90, 255) if on else (40, 40, 60))
+                f.set(cx(3), 0, (0, 90, 255) if on else (40, 40, 60))
+                f.set(cx(4), 0, (255, 20, 20) if not on else (60, 40, 40))
+                f.set(cx(5), 0, (255, 20, 20) if not on else (60, 40, 40))
+        if ph < 2:  # stoi i patrzy, potem panikuje
+            pose = "stoi" if ph == 0 else ("pajac" if int(e / 0.12) % 2 else "pajac_pol")
+            self.pose(f, pose, s["x0"], o < 0, blink)
+            self.x = s["x0"]
+        elif ph == 2:  # ucieka za krawędź
+            self.x = s["x0"] + (s["xout"] - s["x0"]) * p
+            self.pose(f, "idzie1" if int(e * 9) % 2 else "idzie2", self.x, o > 0, blink)
+        elif ph in (4, 5):  # wysiadł, gasi z węża
+            sx = min(pix(2), pix(11))
+            self.man(f, "pist1", sx, o < 0, blink, char=1)
+            for u in range(10, 14):
+                f.set(pix(u), 10, (200, 180, 120))
+            if ph == 5:
+                for k in range(7):
+                    q = (e * 2.5 + k / 7) % 1
+                    f.set(pix(1 - 3.6 * q), 5.5 - 1.8 * math.sin(math.pi * q) + q * 0.8, (90, 170, 255))
+                if fire > 0 and int(e * 10) % 2:
+                    f.add(pix(-1 - hash1(int(e * 10)) * 2), 6, (150, 200, 255))
+            self.x = clamp(sx, -10, W)
+        elif ph == 6:  # zgaszone – macha
+            self.man(f, "macha", min(pix(2), pix(9)) - (1 if o > 0 else 0), o > 0, blink, char=1)
+        if uf is not None:
+            self.x = clamp(pix(uf + 6), -10, W)
+
     def roll(self, off):
         """Losuje następne zajęcie (częstsze częściej) – z góry, żeby panel WWW mógł je pokazać."""
         opts = [n for n in (*self.TRICKS, *self.RIDES) if n not in off]
@@ -5626,6 +5922,19 @@ class Worker(Clock):
             return "never"
         if not self.trick_len(n):
             return "wait"
+        if n in self.SCENES:  # potrzebuje dość miejsca po swojej stronie
+            big = lambda zz: [z for z in zz if min(W - 1, z[1] + 7) - max(0, z[0]) + 1 >= self.SCENES[n][0]]
+            cand = big([here]) if stay else big(mine) or big(zs)
+            if not cand:
+                return "never"
+            z = here if here in cand else cand[0]
+            lo, hi = self.scene_xs(n, z, xr)
+            if z == here and lo <= self.x <= hi:
+                self.scene_init(n, z, xr)
+                self.begin_trick(n, t, False, pause, forced)
+                return "start"
+            self.goal, self.wait = (clamp(self.x, lo, hi) if z == here else random.randint(lo, hi)), t
+            return "go"
         tr, away = self.TRICKS[n], self.x > xr
         dirs = lambda x: (x < xs[0],) if n in self.SHOTS else (away, not away)  # strzela przez zegar
         fl = next((fl for fl in dirs(self.x) if self.fits(tr, fl, xs, xr)), None) if self.at_side(xs, xr) else None
@@ -5669,7 +5978,12 @@ class Worker(Clock):
         if self.trick:
             name, t0, fl, dur, _ = self.trick
             _, poses, step, mirror = self.TRICKS[name]
-            if t - t0 < dur:
+            if name in self.SCENES:
+                if t - t0 < dur:
+                    getattr(self, "scene_" + self.SCENE_FN[name])(f, t - t0, dt, dur, blink)
+                    return
+                self.scene_end(name, t)
+            elif t - t0 < dur:
                 i = int((t - t0) / step) % len(poses)
                 flip = fl != (mirror and i % 2 == 1)
                 sx = self.x + self.place(poses[i], flip)

@@ -1,5 +1,15 @@
 # Zmiany
 
+## 1.18.0
+
+- Ludzik – nowe zajęcia:
+  - **balon**: goni pomarańczowy balonik, który ucieka mu sprzed nosa; podskakuje, w końcu go łapie… i balon pęka;
+  - **pożar**: zapala się śmietnik, ludzik ucieka i wraca wozem strażackim na sygnale jako strażak, gasi pożar
+    z węża, macha, odjeżdża za zegar (zabiera spalony śmietnik) i wraca piechotą;
+  - **zwierzak**: przychodzi kot albo pies, ludzik kuca i go głaszcze (serduszka), a zwierzak potem ucieka;
+  - **traktor** (z przyczepą siana i przyczepą dyń, dymi z rury) i **kombajn** (kręci nagarniaczem, sypie
+    sieczką) – zielone, jeżdżą jak rower i auto.
+
 ## 1.17.0
 
 - Ludzik: zamiast kawy (z daleka wyglądała jak papieros) gra na gitarze (nuty ulatują w górę), podbija piłkę
