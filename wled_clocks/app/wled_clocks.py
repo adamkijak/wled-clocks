@@ -1698,6 +1698,14 @@ def scroll_px(t, speed):
     return n * round(ppf) if ppf >= 1 else n // max(1, round(1 / ppf))
 
 
+def even_speed(v):
+    """Prędkość (px/s) dociągnięta do kroku animacji: całe piksele co klatkę albo 1 px co n klatek – zawsze
+    w równych odstępach (bez 3, 4, 3, 3, 4 klatek na piksel), więc powolny ruch nie szarpie."""
+    fdt = ANIM["tempo"] / ANIM["fps"]
+    ppf = v * fdt
+    return (round(ppf) if ppf >= 1 else 1 / max(1, round(1 / ppf))) / fdt
+
+
 def scroll_time(dist, speed):
     """Ile sekund animacji zajmuje przewinięcie dist pikseli (zgodnie ze scroll_px)."""
     fdt = ANIM["tempo"] / ANIM["fps"]
@@ -4908,10 +4916,12 @@ class Worker(Clock):
                                             "TWYSSSJJJJJJJJ.T", "TWWWJJJJJJJJJJJT", "TTTTTTTTTTTTTTTT"],
         "spi2": ["................"] * 5 + ["T...............", "T.YYY...........", "T.YSCS..JJJJJ...",
                                             "TWYSSSJJJJJJJJ.T", "TWWWJJJJJJJJJJJT", "TTTTTTTTTTTTTTTT"],
-        "gitara1": [".....YYYYY.", "....YYYYYYY", ".....SESES.", ".....SSSSS.", "Q....SMMMS.", ".TSBBBBBBB.",
-                    "..TTUUUBBBB", "...UUUUUSBB", "....UUUPPP.", ".....PP.PP.", "....OOO.OOO"],
-        "gitara2": [".....YYYYY.", "....YYYYYYY", ".....SESES.", ".....SSSSS.", "Q....SRRRS.", ".TSBBBBBBB.",
-                    "..TTUUUBBBB", "...UUUUUBBB", "....UUUSPP.", ".....PP.PP.", "....OOO.OOO"],
+        "gitara1": ["H.......YYYYY.", "TH.....YYYYYYY", ".TT.....SESES.", "...TT...SSSSS.", "...SSTT.SMMMS.",
+                    "....BBTUUBBBB.", ".....BUUUUBBBB", "......UUkUUSBS", ".....uUUUUUuP.", "......uuuuuPP.",
+                    ".......OOO.OOO"],  # gryf ukośnie w górę, pudło z otworem, prawa ręka nad otworem
+        "gitara2": ["H.......YYYYY.", "TH.....YYYYYYY", ".TT.....SESES.", "...TT...SSSSS.", "...SSTT.SRRRS.",
+                    "....BBTUUBBBB.", ".....BUUUUBBBB", "......UUkUUBBS", ".....uUUUUSuP.", "......uuuuuPP.",
+                    ".......OOO.OOO"],  # ręka w dół – uderza w struny
         "kopie": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", ".BBBBBBB", ".SBBBBBS",
                   "..PPPPP.", "OOPP.PP.", ".....OOO"],
         "kuca2": ["........", "........", "..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SSMSS.", "..BBBBB.",
@@ -4985,7 +4995,7 @@ class Worker(Clock):
         "czytanie": ((15, 35), ("czyta1",) * 7 + ("czyta2",), 0.25, False),
         "spanie": ((20, 40), ("spi1", "spi2"), 0.9, False),  # w łóżku
         "jedzenie": ((10, 20), ("je1", "je2", "je3", "je2", "je3"), 0.35, False),
-        "gitara": ((12, 30), ("gitara1", "gitara2"), 0.25, False),
+        "gitara": ((12, 30), ("gitara1", "gitara2"), 0.25, False),         # nuty lecą daleko przed nim
         "piłka": ((10, 22), ("kopie", "stoi"), 0.35, False),        # runda = jedno podbicie
         "piasek": ((20, 40), ("kuca2", "kuca"), 0.4, False),        # buduje zamek z piasku
         "balon": ((15, 30), ("stoi",), 1.0, False),                   # sceny: rysuje je scene_*()
@@ -5000,7 +5010,7 @@ class Worker(Clock):
     # sceny: ludzik się w nich przemieszcza -> (najmniejsza szerokość miejsca po jego stronie w px, najkrótszy czas w s)
     SCENES = {"balon": (26, 12), "pożar": (40, 32), "zwierzak": (21, 10)}
     SCENE_FN = {"balon": "balon", "pożar": "pozar", "zwierzak": "zwierzak"}
-    REACH = {"piłka": 3, "piasek": 16}  # ile px przed ludzikiem zajmują rzeczy (piłka, piaskownica)
+    REACH = {"piłka": 3, "piasek": 16, "gitara": 14}  # ile px przed ludzikiem zajmują rzeczy (piłka, piaskownica)
     CASTLE = ["#.#...#.#", "###...###", "###.#.###", "#########", "####.####", "###...###"]  # rzędy 4–9
     RIDES = {"rower": (("rower1", "rower2"), 14, (2, 4)), "auto": (("auto",), 22, (2, 5)),
              "traktor": (("traktor1", "traktor2"), 8, (1, 2)), "kombajn": (("kombajn1", "kombajn2"), 6, (1, 2))}  # pozy, px/s, okrążenia
@@ -5027,8 +5037,8 @@ class Worker(Clock):
            "K": (40, 170, 90), "A": (110, 220, 40), "T": (150, 90, 40), "G": (230, 180, 60), "D": (130, 130, 145),
            "V": (100, 125, 40), "F": (0, 200, 255), "Q": (110, 110, 120), "H": (220, 220, 230), "N": (30, 160, 60),
            "X": (110, 170, 230), "L": (255, 255, 170), "U": (215, 120, 30), "J": (70, 110, 220),
-           "Z": (220, 25, 20)}
-    # D broń/grot, V rura bazooki, U pudło gitary/dynie, J kołdra, Z wóz strażacki
+           "Z": (220, 25, 20), "u": (150, 70, 10), "k": (45, 20, 5)}
+    # D broń/grot, V rura bazooki, U pudło gitary/dynie (u – cień, k – otwór), J kołdra, Z wóz strażacki
     # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech (w aucie: tylne światło), W kartki/poduszka/drabina,
     # K okładka, A jabłko, T kij/gryf/łóżko/dyszel, G miotła/siano/felgi, F rama roweru, Q opony, H piasty/kołpaki,
     # N karoseria (auto, traktor, kombajn), X szyby, L reflektor
@@ -5448,10 +5458,10 @@ class Worker(Clock):
                 else:
                     f.set(cx(7 - 6 * (ph - 0.65) / 0.35), 7, c)
         elif name == "gitara":
-            for k in range(3):  # nuty ulatują znad gitary
-                ph = (e / 2.1 + k / 3) % 1
-                x, y = cx(1 - 3 * ph), 3 - 7 * ph + math.sin(ph * 9 + k) * 0.6
-                c = mul(hsv(k / 3 + int(e / 2.1 + k / 3) * 0.37, 0.7, 1), 1 - 0.6 * ph)
+            for k in range(4):  # nuty ulatują znad gitary daleko przed niego, falując
+                ph = (e / 3.6 + k / 4) % 1
+                x, y = cx(1 - 17 * ph), 4 - 5 * ph + math.sin(ph * 11 + k * 2) * 1.2
+                c = mul(hsv(k / 4 + int(e / 3.6 + k / 4) * 0.37, 0.7, 1), 1 - 0.7 * ph * ph)
                 for dx, dy in ((0, 2), (1, 2), (1, 1), (1, 0), (2, 0)):
                     f.set(x + dx, y + dy, c)
         elif name == "piłka":
@@ -5659,6 +5669,7 @@ class Worker(Clock):
         out = W + o - self.x if d > 0 else self.x + o
         back = goal + o if d > 0 else W + o - goal
         _, v, laps_range = self.RIDES[name]
+        v = even_speed(v)
         lo, hi = (max(1, round(n * LEN_MUL[ludzik_len(name)])) for n in laps_range)
         free = self.free - 2 - (abs(goal - xr - 1) - abs(self.x - xr - 1)) / self.WALK  # do roboty pójdzie od celu
         if (out + back) / v > free:  # out + back to najwyżej jedno okrążenie
@@ -5670,7 +5681,7 @@ class Worker(Clock):
 
     def ride_time(self, name):
         """Czas jednego okrążenia."""
-        return (W + 2 * self.ride_off(name)) / self.RIDES[name][1]
+        return (W + 2 * self.ride_off(name)) / even_speed(self.RIDES[name][1])
 
     def ride_off(self, name):
         """Ile px za krawędzią pojazd całkiem znika (traktor z przyczepami jest długi)."""
@@ -5693,7 +5704,7 @@ class Worker(Clock):
         """-> False, gdy dojechał."""
         r = self.ride
         poses, v, _ = self.RIDES[r["n"]]
-        k = min(r["len"], (t - r["t0"]) * v)
+        k = min(r["len"], round((t - r["t0"]) * even_speed(v), 6))  # round: 0,9999999 to jeszcze nie krok wstecz
         if k >= r["len"]:
             self.x, self.goal, self.ride = r["goal"], None, None
             return False

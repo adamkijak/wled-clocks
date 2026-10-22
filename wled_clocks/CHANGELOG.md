@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.19.3
+
+- Ludzik: nowa gitara – pudło z otworem, gryf ukośnie w górę z główką, ręka uderza w struny; nuty lecą falując
+  kilkanaście pikseli przed niego (zajęcie wybiera miejsce, gdzie mają wolną drogę).
+- Pojazdy jeżdżą równo: prędkość dociągnięta do kroku animacji (1 px co klatkę albo co 2, 3, 4 klatki – zawsze
+  tyle samo), więc wolny ruch nie szarpie.
+
 ## 1.19.2
 
 - Ludzik: pojazdy jeżdżą mniej więcej o połowę wolniej – rower 14 px/s, auto 22, traktor 8, kombajn 6; wóz
