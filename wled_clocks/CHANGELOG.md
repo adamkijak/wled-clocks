@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.19.1
+
+- Zegar: dzień tygodnia i data w stylu wybranej czcionki – przy cienkiej, wąskiej i LCD cienkie litery (1 px),
+  przy 7-segmentowej i LCD data cyframi jak z wyświetlacza, przy grubej pogrubiona data.
+
 ## 1.19.0
 
 - Zegar: ustawienie „kolor zegara” – dowolny kolor z próbnika w panelu WWW (od razu na panelu) zamiast barwy z listy

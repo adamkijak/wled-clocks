@@ -286,36 +286,44 @@ SLIM = _rows({  # 4x10, kreska 1 px – wąska
     "9": ".##.|#..#|#..#|#..#|#..#|.###|...#|...#|#..#|.##.",
     ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..",
 })
-BOLD = {k: ["".join("#" if "#" in (r + ".")[i:i + 1] + ("." + r)[i:i + 1] else "." for i in range(len(r) + 1)) for r in g]
-        for k, g in BIG.items() if k in "0123456789 "}  # BIG pogrubiony: kreski pionowe 3 px
+def _thick(g):
+    """Znak pogrubiony o 1 px w poziomie."""
+    return ["".join("#" if "#" in (r + ".")[i:i + 1] + ("." + r)[i:i + 1] else "." for i in range(len(r) + 1)) for r in g]
+
+
+BOLD = {k: _thick(g) for k, g in BIG.items() if k in "0123456789 "}  # BIG pogrubiony: kreski pionowe 3 px
 BOLD[":"] = BIG[":"]
 SQUARE = {k: [r.replace(".####.", "######") if i in (0, len(g) - 1) else r for i, r in enumerate(g)]
           for k, g in BIG.items() if k in "0123456789: "}  # BIG z kwadratowymi rogami
 
 
-def _seg7(w, t):
-    """Cyfry jak na wyświetlaczu 7-segmentowym: w szerokość, t grubość pionowych kresek; 9 wierszy, puste rogi."""
+def _seg7(w, t, h=9, gaps=True):
+    """Cyfry jak na wyświetlaczu 7-segmentowym: w szerokość, t grubość pionowych kresek, h wierszy; gaps – puste rogi
+    (małe cyfry bez przerw, inaczej „1” rozpada się na kropki)."""
     on = {"0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc", "5": "afgcd", "6": "afgedc",
           "7": "abc", "8": "abcdefg", "9": "abcdfg"}
-    font = {}
+    font, m = {}, h // 2
     for ch, segs in on.items():
-        g = [["."] * w for _ in range(9)]
-        for s, rows, cols in (("a", [0], range(1, w - 1)), ("g", [4], range(1, w - 1)), ("d", [8], range(1, w - 1)),
-                              ("f", range(1, 4), range(t)), ("b", range(1, 4), range(w - t, w)),
-                              ("e", range(5, 8), range(t)), ("c", range(5, 8), range(w - t, w))):
+        g = [["."] * w for _ in range(h)]
+        for s, rows, cols in (("a", [0], range(1, w - 1)), ("g", [m], range(1, w - 1)), ("d", [h - 1], range(1, w - 1)),
+                              ("f", range(1 - (not gaps), m + (not gaps)), range(t)),
+                              ("b", range(1 - (not gaps), m + (not gaps)), range(w - t, w)),
+                              ("e", range(m + gaps, h - gaps), range(t)), ("c", range(m + gaps, h - gaps), range(w - t, w))):
             if s in segs:
                 for r in rows:
                     for c in cols:
                         g[r][c] = "#"
         font[ch] = ["".join(r) for r in g]
     dot = "#" * t
-    font[":"] = [dot if r in (2, 6) else "." * t for r in range(9)]
-    font[" "] = [".."] * 9
+    font[":"] = [dot if r in (m // 2, h - 1 - m // 2) else "." * t for r in range(h)]
+    font["."] = ["." * t] * (h - 1) + [dot]
+    font[" "] = [".."] * h
     return font
 
 
 CLOCK_FONTS = [("klasyczna", BIG), ("kwadratowa", SQUARE), ("gruba", BOLD), ("cienka", THIN), ("wąska", SLIM),
                ("7-segmentowa", _seg7(6, 2)), ("LCD", _seg7(5, 1))]
+
 
 NARROW_TXT = _rows({  # 3x5 (M, N, W szersze) – długie nazwy dni i daty na wąskim miejscu
     "A": ".#.|#.#|###|#.#|#.#", "B": "##.|#.#|##.|#.#|##.", "C": ".##|#..|#..|#..|.##", "D": "##.|#.#|#.#|#.#|##.",
@@ -330,6 +338,13 @@ NARROW_TXT = _rows({  # 3x5 (M, N, W szersze) – długie nazwy dni i daty na w�
     "4": "#.#|#.#|###|..#|..#", "5": "###|#..|##.|..#|##.", "6": ".##|#..|###|#.#|###", "7": "###|..#|.#.|.#.|.#.",
     "8": "###|#.#|###|#.#|###", "9": "###|#.#|###|..#|##.", ".": ".|.|.|.|#", " ": "..|..|..|..|..",
 })
+SMALL_BOLD = {k: _thick(g) for k, g in SMALL.items() if k in "0123456789. "}  # pogrubiona data przy „gruba”
+# dzień tygodnia i data w stylu czcionki godziny: nazwa -> (czcionki dnia, czcionki daty), od najszerszej –
+# bierze pierwszą, która się mieści (NARROW_TXT – cienkie litery 1 px, _seg7 – data jak na wyświetlaczu)
+CLOCK_SMALL = {"gruba": ((SMALL, NARROW_TXT), (SMALL_BOLD, SMALL, NARROW_TXT)),  # pogrubione litery się zlewają
+               "cienka": ((NARROW_TXT,), (NARROW_TXT,)), "wąska": ((NARROW_TXT,), (NARROW_TXT,)),
+               "7-segmentowa": ((SMALL, NARROW_TXT), (_seg7(5, 2, 5, False), _seg7(4, 1, 5, False))),
+               "LCD": ((NARROW_TXT,), (_seg7(4, 1, 5, False),))}
 
 
 _SMALL_MARK = {"Ą": "ogonek", "Ę": "ogonek", "Ć": "kreska", "Ń": "kreska", "Ó": "kreska", "Ś": "kreska", "Ź": "kreska",
@@ -6224,9 +6239,9 @@ class PlainClock(Clock):
     biały, wieczorem ciepły żółty, w nocy bursztyn; „temperatura” przesuwa barwę. Cyfry w jednej z kilku czcionek."""
 
     @staticmethod
-    def fit(texts, room):
-        """Najszersza czcionka (SMALL, potem wąska), w której wszystkie napisy mieszczą się w room -> (czcionka, szer.)."""
-        for font in (SMALL, NARROW_TXT):
+    def fit(texts, room, fonts=(SMALL, NARROW_TXT)):
+        """Pierwsza czcionka z fonts, w której wszystkie napisy mieszczą się w room -> (czcionka, szerokość)."""
+        for font in fonts:
             w = max(text_w(s, font) for s in texts)
             if w <= room:
                 return font, w
@@ -6234,7 +6249,8 @@ class PlainClock(Clock):
 
     def draw(self, f, now, t, dt):
         c = clock_color(now)
-        font = CLOCK_FONTS[CLOCK["font"]][1]
+        name, font = CLOCK_FONTS[CLOCK["font"]]
+        small, fdates = CLOCK_SMALL.get(name, ((SMALL, NARROW_TXT),) * 2)  # dzień i data w stylu godziny
         hms = now.strftime("%H:%M:%S")
         tw, th = text_w(hms, font), len(font["0"])
         y = 1 + (10 - th) // 2
@@ -6242,16 +6258,16 @@ class PlainClock(Clock):
         date = f"{now.day:02d}.{now.month:02d}.{now.year}"
         if NARROW:  # 60 kolumn: sama godzina, co 10 s na chwilę dzień tygodnia i data (dwa wiersze)
             if page(t, 4, 2.5) == 3:
-                ff, _ = self.fit([wd], W - 2)
+                ff, _ = self.fit([wd], W - 2, small)
                 f.draw(small_pl(wd, (W - text_w(wd, ff)) // 2, 1, font=ff), c)
-                d = date[:6] if text_w(date, SMALL) > W - 2 else date
-                f.text(d, (W - text_w(d, SMALL)) // 2, 7, c, SMALL)
+                fdate, _ = self.fit([date], W - 2, fdates)
+                f.text(date, (W - text_w(date, fdate)) // 2, 7, c, fdate)
                 return
             x = (W - tw) // 2
         else:
             room = W - tw - 6  # najmniej 2 px odstępu przy brzegach i od godziny
-            fd, wdw = self.fit([wd], room)
-            fdate, dw = self.fit([date], room)
+            fd, wdw = self.fit([wd], room, small)
+            fdate, dw = self.fit([date], room, fdates)
             gap = (W - tw - max(wdw, dw)) // 3  # równe odstępy: brzeg, godzina, data, brzeg
             x = gap
             dx = x + tw + gap
