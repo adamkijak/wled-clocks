@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.19.2
+
+- Ludzik: pojazdy jeżdżą mniej więcej o połowę wolniej – rower 14 px/s, auto 22, traktor 8, kombajn 6; wóz
+  strażacki dłużej dojeżdża i spokojniej odjeżdża.
+
 ## 1.19.1
 
 - Zegar: dzień tygodnia i data w stylu wybranej czcionki – przy cienkiej, wąskiej i LCD cienkie litery (1 px),

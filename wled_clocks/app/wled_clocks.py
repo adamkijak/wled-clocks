@@ -4989,7 +4989,7 @@ class Worker(Clock):
         "piłka": ((10, 22), ("kopie", "stoi"), 0.35, False),        # runda = jedno podbicie
         "piasek": ((20, 40), ("kuca2", "kuca"), 0.4, False),        # buduje zamek z piasku
         "balon": ((15, 30), ("stoi",), 1.0, False),                   # sceny: rysuje je scene_*()
-        "pożar": ((26, 34), ("stoi",), 1.0, False),
+        "pożar": ((32, 40), ("stoi",), 1.0, False),
         "zwierzak": ((14, 26), ("stoi",), 1.0, False),
         "żonglerka": ((10, 22), ("zongl1", "zongl2"), 0.25, False),
         "zamiatanie": ((10, 20), ("zamiata1", "zamiata2"), 0.4, False),
@@ -4998,12 +4998,12 @@ class Worker(Clock):
         "bazooka": ((11, 22), ("baz1",) * 4 + ("baz2",) * 2 + ("baz1",) * 12, 0.3, False),
     }
     # sceny: ludzik się w nich przemieszcza -> (najmniejsza szerokość miejsca po jego stronie w px, najkrótszy czas w s)
-    SCENES = {"balon": (26, 12), "pożar": (40, 26), "zwierzak": (21, 10)}
+    SCENES = {"balon": (26, 12), "pożar": (40, 32), "zwierzak": (21, 10)}
     SCENE_FN = {"balon": "balon", "pożar": "pozar", "zwierzak": "zwierzak"}
     REACH = {"piłka": 3, "piasek": 16}  # ile px przed ludzikiem zajmują rzeczy (piłka, piaskownica)
     CASTLE = ["#.#...#.#", "###...###", "###.#.###", "#########", "####.####", "###...###"]  # rzędy 4–9
-    RIDES = {"rower": (("rower1", "rower2"), 24, (2, 5)), "auto": (("auto",), 45, (3, 8)),
-             "traktor": (("traktor1", "traktor2"), 14, (1, 3)), "kombajn": (("kombajn1", "kombajn2"), 11, (1, 2))}  # pozy, px/s, okrążenia
+    RIDES = {"rower": (("rower1", "rower2"), 14, (2, 4)), "auto": (("auto",), 22, (2, 5)),
+             "traktor": (("traktor1", "traktor2"), 8, (1, 2)), "kombajn": (("kombajn1", "kombajn2"), 6, (1, 2))}  # pozy, px/s, okrążenia
     RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony (długie – więcej, ride_off())
     # strzelanie przez zegar do tarczy po drugiej stronie: poza strzału (pierwsza z serii = strzał) i prędkość pocisku (px/s)
     SHOTS = {"łuk": ("luk2", 55), "pistolet": ("pist2", 120), "bazooka": ("baz2", 50)}
@@ -5910,9 +5910,9 @@ class Worker(Clock):
         if "T" not in s:  # długości etapów
             t_run = abs(s["xout"] - s["x0"]) / 18
             dist = 13 - s["u_end"]
-            t_dep = 1.25 + max(0, dist - 18.75) / 30
-            fixed = 1.5 + 1.5 + t_run + 3.0 + 0.4 + 2.5 + 0.4 + t_dep
-            s["T"] = list(itertools.accumulate((1.5, 1.5, t_run, 3.0, 0.4, max(3.0, dur - fixed), 2.5, 0.4, t_dep)))
+            t_dep = 2.5 + max(0, dist - 18.75) / 15  # rusza powoli, potem 15 px/s
+            fixed = 1.5 + 1.5 + t_run + 6.0 + 0.4 + 2.5 + 0.4 + t_dep
+            s["T"] = list(itertools.accumulate((1.5, 1.5, t_run, 6.0, 0.4, max(3.0, dur - fixed), 2.5, 0.4, t_dep)))
         T = s["T"]
         ph = next((i for i, v in enumerate(T) if e < v), len(T) - 1)
         p = (e - (T[ph - 1] if ph else 0)) / ((T[ph] - (T[ph - 1] if ph else 0)) or 1)
@@ -5924,7 +5924,7 @@ class Worker(Clock):
             uf = 13
         elif ph == 8:
             tt = e - T[7]
-            uf = 13 - (12 * tt * tt if tt < 1.25 else 18.75 + 30 * (tt - 1.25))
+            uf = 13 - (3 * tt * tt if tt < 2.5 else 18.75 + 15 * (tt - 2.5))
         if uf is None or uf > -3:  # śmietnik (wóz go zabiera)
             for c in range(-3, 1):
                 f.set(pix(c), 7, (140, 140, 150))
