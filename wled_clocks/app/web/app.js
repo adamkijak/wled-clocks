@@ -12,6 +12,11 @@ const el = (tag, cls, text) => {
 const fold = (s) => s.toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 const HIDDEN_SETTINGS = new Set(["podgląd"]); // podgląd w terminalu – w przeglądarce bez znaczenia
+// ustawienia z próbnikiem koloru: nazwa -> [rozkaz, przycisk „bez koloru”, jego podpowiedź]
+const COLOR_ROWS = {
+  "kolor oczu": ["eyes", "naturalny", "Każde oczy w swoim kolorze"],
+  "kolor zegara": ["clockcol", "z barwy", "Kolor z listy „barwa” (np. pora dnia)"],
+};
 let clocks = null;
 let state = null;
 let listKey = "";
@@ -262,7 +267,9 @@ function settingRow(s) {
     rows.set(s.name, { chars });
     return row;
   }
-  if (s.name === "kolor oczu") { // dowolny kolor albo naturalny (każde oczy swój)
+  const pickCol = COLOR_ROWS[s.name];
+  if (pickCol) { // dowolny kolor z próbnika albo przycisk „bez własnego koloru”
+    const [op, off, offTitle] = pickCol;
     const box = el("div", "wide pick");
     const inp = el("input");
     inp.type = "color";
@@ -271,11 +278,11 @@ function settingRow(s) {
     let wait = 0;
     inp.oninput = () => { // od razu na panelu, także w trakcie wybierania (najwyżej co 80 ms)
       clearTimeout(wait);
-      wait = setTimeout(() => cmd("eyes", { col: inp.value }), 80);
+      wait = setTimeout(() => cmd(op, { col: inp.value }), 80);
     };
-    const nat = el("button", "small", "naturalny");
-    nat.title = "Każde oczy w swoim kolorze";
-    nat.onclick = () => cmd("eyes", { col: "" });
+    const nat = el("button", "small", off);
+    nat.title = offTitle;
+    nat.onclick = () => cmd(op, { col: "" });
     box.append(inp, nat);
     row.append(box);
     rows.set(s.name, { color: inp, nat });

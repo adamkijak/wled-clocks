@@ -255,16 +255,93 @@ for _font in (BIG, SMALL, TXT):  # zasada: każda kreska ma co najmniej 2 diody 
 TALL = {k: [r for r in g for _ in (0, 1)] for k, g in SMALL.items()}  # 5x10: SMALL rozciągnięty w pionie
 
 
+# ---------------------------------------------------------------- czcionki godziny (efekt „zegar”, ustawienie „czcionka”)
+def _rows(d):
+    return {k: v.split("|") for k, v in d.items()}
+
+
+THIN = _rows({  # 5x10, kreska 1 px
+    "0": ".###.|#...#|#...#|#...#|#...#|#...#|#...#|#...#|#...#|.###.",
+    "1": "..#..|.##..|#.#..|..#..|..#..|..#..|..#..|..#..|..#..|#####",
+    "2": ".###.|#...#|....#|....#|...#.|..#..|.#...|#....|#....|#####",
+    "3": ".###.|#...#|....#|....#|..##.|....#|....#|....#|#...#|.###.",
+    "4": "...#.|..##.|.#.#.|#..#.|#..#.|#####|...#.|...#.|...#.|...#.",
+    "5": "#####|#....|#....|####.|....#|....#|....#|....#|#...#|.###.",
+    "6": ".###.|#...#|#....|#....|####.|#...#|#...#|#...#|#...#|.###.",
+    "7": "#####|....#|....#|...#.|...#.|..#..|..#..|.#...|.#...|.#...",
+    "8": ".###.|#...#|#...#|#...#|.###.|#...#|#...#|#...#|#...#|.###.",
+    "9": ".###.|#...#|#...#|#...#|#...#|.####|....#|....#|#...#|.###.",
+    ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..",
+})
+SLIM = _rows({  # 4x10, kreska 1 px – wąska
+    "0": ".##.|#..#|#..#|#..#|#..#|#..#|#..#|#..#|#..#|.##.",
+    "1": "..#.|.##.|#.#.|..#.|..#.|..#.|..#.|..#.|..#.|..#.",
+    "2": ".##.|#..#|...#|...#|..#.|..#.|.#..|#...|#...|####",
+    "3": ".##.|#..#|...#|...#|.##.|...#|...#|...#|#..#|.##.",
+    "4": "..#.|.##.|#.#.|#.#.|#.#.|####|..#.|..#.|..#.|..#.",
+    "5": "####|#...|#...|###.|...#|...#|...#|...#|#..#|.##.",
+    "6": ".##.|#..#|#...|#...|###.|#..#|#..#|#..#|#..#|.##.",
+    "7": "####|...#|...#|..#.|..#.|..#.|.#..|.#..|.#..|.#..",
+    "8": ".##.|#..#|#..#|#..#|.##.|#..#|#..#|#..#|#..#|.##.",
+    "9": ".##.|#..#|#..#|#..#|#..#|.###|...#|...#|#..#|.##.",
+    ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..",
+})
+BOLD = {k: ["".join("#" if "#" in (r + ".")[i:i + 1] + ("." + r)[i:i + 1] else "." for i in range(len(r) + 1)) for r in g]
+        for k, g in BIG.items() if k in "0123456789 "}  # BIG pogrubiony: kreski pionowe 3 px
+BOLD[":"] = BIG[":"]
+SQUARE = {k: [r.replace(".####.", "######") if i in (0, len(g) - 1) else r for i, r in enumerate(g)]
+          for k, g in BIG.items() if k in "0123456789: "}  # BIG z kwadratowymi rogami
+
+
+def _seg7(w, t):
+    """Cyfry jak na wyświetlaczu 7-segmentowym: w szerokość, t grubość pionowych kresek; 9 wierszy, puste rogi."""
+    on = {"0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc", "5": "afgcd", "6": "afgedc",
+          "7": "abc", "8": "abcdefg", "9": "abcdfg"}
+    font = {}
+    for ch, segs in on.items():
+        g = [["."] * w for _ in range(9)]
+        for s, rows, cols in (("a", [0], range(1, w - 1)), ("g", [4], range(1, w - 1)), ("d", [8], range(1, w - 1)),
+                              ("f", range(1, 4), range(t)), ("b", range(1, 4), range(w - t, w)),
+                              ("e", range(5, 8), range(t)), ("c", range(5, 8), range(w - t, w))):
+            if s in segs:
+                for r in rows:
+                    for c in cols:
+                        g[r][c] = "#"
+        font[ch] = ["".join(r) for r in g]
+    dot = "#" * t
+    font[":"] = [dot if r in (2, 6) else "." * t for r in range(9)]
+    font[" "] = [".."] * 9
+    return font
+
+
+CLOCK_FONTS = [("klasyczna", BIG), ("kwadratowa", SQUARE), ("gruba", BOLD), ("cienka", THIN), ("wąska", SLIM),
+               ("7-segmentowa", _seg7(6, 2)), ("LCD", _seg7(5, 1))]
+
+NARROW_TXT = _rows({  # 3x5 (M, N, W szersze) – długie nazwy dni i daty na wąskim miejscu
+    "A": ".#.|#.#|###|#.#|#.#", "B": "##.|#.#|##.|#.#|##.", "C": ".##|#..|#..|#..|.##", "D": "##.|#.#|#.#|#.#|##.",
+    "E": "###|#..|##.|#..|###", "F": "###|#..|##.|#..|#..", "G": ".##|#..|#.#|#.#|.##", "H": "#.#|#.#|###|#.#|#.#",
+    "I": "#|#|#|#|#", "J": "..#|..#|..#|#.#|.#.", "K": "#.#|#.#|##.|#.#|#.#", "L": "#..|#..|#..|#..|###",
+    "Ł": "#..|#..|##.|#..|###", "M": "#...#|##.##|#.#.#|#...#|#...#", "N": "#..#|##.#|#.##|#..#|#..#",
+    "O": ".#.|#.#|#.#|#.#|.#.", "P": "##.|#.#|##.|#..|#..", "Q": ".#.|#.#|#.#|##.|.##", "R": "##.|#.#|##.|#.#|#.#",
+    "S": ".##|#..|.#.|..#|##.", "T": "###|.#.|.#.|.#.|.#.", "U": "#.#|#.#|#.#|#.#|###", "V": "#.#|#.#|#.#|#.#|.#.",
+    "W": "#...#|#...#|#.#.#|##.##|#...#", "X": "#.#|#.#|.#.|#.#|#.#", "Y": "#.#|#.#|.#.|.#.|.#.",
+    "Z": "###|..#|.#.|#..|###",
+    "0": "###|#.#|#.#|#.#|###", "1": ".#.|##.|.#.|.#.|###", "2": "##.|..#|.#.|#..|###", "3": "##.|..#|.#.|..#|##.",
+    "4": "#.#|#.#|###|..#|..#", "5": "###|#..|##.|..#|##.", "6": ".##|#..|###|#.#|###", "7": "###|..#|.#.|.#.|.#.",
+    "8": "###|#.#|###|#.#|###", "9": "###|#.#|###|..#|##.", ".": ".|.|.|.|#", " ": "..|..|..|..|..",
+})
+
+
 _SMALL_MARK = {"Ą": "ogonek", "Ę": "ogonek", "Ć": "kreska", "Ń": "kreska", "Ó": "kreska", "Ś": "kreska", "Ź": "kreska",
                "Ż": "kropka"}
 
 
-def small_pl(s, x0, y0, sp=1):
-    """Punkty napisu w SMALL z polskimi znakami: SMALL ma tylko 5 wierszy, więc kreska i kropka idą do wiersza nad
-    napisem, a ogonek do wiersza pod nim – napis potrzebuje wolnego wiersza nad sobą i pod sobą."""
+def small_pl(s, x0, y0, sp=1, font=SMALL):
+    """Punkty napisu w SMALL (albo NARROW_TXT) z polskimi znakami: SMALL ma tylko 5 wierszy, więc kreska i kropka
+    idą do wiersza nad napisem, a ogonek do wiersza pod nim – napis potrzebuje wolnego wiersza nad sobą i pod sobą."""
     pts, x = [], int(x0)
     for c in s:
-        g = glyph(SMALL, c)
+        g = glyph(font, c)
         w = len(g[0])
         pts += [(x + k, y0 + ry) for ry, row in enumerate(g) for k, b in enumerate(row) if b == "#"]
         mark = _SMALL_MARK.get(c.upper())
@@ -6113,7 +6190,8 @@ CLOCK_HUES = [("pora dnia", None), ("biały", (255, 255, 255)), ("ciepły biały
               ("żółty", (255, 200, 0)), ("pomarańczowy", (255, 120, 0)), ("czerwony", (255, 30, 20)),
               ("różowy", (255, 60, 160)), ("fioletowy", (170, 60, 255)), ("niebieski", (40, 110, 255)),
               ("błękitny", (0, 200, 255)), ("zielony", (40, 255, 80))]
-CLOCK = {"hue": 0, "temp": 0}  # „barwa” (indeks w CLOCK_HUES) i „temperatura” (K); zapisywane w konfiguracji
+CLOCK = {"hue": 0, "temp": 0, "col": None, "font": 0}  # „barwa” (indeks w CLOCK_HUES), „temperatura” (K), dowolny
+# kolor (r, g, b) zamiast barwy (None = barwa) i „czcionka” (indeks w CLOCK_FONTS); zapisywane w konfiguracji
 
 
 def daylight_k(elev):
@@ -6127,8 +6205,9 @@ def daylight_k(elev):
 
 
 def clock_color(now):
-    """Kolor zegara: „pora dnia” = temperatura za słońcem + przesunięcie; stały kolor = przesunięcie jak balans bieli."""
-    base = CLOCK_HUES[CLOCK["hue"]][1]
+    """Kolor zegara: „pora dnia” = temperatura za słońcem + przesunięcie; stały kolor (z listy albo dowolny) =
+    przesunięcie jak balans bieli."""
+    base = CLOCK["col"] or CLOCK_HUES[CLOCK["hue"]][1]
     if base is None:
         return kelvin_rgb(daylight_k(sun_position(now)[0]) + CLOCK["temp"])
     if not CLOCK["temp"]:
@@ -6140,30 +6219,45 @@ def clock_color(now):
 
 @reg("zegar")
 class PlainClock(Clock):
-    """Zwykły, czytelny zegar: godzina z sekundami i data, wszystko jednym kolorem. Barwa do wyboru; „pora dnia”
-    idzie za słońcem – w południe biały, wieczorem ciepły żółty, w nocy bursztyn; „temperatura” przesuwa barwę."""
+    """Zwykły, czytelny zegar: godzina z sekundami, dzień tygodnia (zawsze cały – długie nazwy węższymi literami)
+    i data, wszystko jednym kolorem. Barwa z listy albo dowolny kolor; „pora dnia” idzie za słońcem – w południe
+    biały, wieczorem ciepły żółty, w nocy bursztyn; „temperatura” przesuwa barwę. Cyfry w jednej z kilku czcionek."""
+
+    @staticmethod
+    def fit(texts, room):
+        """Najszersza czcionka (SMALL, potem wąska), w której wszystkie napisy mieszczą się w room -> (czcionka, szer.)."""
+        for font in (SMALL, NARROW_TXT):
+            w = max(text_w(s, font) for s in texts)
+            if w <= room:
+                return font, w
+        return NARROW_TXT, w
 
     def draw(self, f, now, t, dt):
         c = clock_color(now)
+        font = CLOCK_FONTS[CLOCK["font"]][1]
         hms = now.strftime("%H:%M:%S")
-        tw = text_w(hms)
+        tw, th = text_w(hms, font), len(font["0"])
+        y = 1 + (10 - th) // 2
         wd = PL_DAYS[now.weekday()].upper()
         date = f"{now.day:02d}.{now.month:02d}.{now.year}"
-        if NARROW:  # 60 kolumn: sama godzina, co 10 s na chwilę data
+        if NARROW:  # 60 kolumn: sama godzina, co 10 s na chwilę dzień tygodnia i data (dwa wiersze)
             if page(t, 4, 2.5) == 3:
-                s = f"{wd[:3]} {now.day:02d}.{now.month:02d}"
-                f.draw(small_pl(s, (W - text_w(s, SMALL)) // 2, 3), c)
+                ff, _ = self.fit([wd], W - 2)
+                f.draw(small_pl(wd, (W - text_w(wd, ff)) // 2, 1, font=ff), c)
+                d = date[:6] if text_w(date, SMALL) > W - 2 else date
+                f.text(d, (W - text_w(d, SMALL)) // 2, 7, c, SMALL)
                 return
             x = (W - tw) // 2
         else:
-            if text_w(wd, SMALL) > W - tw - 10:
-                wd = wd[:3]
-            gap = (W - tw - max(text_w(wd, SMALL), text_w(date, SMALL))) // 3  # równe odstępy: brzeg, godzina, data, brzeg
+            room = W - tw - 6  # najmniej 2 px odstępu przy brzegach i od godziny
+            fd, wdw = self.fit([wd], room)
+            fdate, dw = self.fit([date], room)
+            gap = (W - tw - max(wdw, dw)) // 3  # równe odstępy: brzeg, godzina, data, brzeg
             x = gap
             dx = x + tw + gap
-            f.draw(small_pl(wd, dx, 1), c)       # wiersz 0 na kreskę (Ś), wiersz 6 na ogonek (Ą)
-            f.text(date, dx, 7, c, SMALL)
-        f.text(hms, x, 1, c, BIG)  # wszystko jednym kolorem
+            f.draw(small_pl(wd, dx, 1, font=fd), c)       # wiersz 0 na kreskę (Ś), wiersz 6 na ogonek (Ą)
+            f.text(date, dx, 7, c, fdate)
+        f.text(hms, x, y, c, font)  # wszystko jednym kolorem
 
 
 # ---------------------------------------------------------------- test kolorów (kalibracja podglądu)
@@ -8142,7 +8236,7 @@ class Engine:
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
                   "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik",
-                  "ludzik strona": "ludzik", "kolor oczu": "kot czlowiek bajka sowa robot sauron hal mrok", "barwa": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
+                  "ludzik strona": "ludzik", "kolor oczu": "kot czlowiek bajka sowa robot sauron hal mrok", "barwa": "zegar", "kolor zegara": "zegar", "czcionka": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
                   "diody: zielony": "kolory", "diody: niebieski": "kolory"}
 
     def __init__(self, a, cfg):
@@ -8299,7 +8393,14 @@ class Engine:
             COLOR["fix"] = not COLOR["fix"]
 
         def s_hue(d):
-            CLOCK["hue"] = (CLOCK["hue"] + d) % len(CLOCK_HUES)
+            CLOCK["hue"], CLOCK["col"] = (CLOCK["hue"] + d) % len(CLOCK_HUES), None
+
+        def s_clkcol(d):
+            i = EYE_PRESETS.index(CLOCK["col"]) if CLOCK["col"] in EYE_PRESETS else 0
+            CLOCK["col"] = EYE_PRESETS[(i + d) % len(EYE_PRESETS)]
+
+        def s_font(d):
+            CLOCK["font"] = (CLOCK["font"] + d) % len(CLOCK_FONTS)
 
         def s_temp(d):
             CLOCK["temp"] = self.step_in(CLOCK_TEMPS, CLOCK["temp"], d)
@@ -8355,8 +8456,12 @@ class Engine:
                                  lambda v: LUDZIK_CHARS[v][0]),
             "ludzik strona": opt(list(range(len(LUDZIK_SIDES))), lambda: LUDZIK["side"], lambda v: LUDZIK.update(side=v),
                                  lambda v: LUDZIK_SIDES[v]),
-            "barwa": opt(list(range(len(CLOCK_HUES))), lambda: CLOCK["hue"], lambda v: CLOCK.update(hue=v),
-                         lambda v: CLOCK_HUES[v][0]),
+            "barwa": opt(lambda: list(range(len(CLOCK_HUES))) + (["własny"] if CLOCK["col"] else []),
+                         lambda: "własny" if CLOCK["col"] else CLOCK["hue"],
+                         lambda v: v != "własny" and CLOCK.update(hue=v, col=None),
+                         lambda v: "własny kolor" if v == "własny" else CLOCK_HUES[v][0]),
+            "czcionka": opt(list(range(len(CLOCK_FONTS))), lambda: CLOCK["font"], lambda v: CLOCK.update(font=v),
+                            lambda v: CLOCK_FONTS[v][0]),
             "temperatura": opt(CLOCK_TEMPS, lambda: CLOCK["temp"], lambda v: CLOCK.update(temp=v),
                                lambda v: f"{v:+d} K" if v else "0 K", "range"),
             "wysyłanie": flag(lambda: self.sending, lambda v: v != self.sending and self.toggle_send()),
@@ -8395,7 +8500,11 @@ class Engine:
              "tęczówki / świecenie; w panelu WWW dowolny kolor, tu gotowe"),
             ("ludzik strona", lambda: LUDZIK_SIDES[LUDZIK["side"]], s_lside,
              "gdzie spaceruje: po obu stronach albo głównie po jednej (na drugą tylko na chwilę)"),
-            ("barwa", lambda: CLOCK_HUES[CLOCK["hue"]][0], s_hue, "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
+            ("barwa", lambda: "własny kolor" if CLOCK["col"] else CLOCK_HUES[CLOCK["hue"]][0], s_hue,
+             "kolor zegara; pora dnia = biały w południe, ciepły wieczorem"),
+            ("kolor zegara", lambda: eye_hex(CLOCK["col"]) or "z barwy", s_clkcol,
+             "dowolny kolor zamiast barwy; w panelu WWW z próbnika, tu gotowe"),
+            ("czcionka", lambda: CLOCK_FONTS[CLOCK["font"]][0], s_font, "krój cyfr godziny"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
             ("diody: czerwony", lambda: f"x{COLOR['r']:g}", s_led("r"), "jasność kanału w podglądzie – dopasuj do panelu"),
             ("diody: zielony", lambda: f"x{COLOR['g']:g}", s_led("g"),
@@ -8527,6 +8636,7 @@ class Engine:
                "oczy_kolor": eye_hex(EYES["col"]),
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
+               "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
                "wled_fx_cfg": self.wled_saved}
         try:
@@ -9321,6 +9431,11 @@ def web_cmd(e, c):
                 raise ValueError(f"zła wartość ustawienia {name!r}")
             return lambda: e.pick(name, i)
         return lambda: e.setting(name, d)
+    if op == "clockcol":
+        h = str(c.get("col", ""))
+        if h and not eye_rgb(h):
+            raise ValueError("kolor zegara: #rrggbb albo pusty (z barwy)")
+        return lambda: CLOCK.update(col=eye_rgb(h))
     if op == "eyes":
         h = str(c.get("col", ""))
         if h and not eye_rgb(h):
@@ -10189,6 +10304,8 @@ def main():
     LUDZIK["side"] = LUDZIK_SIDES.index(cfg["ludzik_strona"]) if cfg.get("ludzik_strona") in LUDZIK_SIDES else 0
     CLOCK["hue"] = next((i for i, (n, _) in enumerate(CLOCK_HUES) if n == cfg.get("zegar_barwa")), 0)
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
+    CLOCK["col"] = eye_rgb(cfg.get("zegar_kolor") or "")
+    CLOCK["font"] = next((i for i, (n, _) in enumerate(CLOCK_FONTS) if n == cfg.get("zegar_czcionka")), 0)
     rgb = cfg.get("led_rgb")
     if isinstance(rgb, list) and len(rgb) == 3 and all(v in COLOR_STEPS for v in rgb):
         COLOR.update(r=rgb[0], g=rgb[1], b=rgb[2])

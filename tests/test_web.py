@@ -876,3 +876,30 @@ class HeadlessProcessTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlainClockTest(unittest.TestCase):
+    def test_color_font_and_weekday(self):
+        """Zegar: dowolny kolor zamiast barwy, każda czcionka mieści godzinę, a nazwa dnia zawsze cała."""
+        e = wc.Engine(args(mode="zegar"), {})
+        shown = [n for n, *_ in e.shown_settings()]
+        self.assertIn("kolor zegara", shown)
+        self.assertIn("czcionka", shown)
+        wc.web_cmd(e, {"op": "clockcol", "col": "#00ff00"})()
+        try:
+            self.assertEqual(wc.clock_color(wc.dtm.datetime.now().astimezone()), (0, 255, 0))
+            self.assertEqual(e.choice_json("barwa")["labels"][e.choice_json("barwa")["index"]], "własny kolor")
+            with self.assertRaises(ValueError):
+                wc.web_cmd(e, {"op": "clockcol", "col": "zielony"})
+            for i, (name, font) in enumerate(wc.CLOCK_FONTS):
+                wc.CLOCK["font"] = i
+                for d in range(7):
+                    now = wc.dtm.datetime(2026, 10, 19 + d, 23, 58, 48).astimezone()
+                    f = wc.Frame()
+                    wc.CLOCKS["zegar"]().draw(f, now, 0, 0.1)
+                    wd = wc.PL_DAYS[d].upper()
+                    room = wc.W - wc.text_w("23:58:48", font) - 6
+                    self.assertLessEqual(wc.PlainClock.fit([wd], room)[1], room, (name, wd))
+                    self.assertTrue(all(c == (0, 0, 0) or c[1] > 0 for row in f.px for c in row))
+        finally:
+            wc.CLOCK.update(col=None, font=0)

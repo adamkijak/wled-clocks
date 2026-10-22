@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.19.0
+
+- Zegar: ustawienie „kolor zegara” – dowolny kolor z próbnika w panelu WWW (od razu na panelu) zamiast barwy z listy
+  albo „pory dnia”; wybór barwy z listy wraca do niej.
+- Zegar: ustawienie „czcionka” – klasyczna, kwadratowa, gruba, cienka, wąska, 7-segmentowa i LCD.
+- Zegar: nazwa dnia tygodnia zawsze cała (koniec z „PON”) – gdy się nie mieści, pisana węższymi literami; na
+  panelu 60 kolumn dzień i data w dwóch wierszach.
+
 ## 1.18.0
 
 - Ludzik – nowe zajęcia:
