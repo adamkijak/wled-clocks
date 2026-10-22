@@ -4846,6 +4846,12 @@ LUDZIK_CHARS = [
                "M": (0, 210, 255), "B": (170, 180, 205), "P": (90, 100, 125), "O": (70, 80, 100)}),
     ("kosmita", {"Y": (90, 220, 70), "S": (90, 220, 70), "E": (170, 0, 255), "C": (40, 110, 30),
                  "M": (20, 100, 20), "B": (130, 50, 210), "P": (180, 185, 200), "O": (130, 50, 210)}),
+    ("policjant", {"Y": (35, 65, 185), "S": (255, 180, 130), "E": (30, 70, 200), "C": (150, 90, 60),
+                   "M": (200, 40, 50), "B": (110, 170, 255), "P": (35, 55, 150), "O": (90, 90, 100)}),  # czapka, błękit
+    ("lekarz", {"Y": (120, 75, 35), "S": (255, 180, 130), "E": (30, 70, 200), "C": (150, 90, 60),
+                "M": (200, 40, 50), "B": (240, 240, 240), "P": (40, 180, 150), "O": (235, 235, 235)}),  # biały kitel
+    ("superbohater", {"Y": (70, 70, 95), "S": (255, 180, 130), "E": (30, 70, 200), "C": (150, 90, 60),
+                      "M": (200, 40, 50), "B": (30, 90, 235), "P": (230, 30, 30), "O": (230, 30, 30)}),
 ]
 
 
@@ -4877,7 +4883,7 @@ class Worker(Clock):
     kopniak, zamiatanie, czary, spawanie laserem, lina, holowanie autem, obrót korbą) – nowe cyfry wchodzą równo z pełną
     minutą; z nudów spaceruje po obu stronach zegara, czyta, śpi w łóżku, je, gra na gitarze, podbija piłkę, buduje
     zamek z piasku, goni balonik, głaszcze kota albo psa, gasi płonący śmietnik (przyjeżdża wozem strażackim),
-    żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem, autem, traktorem z przyczepami i kombajnem (kilka okrążeń:
+    żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem, autem, karetką, radiowozem, traktorem z przyczepami i kombajnem (kilka okrążeń:
     wyjeżdża za krawędź i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą.
     Zajęcia trwają tyle, ile zostało do przestawiania cyfr (najwyżej górna granica z TRICKS)."""
 
@@ -4982,6 +4988,13 @@ class Worker(Clock):
                     ".ZXSESZ.W.W.W.W.W.W.W.", ".ZXSSSZZZZZZZZZZZZZZZ.", "LZZZZZZZWWWWWWWWWWWWZ.",
                     "ZZZZZZZZZZZZZZZZZZZZZ.", "ZZZZZZZZZZZZZZZZZZZZZD", ".ZQQQZZZZZZZZZZZQQQZZ.",
                     "..QHQ...........QHQ...", "..QQQ...........QQQ..."]  # wóz strażacki
+    POSES["karetka"] = ["......................", ".....WWWWWWWWWWWWWWWW.", "....WXYYYWWWWWWZWWWWW.",
+                        "...WWXESSWWWWWZZZWWWW.", "..WWWXSSSWWWWWWZWWWWW.", "LWWWWWWWWWWWWWWWWWWWW.",
+                        "WZZZZZZZZZZZZZZZZZZZZ.", "WWWWWWWWWWWWWWWWWWWWWD", ".WQQQWWWWWWWWWWWQQQWW.",
+                        "..QHQ...........QHQ...", "..QQQ...........QQQ..."]  # biała, czerwony pas i krzyż
+    POSES["policja"] = ["....................", "....................", "......bbbbbbbb......", ".....bXXYYYYYXb.....",
+                        "....bXXXSESESXXb....", "...bXXXXSSSSSXXXb...", ".bbbbbbbbbbbbbbbbbb.", "LWWWWWWWWWWWWWWWWWWW",
+                        "WWWQQQWWWWWWWWQQQWWR", "..QQHQQ......QQHQQ..", "...QQQ........QQQ..."]  # granatowo-biały
     del TRACTOR, HAY, PUMPKINS, COMBINE, i, f_, x_, y_, z_
     POSES["glowa1"], POSES["glowa2"] = POSES["stoi"][::-1], POSES["idzie1"][::-1]  # stanie na głowie, nogi machają
     # nudzi się: nazwa -> (czas od–do w s, pozy jednej rundy, czas jednej pozy, co druga odbita w lustrze);
@@ -5016,7 +5029,13 @@ class Worker(Clock):
     REACH = {"piłka": 3, "piasek": 16, "gitara": 14}  # ile px przed ludzikiem zajmują rzeczy (piłka, piaskownica)
     CASTLE = ["#.#...#.#", "###...###", "###.#.###", "#########", "####.####", "###...###"]  # rzędy 4–9
     RIDES = {"rower": (("rower1", "rower2"), 14, (2, 4)), "auto": (("auto",), 22, (2, 5)),
-             "traktor": (("traktor1", "traktor2"), 8, (1, 2)), "kombajn": (("kombajn1", "kombajn2"), 6, (1, 2))}  # pozy, px/s, okrążenia
+             "traktor": (("traktor1", "traktor2"), 8, (1, 2)), "kombajn": (("kombajn1", "kombajn2"), 6, (1, 2)),
+             "karetka": (("karetka",), 22, (2, 4)), "policja": (("policja",), 22, (2, 4))}
+    # koguty: pojazd -> [(kolumna, wiersz, kolor w 1. połowie błysku, w 2.)]
+    SIRENS = {"karetka": [(5, 0, (0, 90, 255), None), (6, 0, (0, 90, 255), None), (19, 0, None, (0, 90, 255)),
+                          (20, 0, None, (0, 90, 255))],
+              "policja": [(8, 1, (0, 90, 255), None), (9, 1, (0, 90, 255), None), (10, 1, None, (255, 20, 20)),
+                          (11, 1, None, (255, 20, 20))]}  # pozy, px/s, okrążenia
     RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony (długie – więcej, ride_off())
     # strzelanie przez zegar do tarczy po drugiej stronie: poza strzału (pierwsza z serii = strzał) i prędkość pocisku (px/s)
     SHOTS = {"łuk": ("luk2", 55), "pistolet": ("pist2", 120), "bazooka": ("baz2", 50)}
@@ -5040,8 +5059,9 @@ class Worker(Clock):
            "K": (40, 170, 90), "A": (110, 220, 40), "T": (150, 90, 40), "G": (230, 180, 60), "D": (130, 130, 145),
            "V": (100, 125, 40), "F": (0, 200, 255), "Q": (110, 110, 120), "H": (220, 220, 230), "N": (30, 160, 60),
            "X": (110, 170, 230), "L": (255, 255, 170), "U": (215, 120, 30), "J": (70, 110, 220),
-           "Z": (220, 25, 20), "u": (150, 70, 10), "k": (45, 20, 5)}
-    # D broń/grot, V rura bazooki, U pudło gitary/dynie (u – cień, k – otwór), J kołdra, Z wóz strażacki
+           "Z": (220, 25, 20), "u": (150, 70, 10), "k": (45, 20, 5), "b": (20, 45, 150)}
+    # D broń/grot, V rura bazooki, U pudło gitary/dynie (u – cień, k – otwór), J kołdra, Z wóz strażacki/pas
+    # karetki, b radiowóz
     # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech (w aucie: tylne światło), W kartki/poduszka/drabina,
     # K okładka, A jabłko, T kij/gryf/łóżko/dyszel, G miotła/siano/felgi, F rama roweru, Q opony, H piasty/kołpaki,
     # N karoseria (auto, traktor, kombajn), X szyby, L reflektor
@@ -5761,10 +5781,19 @@ class Worker(Clock):
             for q in range(5):  # sieczka i kurz z tyłu
                 ph = (t * 1.8 + q / 5) % 1
                 f.add(cx(25 + ph * 7), 8 + (hash1(q) - 0.5) * 2 - ph * 2, mul((200, 170, 90), (1 - ph) * 0.8))
-        elif r["n"] == "auto":
+        if r["n"] in self.SIRENS:  # koguty migają na zmianę, z poświatą
+            half = int(t * 6) % 2
+            for c, y, a, b in self.SIRENS[r["n"]]:
+                col = (a, b)[half]
+                f.set(cx(c), y, col or (40, 40, 50))
+                if col:
+                    for dx, dy in ((-1, 0), (1, 0), (0, 1), (0, -1)):
+                        f.add(cx(c) + dx, y + dy, mul(col, 0.18))
+        if r["n"] in ("auto", "karetka", "policja"):
             front, back = (sx + w, sx - 1) if flip else (sx - 1, sx + w)
+            ly = next(i for i, row in enumerate(self.POSES[pose]) if "L" in row)  # wiersz reflektora
             for q in range(6):  # snop światła przed maską
-                f.add(front + d * q, 7 + (q > 2), mul((90, 85, 50), 1 - q / 6))
+                f.add(front + d * q, ly + (q > 2), mul((90, 85, 50), 1 - q / 6))
             for q in range(3):  # spaliny z rury
                 ph = (t * 2 + q / 3) % 1
                 f.add(back - d * (1 + ph * 6), 9 - ph * 2, mul(visible((90, 90, 95), 4), 1 - ph))
@@ -7899,14 +7928,14 @@ class CatEyes(Eyes):
         half = 0.55 * math.sin(math.pi * clamp((t - s0) / sd_)) if t - s0 < sd_ else 0  # powolne przymknięcie
         c = max(self.lid(t, 0.24), half)
         col, a, b = self.col(), 13.0, 5.6 * (1 - c)
-        lash = visible(mul(col, 0.12))
+        lash = visible(mul(col, 0.35))
         for cx in (W / 2 - 22, W / 2 + 22):
             ox, oy = cx + self.g[0] * 6, self.CY + self.g[1] * 1.2
 
             def px(x, y, cx=cx, ox=ox, oy=oy):
                 dx, dy = x - cx, y - self.CY
                 if b < 0.7:  # zamknięte – kreska powieki
-                    return lash if abs(dy) < 0.5 and abs(dx) < a * 0.95 else None
+                    return lash if -0.5 < dy <= 0.5 and abs(dx) < a * 0.95 else None  # środki pikseli co 0,5
                 k = cover(sd_almond(dx, dy, a, b))
                 if not k:
                     return None
@@ -7998,7 +8027,7 @@ class CartoonEyes(Eyes):
                 if mood == "radość":  # ^ ^ – łuk
                     return col if abs(math.hypot(dx / 1.3, dy - 3.5) - 5.0) < 0.6 and dy < 2.5 else None
                 if bb < 0.8:
-                    return col if abs(dy) < 0.5 and abs(dx) < a else None
+                    return col if -0.5 < dy <= 0.5 and abs(dx) < a else None  # zamknięte: kreska (środki co 0,5)
                 k = cover(sd_ellipse(dx, dy, a, bb))
                 if not k:
                     return None

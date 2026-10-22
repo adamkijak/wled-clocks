@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.21.0
+
+- Ludzik: nowe przejazdy – karetka (biała, czerwony pas i krzyż, niebieskie koguty) i radiowóz (granatowo-biały,
+  belka świateł niebiesko-czerwona); światła migają na zmianę z poświatą, reflektory i spaliny jak w aucie.
+- Ludzik: 3 nowe postacie – policjant, lekarz i superbohater (razem 8).
+- Oczy (kot, bajka): zamknięte oko rysuje kreskę powieki – wcześniej przy mrugnięciu znikało całe, a podgląd na
+  liście bywał czarny.
+
 ## 1.20.0
 
 - Ludzik: zajęcia nie urywają się nagle.
