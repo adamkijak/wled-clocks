@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.22.2
+
+- Ludzik: kombajn zostawia po sobie bele słomy – co kawałek bela wypada z tyłu na ziemię i leży do końca
+  przejazdu, potem bele powoli gasną.
+
 ## 1.22.1
 
 - Ludzik: nowa postać „chłopak zielony” – ta sama sylwetka co chłopak, w zielonej bluzie i ciemnozielonych

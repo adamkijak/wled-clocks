@@ -5129,6 +5129,8 @@ class Worker(Clock):
                           (20, 0, None, (0, 90, 255))],
               "policja": [(8, 1, (0, 90, 255), None), (9, 1, (0, 90, 255), None), (10, 1, None, (255, 20, 20)),
                           (11, 1, None, (255, 20, 20))]}  # pozy, px/s, okrążenia
+    BALE = [".LLLL.", "LDLLDL", "LLLLLL"]  # bela słomy za kombajnem (D – sznurek)
+    BALE_PAL = {"L": (235, 200, 90), "D": (160, 115, 40)}
     RIDE_OFF = 25  # tyle px za krawędzią pojazd znika, zanim wróci z drugiej strony (długie – więcej, ride_off())
     # strzelanie przez zegar do tarczy po drugiej stronie: poza strzału (pierwsza z serii = strzał) i prędkość pocisku (px/s)
     SHOTS = {"łuk": ("luk2", 55), "pistolet": ("pist2", 120), "bazooka": ("baz2", 50)}
@@ -5170,6 +5172,7 @@ class Worker(Clock):
         self.how_seed = random.random()  # losowy sposób przestawiania: inny w każdym uruchomieniu
         self.char = None  # postać na sztywno (podgląd postaci); None = z ustawień
         self.sc = {}  # stan bieżącej sceny (balon, pożar, zwierzak)
+        self.bales, self.bales_end = [], None  # bele słomy po kombajnie: [x, kiedy wypadła]; gasną po przejeździe
         self.outro, self.last = None, None  # zakończenie ostatniego zajęcia; last: (poza, sx, flip) z ostatniej klatki
 
     @staticmethod
@@ -5824,6 +5827,8 @@ class Worker(Clock):
         laps = min(random.randint(lo, hi), int(free / self.ride_time(name)))
         if laps < 1:
             return None
+        if name == "kombajn":
+            self.bales, self.bales_end = [], None  # nowy przejazd – nowe bele
         self.ride = {"n": name, "t0": t, "x0": self.x, "d": d, "goal": goal, "edge": edge, "t_out": t_out,
                      "t_in": t_in, "len": laps * (W + 2 * o)}
         return t_out + self.ride["len"] / v + t_in
@@ -5881,6 +5886,13 @@ class Worker(Clock):
                 ph = (t * 1.6 + q / 3) % 1
                 f.add(cx(3) - d * ph * 5, 1.5 - ph * 2.5, mul(visible((90, 90, 95), 4), 1 - ph))
         elif r["n"] == "kombajn":
+            lap = W + 2 * self.ride_off("kombajn")
+            key = (int(k // lap), int((k % lap) // 24))  # co 24 px wypada z tyłu bela
+            if key not in r.setdefault("drops", set()):
+                r["drops"].add(key)
+                x0 = round(cx(25)) - (6 if d > 0 else 0)
+                if 0 <= x0 <= W - 6 and all(abs(b[0] - x0) > 7 for b in self.bales):
+                    self.bales.append([x0, t])
             for q in range(4):  # nagarniacz kręci się nad hederem
                 a = q * math.pi / 2 + t * 5 * (1 if flip else -1)
                 f.line(cx(2.5), 5.5, cx(2.5 + math.cos(a) * 2.4), 5.5 + math.sin(a) * 2.4, visible((120, 100, 30)))
@@ -5905,6 +5917,20 @@ class Worker(Clock):
                 ph = (t * 2 + q / 3) % 1
                 f.add(back - d * (1 + ph * 6), 9 - ph * 2, mul(visible((90, 90, 95), 4), 1 - ph))
         return True
+
+    def draw_bales(self, f, t):
+        """Bele słomy po kombajnie: wypadają z tyłu na ziemię, leżą do końca przejazdu, potem w 3 s gasną."""
+        if not self.bales:
+            return
+        if self.bales_end is None and not (self.ride and self.ride["n"] == "kombajn"):
+            self.bales_end = t
+        k = 1.0 if self.bales_end is None else 1 - (t - self.bales_end) / 3
+        if k <= 0:
+            self.bales, self.bales_end = [], None
+            return
+        for x0, t0 in self.bales:
+            y = min(8, 5 + (t - t0) * 14)  # spada z wysokości wylotu
+            sprite(f, self.BALE, x0, round(y), {c: mul(v, k) for c, v in self.BALE_PAL.items()})
 
     def begin_trick(self, n, t, fl, pause, forced=False):
         (lo, hi), poses, step, _ = self.trick_spec(n)
@@ -6348,6 +6374,7 @@ class Worker(Clock):
         ground = visible((40, 26, 12))
         for x in range(W):
             f.set(x, 11, ground)
+        self.draw_bales(f, t)
         col = (235, 235, 255)
         blink = (t % 3.7) < 0.15
         j = self.job
