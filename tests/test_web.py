@@ -880,7 +880,17 @@ class InboxTest(unittest.TestCase):
             self.assertEqual(self.send(code, "x kto", ip="5.0.0.5")[0], 422)
             self.assertEqual(self.send(code, "-x MAR", ip="5.0.0.6")[0], 200)
             self.assertFalse(wc.DAILY["people"][0]["done"])
-            self.assertIn('value="x BAR"', self.send(code)[1])                         # przyciski na stronie
+            page = self.send(code)[1]
+            self.assertIn('value="x BAR"', page)                                     # przyciski na stronie
+            self.assertNotIn("Reactions", page)                                      # tylko daily, bez skrzynki
+            wc.web_cmd(e, {"op": "daily", "act": "speak"})()                           # zwykła lista, bez „mówi”
+            self.assertIsNone(wc.daily_cur())
+            self.assertEqual(self.send(code, "teraz mar", ip="5.0.0.7")[0], 422)
+            self.assertEqual(self.send(code, "x", ip="5.0.0.8")[0], 422)
+            f = wc.Frame()
+            wc.CLOCKS["daily"]().draw(f, wc.dtm.datetime.now().astimezone(), 0.0, 0.05)
+            self.assertFalse(any(c[0] > 150 and c[0] > c[1] > 90 and c[2] < 60 for row in f.px for c in row))
+            wc.web_cmd(e, {"op": "daily", "act": "speak"})()
             wc.web_cmd(e, {"op": "daily", "act": "next"})()
             wc.web_cmd(e, {"op": "daily", "act": "reset"})()
             self.assertFalse(any(p["done"] for p in wc.DAILY["people"]))
@@ -900,7 +910,13 @@ class InboxTest(unittest.TestCase):
             self.assertEqual(self.send(code, "1 1 nijaki", ip="6.0.0.5")[0], 422)
             page = self.send(code + "?c=blue")[1]
             self.assertIn('value="1 1 blue"', page)                                  # siatka w wybranym kolorze
-            self.assertEqual(page.count('name="message" value="'), wc.W * wc.H + len(wc.DAILY["people"]) + 4)  # + reakcje
+            self.assertEqual(page.count('name="message" value="'), wc.W * wc.H)      # sama siatka (rysunek na panelu)
+            self.assertIn("<script>", page)
+            self.assertEqual(self.send(code, "px blue 1,1 2,1 3,2 " + "4,4 " * 40, ip="6.0.0.6")[0], 200)  # przeciąganie
+            self.assertEqual({k for k in wc.DRAW["px"] if k[1] in (0, 1)} >= {(0, 0), (1, 0), (2, 1)}, True)
+            self.assertEqual(self.send(code, "px blue 121,1", ip="6.0.0.7")[0], 422)
+            wc.web_cmd(e, {"op": "draw", "act": "pxs", "pts": [[5, 5], [6, 5]], "c": "#ff0000"})()
+            self.assertEqual(wc.DRAW["px"][(6, 5)], (255, 0, 0))
             wc.web_cmd(e, {"op": "draw", "act": "px", "x": 0, "y": 0, "c": "#00ff00"})()
             self.assertEqual(wc.draw_hex()[:6], "00ff00")
             with self.assertRaises(ValueError):

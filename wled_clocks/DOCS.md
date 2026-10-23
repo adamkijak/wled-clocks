@@ -61,12 +61,15 @@ Zabezpieczenia:
   - **daily** (efekt „daily”) – lista osób na spotkanie (w ustawieniach efektu: jedna osoba w wierszu, skrót 2–3
     litery); kto już mówił, jest przekreślony na zielono, kto mówi – świeci na złoto. Odhacza się w panelu WWW albo
     z calla: `x mar`, `-x mar` (cofnij), `teraz mar`, samo `x` (mówca); po odhaczeniu mówcy podświetla się
-    następna osoba;
-  - **wspólny rysunek** (efekt „rysunek”) – widzowie klikają siatkę 120 × 12 na swojej stronie (z wyborem koloru)
-    albo wysyłają `45 3 czerwony` (kolumna, wiersz, kolor), `45-60 3 niebieski` (kreska), `45 3 gumka`; Ty
+    następna osoba. Bez zaznaczenia „pokazuj, kto mówi” to zwykła lista do odhaczania (bez złotego mówcy,
+    `teraz` i samego `x`);
+  - **wspólny rysunek** (efekt „rysunek”) – widzowie malują na siatce 120 × 12 na swojej stronie (z wyborem
+    koloru): z przytrzymanym przyciskiem myszy albo palcem kreska idzie płynnie, piksele lecą paczkami; albo wysyłają `45 3 czerwony` (kolumna, wiersz, kolor), `45-60 3 niebieski` (kreska), `45 3 gumka`; Ty
     malujesz myszą w panelu WWW i czyścisz jednym przyciskiem.
   - Polecenia daily i rysunku działają tylko, gdy ich efekt jest na panelu – inaczej to zwykłe wiadomości.
-  - Głosy, reakcje i daily mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę. Rysunek jeszcze lżejszy: piksel co 0,2 s, przez tunel razem 900 na minutę.
+    Strona dla widzów też pokazuje tylko to, co ma efekt na panelu: przy daily – listę osób z przyciskami, przy
+    rysunku – siatkę, w pozostałych przypadkach – pole na wiadomość, ankietę, reakcje i instrukcję.
+  - Głosy, reakcje i daily mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę. Rysunek jeszcze lżejszy: piksel (albo paczka pikseli z przeciągania) co 0,2 s, przez tunel razem 900 na minutę.
 - Dziennik dodatku zapisuje każdą wiadomość.
 - Przy wiadomości widać IP nadawcy i przybliżone miejsce (ipwho.is, dostaje tylko adres IP) – o ile IP jest znane:
   za tunelem bore nie jest, przy własnym porcie (i `--msg-proxy` za Cloudflare) tak.

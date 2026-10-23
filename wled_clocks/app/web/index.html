@@ -67,6 +67,8 @@
       <p id="fx-none" class="muted">Ten efekt nie ma własnych ustawień.</p>
       <div id="daily" class="daily" hidden>
         <div class="card-head"><h3>Daily – osoby</h3><span id="daily-state" class="pill">…</span></div>
+        <label class="chk"><input type="checkbox" id="daily-speak"> pokazuj, kto mówi (złoty ze strzałką) – wyłączone:
+          zwykła lista do odhaczania</label>
         <details id="daily-edit" class="grp">
           <summary><span class="arrow">▸</span> Edytuj listę osób</summary>
           <textarea id="daily-text" rows="5" spellcheck="false" aria-label="Osoby na daily" placeholder="Marta MAR&#10;Bartek BAR&#10;Kuba"></textarea>
@@ -82,7 +84,7 @@
         </div>
         <details class="grp" data-k="daily-more">
           <summary><span class="arrow">▸</span> Opcje i polecenia z calla</summary>
-          <label class="chk"><input type="checkbox" id="daily-auto"> po odhaczeniu mówcy podświetl następną osobę</label>
+          <label class="chk" id="daily-auto-row"><input type="checkbox" id="daily-auto"> po odhaczeniu mówcy podświetl następną osobę</label>
           <p class="muted">Z calla (przez skrzynkę, gdy jest otwarta): <code>x mar</code> odhacza, <code>-x mar</code> cofa,
             <code>teraz mar</code> – mówi, samo <code>x</code> odhacza mówcę. Widzowie mają też przyciski na swojej stronie.</p>
         </details>

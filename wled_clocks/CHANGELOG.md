@@ -1,5 +1,14 @@
 # Zmiany
 
+## 1.27.0
+
+- Daily: przełącznik „pokazuj, kto mówi” – wyłączony daje zwykłą listę do odhaczania (bez złotego mówcy,
+  przycisku „Następna osoba”, `teraz mar` i samego `x`).
+- Strona dla widzów pokazuje tylko to, co ma efekt, który jest teraz na panelu: przy daily – osoby z przyciskami,
+  przy rysunku – siatkę, poza nimi – pole na wiadomość, ankietę, reakcje i instrukcję.
+- Rysunek: malowanie z przytrzymanym przyciskiem myszy (albo palcem) jest płynne – kratki pomiędzy ruchami
+  dociągnięte linią, piksele wysyłane paczkami (u widzów i w panelu WWW). Bez skryptu siatka działa jak dotąd.
+
 ## 1.26.0
 
 - Ludzik: nowe pojazdy – żółta **koparka** na gąsienicach (ramię z łyżką, przesuwające się gąsienice, dym z rury,

@@ -658,6 +658,9 @@ $("#daily-text").addEventListener("input", () => (dailyDirty = true));
 $("#daily-save").onclick = () => { dailyDirty = false; cmd("daily", { act: "set", v: $("#daily-text").value }); };
 $("#daily-next").onclick = () => cmd("daily", { act: "next" });
 $("#daily-reset").onclick = () => cmd("daily", { act: "reset" });
+$("#daily-speak").addEventListener("change", (e) => {
+  if (e.target.checked !== state.daily.speak) cmd("daily", { act: "speak" });
+});
 $("#daily-auto").addEventListener("change", (e) => {
   if (e.target.checked !== state.daily.auto) cmd("daily", { act: "auto" });
 });
@@ -672,6 +675,8 @@ function renderDaily(d) {
     $("#daily-edit").open = true;
   }
   $("#daily-auto").checked = d.auto;
+  $("#daily-speak").checked = d.speak;
+  $("#daily-next").hidden = $("#daily-auto-row").hidden = !d.speak; // zwykła lista: bez mówcy
   if (!dailyDirty && document.activeElement !== $("#daily-text")) {
     $("#daily-text").value = d.people.map((p) => `${p.name} ${p.id}`).join("\n");
   }
@@ -690,7 +695,8 @@ function renderDaily(d) {
     now.onclick = () => cmd("daily", { act: "now", i });
     const who = el("span", "who");
     who.append(el("b", "", p.id), document.createTextNode(` ${p.name}${i === d.cur ? " – mówi" : ""}`));
-    li.append(tick, now, who);
+    if (d.speak) li.append(tick, now, who);
+    else li.append(tick, who);
     ul.append(li);
   });
 }
@@ -711,22 +717,46 @@ DRAW_PAL.forEach((c) => {
   $("#draw-pal").append(b);
 });
 $("#draw-clear").onclick = () => cmd("draw", { act: "clear" });
-let painting = false, lastPx = "";
-const paintAt = (e) => {
+let painting = false, lastPx = null;
+const paintPx = (x, y) => {
   const cv = $("#draw-cv");
-  const r = cv.getBoundingClientRect();
-  const x = Math.floor(((e.clientX - r.left) / r.width) * cv.width);
-  const y = Math.floor(((e.clientY - r.top) / r.height) * cv.height);
-  if (x < 0 || y < 0 || x >= cv.width || y >= cv.height || `${x},${y}` === lastPx) return;
-  lastPx = `${x},${y}`;
   const ctx = cv.getContext("2d"); // od razu u siebie, panel dogoni
   ctx.fillStyle = brush || "#000";
   ctx.fillRect(x, y, 1, 1);
-  cmd("draw", { act: "px", x, y, c: brush });
+  if (drawQ.c !== brush) flushDraw();
+  drawQ.c = brush;
+  drawQ.pts.push([x, y]);
 };
-$("#draw-cv").addEventListener("pointerdown", (e) => { painting = true; lastPx = ""; paintAt(e); });
+const drawQ = { c: "", pts: [] }; // piksele wysyłane paczkami, nie każdy osobno
+const flushDraw = () => {
+  if (!drawQ.pts.length) return;
+  cmd("draw", { act: "pxs", pts: drawQ.pts.splice(0), c: drawQ.c });
+};
+setInterval(flushDraw, 100);
+const paintAt = (e) => {
+  const cv = $("#draw-cv");
+  const r = cv.getBoundingClientRect();
+  const x1 = Math.min(cv.width - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * cv.width)));
+  const y1 = Math.min(cv.height - 1, Math.max(0, Math.floor(((e.clientY - r.top) / r.height) * cv.height)));
+  if (!lastPx) { paintPx(x1, y1); lastPx = [x1, y1]; return; }
+  let [x, y] = lastPx; // szybki ruch myszy: kratki pomiędzy dociągnięte linią
+  const dx = Math.abs(x1 - x), dy = -Math.abs(y1 - y), sx = x < x1 ? 1 : -1, sy = y < y1 ? 1 : -1;
+  let err = dx + dy;
+  while (x !== x1 || y !== y1) {
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+    paintPx(x, y);
+  }
+  lastPx = [x1, y1];
+};
+$("#draw-cv").addEventListener("pointerdown", (e) => {
+  painting = true; lastPx = null;
+  e.target.setPointerCapture(e.pointerId); // przeciąganie poza kanwę nie urywa kreski
+  paintAt(e);
+});
 $("#draw-cv").addEventListener("pointermove", (e) => painting && paintAt(e));
-addEventListener("pointerup", () => (painting = false));
+addEventListener("pointerup", () => { painting = false; lastPx = null; });
 
 function renderDraw(hex) {
   $("#draw").hidden = hex == null;
