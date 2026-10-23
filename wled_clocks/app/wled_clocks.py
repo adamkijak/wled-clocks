@@ -10437,11 +10437,14 @@ DRAW_PALETTE = [("red", "#ff2d23"), ("orange", "#ff8200"), ("yellow", "#ffe100")
                 ("white", "#ffffff"), ("erase", "#000000")]
 
 
-# rysowanie z przytrzymanym przyciskiem: kratki między ruchami myszy dociągnięte linią, wysyłane paczkami co 220 ms
-# (zwykłym tekstem – odpowiedź to krótki tekst, nie cała strona)
-# (bez skryptu siatka dalej działa przyciskami – każde kliknięcie to jeden piksel)
-DRAW_JS = """(()=>{const g=document.querySelector('.grid');if(!g||!window.fetch)return;
-const c=g.dataset.c,h=g.dataset.h,q=[];let on=false,last=null,busy=false;
+# skrypt strony widzów (bez niego wszystko działa przyciskami, tylko bez odświeżania):
+# - co sekundę pyta o stan (?live): gdy na panelu jest inny efekt albo zmieniła się lista daily / ankieta – przeładowuje
+#   stronę (o ile nikt nie pisze w polu), na rysunku dociąga cudze piksele (cały rysunek tylko, gdy się zmienił),
+# - rysowanie z przytrzymanym przyciskiem: kratki między ruchami myszy dociągnięte linią, wysyłane paczkami co 220 ms
+#   (zwykłym tekstem – odpowiedź to krótki tekst, nie cała strona)
+LIVE_JS = """(()=>{if(!window.fetch)return;const B=document.body,mode=B.dataset.fx,key=B.dataset.k;
+const g=document.querySelector('.grid'),q=[];let on=false,last=null,busy=false,hh='';
+if(g){const c=g.dataset.c,h=g.dataset.h;
 const at=(e)=>{const b=document.elementFromPoint(e.clientX,e.clientY);
 if(!b||b.parentNode!==g)return null;const v=b.value.split(' ');return[+v[0],+v[1]];};
 const cell=(x,y)=>g.children[(y-1)*%d+x-1];
@@ -10457,8 +10460,45 @@ setInterval(send,220);g.style.touchAction='none';
 g.addEventListener('click',(e)=>e.preventDefault());
 g.addEventListener('pointerdown',(e)=>{const p=at(e);if(!p)return;e.preventDefault();on=true;last=null;to(p);});
 addEventListener('pointermove',(e)=>{if(!on)return;const p=at(e);if(p)to(p);});
-addEventListener('pointerup',()=>{on=false;last=null;});})();""" % W
-DRAW_JS_SHA = base64.b64encode(hashlib.sha256(DRAW_JS.encode()).digest()).decode()
+addEventListener('pointerup',()=>{on=false;last=null;});}
+const idle=()=>{const i=document.querySelector('input[name=message]');
+return !on&&(!i||(!i.value&&document.activeElement!==i));};
+const tick=()=>{if(document.hidden)return;fetch(location.pathname+'?live='+hh,{cache:'no-store'})
+.then((r)=>(r.ok?r.json():null)).then((j)=>{if(!j)return;
+if(j.fx!==mode||j.k!==key){if(idle())location.replace(location.pathname+location.search);return;}
+if(g&&j.hex&&!on&&!q.length&&!busy){hh=j.h;const k=g.children;
+for(let i=0;i<k.length;i++){const v=j.hex.substr(i*6,6);k[i].style.background=v==='------'?'':'#'+v;}}})
+.catch(()=>{});};setInterval(tick,1000);})();""" % W
+LIVE_JS_SHA = base64.b64encode(hashlib.sha256(LIVE_JS.encode()).digest()).decode()
+
+
+def msg_live():
+    """Co jest na stronie widzów: (efekt – daily / draw / msg, klucz stanu, przy którego zmianie strona się
+    przeładowuje)."""
+    live = [(st["seen"], k) for k, st in (("daily", DAILY), ("draw", DRAW)) if on_panel(st)]
+    fx = max(live)[1] if live else "msg"  # przy przełączaniu efektów – ten, który rysował ostatnio
+    if fx == "daily" and not DAILY["people"]:
+        fx = "msg"
+    if fx == "daily":
+        state = [DAILY["people"], daily_cur()]
+    elif fx == "draw":
+        state = []
+    else:
+        p = INBOX.poll
+        state = [p and [p["q"], p["opts"], p["on"]], INBOX.extras]
+    return fx, hashlib.sha1(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+
+def msg_live_json(seen):
+    """Odpowiedź na ?live=<skrót rysunku, który strona już ma>: efekt, klucz i – gdy się zmienił – cały rysunek."""
+    fx, k = msg_live()
+    out = {"fx": fx, "k": k}
+    if fx == "draw":
+        hexs = draw_hex()
+        h = hashlib.sha1(hexs.encode()).hexdigest()[:12]
+        if h != seen:
+            out.update(hex=hexs, h=h)
+    return json.dumps(out)
 
 
 def msg_grid(color):
@@ -10474,8 +10514,7 @@ def msg_grid(color):
     return (f'<h2 id="g">Draw together</h2><p>Pick a colour, hold the mouse button and draw. Or send <code>45 3 red</code> (column, row, '
             f'colour; <code>45-60 3 blue</code> draws a line, <code>erase</code> clears).</p><div class="row">{pal}</div>'
             f'<div class="gw"><form method="post" action="?c={color}#g" class="grid" data-c="{color}" '
-            f'data-h="{hexs[color]}" style="grid-template-columns:repeat({W},9px)">{cells}</form></div>'
-            f'<script>{DRAW_JS}</script>')
+            f'data-h="{hexs[color]}" style="grid-template-columns:repeat({W},9px)">{cells}</form></div>')
 
 
 def msg_daily():
@@ -10501,16 +10540,17 @@ def msg_page(msg, query=""):
     field = lambda hint: (f'<form method="post" accept-charset="utf-8"><input name="message" maxlength="{MSG_MAX}" '
                           f'required autofocus placeholder="{e(hint)}" aria-label="{e(hint)}"><button>Send</button>'
                           f'</form>')
+    fx, key = msg_live()
     head = lambda title: (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
                           f'content="width=device-width, initial-scale=1"><title>{e(title)}</title>'
-                          f'<style>{MSG_STYLE}</style></head><body><h1>{e(title)}</h1><p class="m">{e(msg)}</p>')
-    live = [(st["seen"], k) for k, st in (("daily", DAILY), ("draw", DRAW)) if on_panel(st)]
-    fx = max(live)[1] if live else None  # przy przełączaniu efektów – ten, który rysował ostatnio
-    if fx == "daily" and DAILY["people"]:
-        return head("Daily") + msg_daily() + field("e.g. x mar") + "</body></html>"
+                          f'<style>{MSG_STYLE}</style></head><body data-fx="{fx}" data-k="{key}"><h1>{e(title)}</h1>'
+                          f'<p class="m">{e(msg)}</p>')
+    end = f"<script>{LIVE_JS}</script></body></html>"
+    if fx == "daily":
+        return head("Daily") + msg_daily() + field("e.g. x mar") + end
     if fx == "draw":
         return (head("Draw on the panel") + msg_grid((urllib.parse.parse_qs(query).get("c") or ["red"])[0])
-                + field("e.g. 45 3 red") + "</body></html>")
+                + field("e.g. 45 3 red") + end)
     out = [head("Write something on the panel"), field("Your message"),
            f'<p>Up to {MSG_MAX} characters. Messages show up on the panel one by one.</p>']
     if poll and poll["on"]:
@@ -10530,7 +10570,7 @@ def msg_page(msg, query=""):
                    "<code>[rainbow] hello!</code></li>"
                    "<li><b>Emoticons</b> turn into pictures: <code>:)</code> <code>:(</code> <code>:D</code> "
                    "<code>;)</code> <code>:P</code> <code>:O</code> <code>&lt;3</code></li>")
-    out.append("<li>From a terminal: <code>curl -d 'hi :)' this-address</code></li></ul></body></html>")
+    out.append(f"<li>From a terminal: <code>curl -d 'hi :)' this-address</code></li></ul>{end}")
     return "".join(out)
 
 
@@ -10643,8 +10683,10 @@ class MsgHandler(httpd.BaseHTTPRequestHandler):
                 return h.strip()[:64]
         return self.client_address[0]
 
-    def answer(self, code, text, page=False):
-        if page:
+    def answer(self, code, text, page=False, json_=False):
+        if json_:
+            body, ctype = text.encode("utf-8"), "application/json"
+        elif page:
             body = msg_page(text, urllib.parse.urlsplit(self.path).query).encode("utf-8")
             ctype = "text/html; charset=utf-8"
         else:
@@ -10656,7 +10698,7 @@ class MsgHandler(httpd.BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; "
-                         f"script-src 'sha256-{DRAW_JS_SHA}'; connect-src 'self'; "
+                         f"script-src 'sha256-{LIVE_JS_SHA}'; connect-src 'self'; "
                          "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
@@ -10672,6 +10714,9 @@ class MsgHandler(httpd.BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.allowed():
             return self.answer(404, "not found")
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+        if "live" in query:  # stan dla skryptu strony – co sekundę
+            return self.answer(200, msg_live_json(query["live"][0][:16]), json_=True)
         self.answer(200, "", page=True)
 
     def do_POST(self):

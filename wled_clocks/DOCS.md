@@ -69,6 +69,8 @@ Zabezpieczenia:
   - Polecenia daily i rysunku działają tylko, gdy ich efekt jest na panelu – inaczej to zwykłe wiadomości.
     Strona dla widzów też pokazuje tylko to, co ma efekt na panelu: przy daily – listę osób z przyciskami, przy
     rysunku – siatkę, w pozostałych przypadkach – pole na wiadomość, ankietę, reakcje i instrukcję.
+    Strona odświeża się sama co sekundę: rysunek pokazuje na bieżąco piksele innych, a po zmianie efektu, listy
+    daily albo ankiety strona się przeładowuje (nie wtedy, gdy ktoś pisze w polu).
   - Głosy, reakcje i daily mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę. Rysunek jeszcze lżejszy: piksel (albo paczka pikseli z przeciągania) co 0,2 s, przez tunel razem 900 na minutę.
 - Dziennik dodatku zapisuje każdą wiadomość.
 - Przy wiadomości widać IP nadawcy i przybliżone miejsce (ipwho.is, dostaje tylko adres IP) – o ile IP jest znane:

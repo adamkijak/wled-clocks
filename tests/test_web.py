@@ -912,6 +912,10 @@ class InboxTest(unittest.TestCase):
             self.assertIn('value="1 1 blue"', page)                                  # siatka w wybranym kolorze
             self.assertEqual(page.count('name="message" value="'), wc.W * wc.H)      # sama siatka (rysunek na panelu)
             self.assertIn("<script>", page)
+            self.assertIn('data-fx="draw"', page)
+            live = json.loads(self.send(code + "?live=")[1])                          # odświeżanie strony
+            self.assertEqual((live["fx"], len(live["hex"])), ("draw", wc.W * wc.H * 6))
+            self.assertNotIn("hex", json.loads(self.send(code + "?live=" + live["h"])[1]))  # bez zmian – bez rysunku
             self.assertEqual(self.send(code, "px blue 1,1 2,1 3,2 " + "4,4 " * 40, ip="6.0.0.6")[0], 200)  # przeciąganie
             self.assertEqual({k for k in wc.DRAW["px"] if k[1] in (0, 1)} >= {(0, 0), (1, 0), (2, 1)}, True)
             self.assertEqual(self.send(code, "px blue 121,1", ip="6.0.0.7")[0], 422)

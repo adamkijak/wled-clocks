@@ -8,6 +8,8 @@
   przy rysunku – siatkę, poza nimi – pole na wiadomość, ankietę, reakcje i instrukcję.
 - Rysunek: malowanie z przytrzymanym przyciskiem myszy (albo palcem) jest płynne – kratki pomiędzy ruchami
   dociągnięte linią, piksele wysyłane paczkami (u widzów i w panelu WWW). Bez skryptu siatka działa jak dotąd.
+- Strona dla widzów odświeża się sama: co sekundę sprawdza stan – na rysunku dociąga to, co malują inni, a gdy
+  na panelu zmieni się efekt albo lista daily / ankieta, przeładowuje się (o ile nikt nie pisze w polu).
 
 ## 1.26.0
 
