@@ -318,7 +318,7 @@ function settingRow(s) {
     rows.set(s.name, { color: inp, nat });
     return row;
   }
-  if (s.kind) return pickRow(s, row); // suwak albo lista rozwijana
+  if (s.kind) return pickRow(s, row); // lista rozwijana
   const dec = el("button", "small", "◂");
   const inc = el("button", "small", "▸");
   dec.title = "mniej";
@@ -341,35 +341,19 @@ function settingRow(s) {
   return row;
 }
 
-// ustawienie z listą wartości: suwak (kind "range") albo lista rozwijana ("list"); wysyła numer wybranej wartości
+// ustawienie z listą wartości: lista rozwijana; wysyła numer wybranej wartości
 function pickRow(s, row) {
   const box = el("div", "wide pick");
-  const label = el("span", "plabel");
-  const r = { kind: s.kind, labels: [], label, hint: el("div", "hint"), dragging: false };
-  const send = (i) => {
+  const r = { labels: [], hint: el("div", "hint") };
+  r.ctl = el("select");
+  r.ctl.onchange = () => {
     if (s.name === "szerokość" && !confirm("Zmiana szerokości uruchamia skrypt ponownie. Kontynuować?")) {
       r.ctl.value = String(r.index);
       return;
     }
-    cmd("setting", { name: s.name, i });
+    cmd("setting", { name: s.name, i: Number(r.ctl.value) });
   };
-  if (s.kind === "range") {
-    r.ctl = el("input");
-    r.ctl.type = "range";
-    r.ctl.min = "0";
-    r.ctl.step = "1";
-    r.ctl.oninput = () => (label.textContent = r.labels[r.ctl.value]); // podgląd wartości w trakcie przesuwania
-    r.ctl.onpointerdown = () => (r.dragging = true);
-    r.ctl.onchange = () => {
-      r.dragging = false;
-      send(Number(r.ctl.value));
-    };
-    box.append(r.ctl, label);
-  } else {
-    r.ctl = el("select");
-    r.ctl.onchange = () => send(Number(r.ctl.value));
-    box.append(r.ctl);
-  }
+  box.append(r.ctl);
   r.ctl.setAttribute("aria-label", s.name);
   row.append(box, r.hint);
   rows.set(s.name, r);
@@ -379,23 +363,18 @@ function pickRow(s, row) {
 function renderPick(r, s) {
   if (r.labels.join("\n") !== s.labels.join("\n")) { // lista wartości się zmieniła (np. „poziomy: auto = …”)
     r.labels = s.labels;
-    if (r.kind === "range") r.ctl.max = String(s.labels.length - 1);
-    else {
-      r.ctl.textContent = "";
-      s.labels.forEach((l, i) => {
-        const o = el("option", "", l);
-        o.value = String(i);
-        r.ctl.append(o);
-      });
-    }
+    r.ctl.textContent = "";
+    s.labels.forEach((l, i) => {
+      const o = el("option", "", l);
+      o.value = String(i);
+      r.ctl.append(o);
+    });
   }
   r.index = s.index;
-  if (r.dragging) return; // nie przestawiamy suwaka pod palcem
-  r.ctl.value = String(s.index);
-  r.label.textContent = s.labels[s.index];
+  if (document.activeElement !== r.ctl) r.ctl.value = String(s.index); // nie pod otwartą listą
 }
 
-// ustawienia bieżącego efektu WLED (z jego opisu w WLED): suwaki, opcje, paleta, kolory – każda zmiana od razu do WLED
+// ustawienia bieżącego efektu WLED (z jego opisu w WLED): liczby, opcje, paleta, kolory – każda zmiana od razu do WLED
 let wledKey = "";
 const wledRows = new Map(); // klucz (sx, ix, …, pal, col0…) -> {ctl, label, kind}
 
@@ -411,21 +390,22 @@ function renderWled(ws) {
       const row = el("div", "srow");
       row.append(el("span", "", it.label));
       const pick = el("div", "wide pick");
-      const r = { kind: it.kind, dragging: false };
+      const r = { kind: it.kind };
       const send = (v) => cmd("wled", { key: it.key, v });
-      if (it.kind === "range") {
+      if (it.kind === "range") { // liczba 0…max do wpisania
         r.ctl = el("input");
-        r.ctl.type = "range";
+        r.ctl.type = "number";
+        r.ctl.inputMode = "numeric";
         r.ctl.min = "0";
         r.ctl.max = String(it.max);
-        r.label = el("span", "plabel");
-        r.ctl.oninput = () => (r.label.textContent = r.ctl.value);
-        r.ctl.onpointerdown = () => (r.dragging = true);
         r.ctl.onchange = () => {
-          r.dragging = false;
+          const v = Math.round(Number(r.ctl.value));
+          if (r.ctl.value === "" || !Number.isFinite(v)) return;
+          r.ctl.value = String(Math.min(it.max, Math.max(0, v)));
           send(Number(r.ctl.value));
         };
-        pick.append(r.ctl, r.label);
+        r.ctl.onkeydown = (e) => e.key === "Enter" && r.ctl.blur();
+        pick.append(r.ctl, el("span", "plabel", `0–${it.max}`));
       } else if (it.kind === "check") {
         r.ctl = el("input");
         r.ctl.type = "checkbox";
@@ -454,13 +434,12 @@ function renderWled(ws) {
   }
   for (const it of ws ? ws.items : []) {
     const r = wledRows.get(it.key);
-    if (!r || r.dragging || document.activeElement === r.ctl) continue; // nie przestawiamy pod palcem
+    if (!r || document.activeElement === r.ctl) continue; // nie nadpisujemy tego, co ktoś właśnie wpisuje
     const loading = it.value === null || it.value === undefined; // WLED jeszcze nie podał wartości
     r.ctl.disabled = loading;
     if (loading) continue;
     if (r.kind === "check") r.ctl.checked = Boolean(it.value);
     else r.ctl.value = String(it.value);
-    if (r.label) r.label.textContent = String(it.value);
   }
   return Boolean(ws && ws.items.length);
 }

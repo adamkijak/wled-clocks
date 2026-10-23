@@ -859,7 +859,7 @@ class Clock:
 
 
 class Odometer(Clock):
-    """Bębny licznika: cyfra toczy się w górę przy zmianie, cieniowanie walca daje efekt 3D."""
+    """Bębny licznika toczą się przy zmianie cyfry."""
 
     def __init__(self):
         self.slots = {}
@@ -899,7 +899,7 @@ class Odometer(Clock):
 
 
 class Swarm(Clock):
-    """Cyfry z cząsteczek. Zmiana czasu = piksele odlatują i lecą w nowe miejsca."""
+    """Cyfry z cząsteczek, które przelatują przy zmianie."""
 
     def __init__(self):
         self.parts, self.txt = [], None
@@ -958,7 +958,7 @@ class Swarm(Clock):
 
 
 class Fire(Clock):
-    """Ściana ognia; cyfry to ciemna sylwetka z żarzącą się krawędzią."""
+    """Ściana ognia, cyfry jako ciemna sylwetka."""
 
     PAL = [(0, 0, 0), (60, 0, 0), (170, 20, 0), (255, 80, 0), (255, 170, 20), (255, 240, 120), (255, 255, 230)]
 
@@ -1000,7 +1000,7 @@ class Fire(Clock):
 
 
 class Matrix(Clock):
-    """Deszcz kodu; kropla przechodząca przez cyfrę rozbłyskuje na biało."""
+    """Deszcz kodu jak w Matriksie."""
 
     def __init__(self):
         self.glow = [[0.0] * W for _ in range(H)]
@@ -1041,7 +1041,7 @@ class Matrix(Clock):
 
 
 class Sky(Clock):
-    """Prawdziwe położenie słońca i księżyca: świt i zmierzch z pomarańczowym pasem, dzień z chmurami, noc z gwiazdami, wieczorem światła w domach."""
+    """Prawdziwe położenie słońca i księżyca na niebie."""
 
     def __init__(self):
         rnd = random.Random(7)
@@ -1106,7 +1106,7 @@ class Sky(Clock):
 
 
 class DayRibbon(Clock):
-    """Taśma doby: 120 px = 24 h, kolory to niebo o danej godzinie, przeszłość jasna, przyszłość przygaszona."""
+    """Taśma doby w kolorach nieba o danej godzinie."""
 
     def __init__(self):
         self.cache = (None, None)
@@ -1151,7 +1151,7 @@ class DayRibbon(Clock):
 
 
 class Scanner(Clock):
-    """Wiązka jak w KITT; cyfry świecą po przejściu wiązki i powoli gasną."""
+    """Wiązka jak w KITT podświetla cyfry."""
 
     def __init__(self):
         self.glow = [[0.0] * W for _ in range(H)]
@@ -1186,7 +1186,7 @@ class Scanner(Clock):
 
 
 class Rainbow(Clock):
-    """Cyfry wypełnione płynącą tęczą, falujące jak flaga; w tle migoczące gwiazdki."""
+    """Cyfry wypełnione płynącą tęczą."""
 
     def __init__(self):
         self.sp = [(random.randrange(W), random.randrange(H), random.random() * 9, random.uniform(1, 3)) for _ in range(40)]
@@ -1210,7 +1210,7 @@ class Rainbow(Clock):
 
 
 class Warp(Clock):
-    """Lot przez gwiazdy; nowa minuta (i co 15 s mini) = skok w nadprzestrzeń ze smugami."""
+    """Lot przez gwiazdy, co minutę skok w nadprzestrzeń."""
 
     def __init__(self):
         self.stars = [self.new_star(True) for _ in range(90)]
@@ -1252,7 +1252,7 @@ class Warp(Clock):
 
 
 class Life(Clock):
-    """Gra w życie w tle. Każda mijająca minuta rozpada się na żywe komórki."""
+    """Gra w życie, minuty rozpadają się na komórki."""
 
     def __init__(self):
         self.cells = [[random.random() < 0.18 for _ in range(W)] for _ in range(H)]
@@ -1301,7 +1301,7 @@ class Life(Clock):
 
 
 class Aquarium(Clock):
-    """Rybki pływają przed i za cyframi, bąbelki, wodorosty, refleksy światła."""
+    """Rybki, bąbelki i wodorosty wokół cyfr."""
 
     FISH = ["#.##.", "###e#", "#.##."]
 
@@ -1360,7 +1360,7 @@ class Aquarium(Clock):
 
 
 class Pong(Clock):
-    """Pong: lewy wynik = godziny, prawy = minuty. Przy zmianie jedna paletka 'przepuszcza' piłkę."""
+    """Pong: wynik to godziny i minuty."""
 
     PH = 3
     LX, RX = 1, W - 2
@@ -1877,7 +1877,7 @@ PL_MON3 = ["STY", "LUT", "MAR", "KWI", "MAJ", "CZE", "LIP", "SIE", "WRZ", "PAŹ"
 # ================================================================ EFEKTY Z DANYMI Z INTERNETU
 @reg("pogoda")
 class Weather(Clock):
-    """Pogoda teraz (Open-Meteo): animowana ikona, temperatura w jej kolorze, opis, wiatr i godzina."""
+    """Pogoda teraz: ikona, temperatura, wiatr."""
 
     def draw(self, f, now, t, dt):
         m = NET.get("meteo")
@@ -1914,7 +1914,7 @@ class Weather(Clock):
 
 @reg("prognoza")
 class Forecast(Clock):
-    """Najbliższe 24 h (Open-Meteo): krzywa temperatury w jej kolorach, niebieskie słupki = szansa opadów."""
+    """Prognoza na 24 h: temperatura i szansa opadów."""
 
     def draw(self, f, now, t, dt):
         m = NET.get("meteo")
@@ -1954,7 +1954,7 @@ class Forecast(Clock):
 
 @reg("opady")
 class Precip(Clock):
-    """Pada tak, jak pada naprawdę: gęstość kropli = opad i szansa opadów teraz (Open-Meteo); przy mrozie płatki śniegu."""
+    """Deszcz lub śnieg tak gęsty, jak pada naprawdę."""
 
     def __init__(self):
         self.drops, self.acc = [], 0.0
@@ -2005,7 +2005,7 @@ class Precip(Clock):
 
 @reg("wiatr")
 class Wind(Clock):
-    """Wiatr z Open-Meteo: smugi lecą z prawdziwą prędkością i z prawdziwego kierunku, obok km/h i skąd wieje."""
+    """Smugi wiatru z prawdziwą prędkością i kierunkiem."""
 
     DIRS = ["PN", "PN-WS", "WSCH", "PD-WS", "PD", "PD-ZA", "ZACH", "PN-ZA"]
 
@@ -2037,7 +2037,7 @@ class Wind(Clock):
 
 @reg("termometr")
 class Thermo(Clock):
-    """Termometr rtęciowy od -20 do +40°C: temperatura teraz, odczuwalna i wilgotność (Open-Meteo)."""
+    """Termometr: temperatura, odczuwalna i wilgotność."""
 
     def draw(self, f, now, t, dt):
         m = NET.get("meteo")
@@ -2073,7 +2073,7 @@ class Thermo(Clock):
 
 @reg("smog")
 class Smog(Clock):
-    """Jakość powietrza (Open-Meteo): PM2.5 i indeks EAQI; im gorzej, tym gęstszy brunatny smog nad miastem."""
+    """Jakość powietrza: PM2.5 i smog nad miastem."""
 
     LEVELS = [(20, "B. DOBRE", (0, 230, 120)), (40, "DOBRE", (130, 230, 0)), (60, "UMIARK.", (255, 220, 0)),
               (80, "ZŁE", (255, 120, 0)), (100, "B. ZŁE", (255, 30, 30)), (9999, "FATALNE", (190, 0, 190))]
@@ -2120,7 +2120,7 @@ class Smog(Clock):
 
 @reg("kursy")
 class Rates(Clock):
-    """Kursy walut NBP (tabela A) przewijane jak na giełdzie; ▲ zielony = kurs wyższy niż wczoraj, ▼ czerwony = niższy."""
+    """Kursy walut NBP ze zmianą od wczoraj."""
 
     CODES = ["EUR", "USD", "CHF", "GBP", "JPY", "CZK", "NOK", "SEK", "DKK", "HUF", "UAH", "CNY", "CAD", "AUD"]
 
@@ -2147,7 +2147,7 @@ class Rates(Clock):
 
 @reg("zloto")
 class Gold(Clock):
-    """Cena złota NBP (zł za gram) z połyskiem i wykresem z 30 ostatnich notowań."""
+    """Cena złota NBP z wykresem z 30 notowań."""
 
     def draw(self, f, now, t, dt):
         g = NET.get("gold")
@@ -2177,7 +2177,7 @@ class Gold(Clock):
 
 @reg("krypto")
 class Crypto(Clock):
-    """Kryptowaluty z Binance: BTC, ETH, SOL, DOGE w dolarach i zmiana 24 h; w tle wykres BTC z 5 dni."""
+    """Kryptowaluty z Binance i wykres BTC."""
 
     def draw(self, f, now, t, dt):
         tick, kl = NET.get("crypto"), NET.get("klines")
@@ -2202,7 +2202,7 @@ class Crypto(Clock):
 
 @reg("iss")
 class ISS(Clock):
-    """Mapa świata z granicą dnia i nocy, a na niej Międzynarodowa Stacja Kosmiczna na żywo i jej ślad (wheretheiss.at)."""
+    """ISS na żywo na mapie świata z granicą dnia i nocy."""
 
     def __init__(self):
         self.trail, self.ts = [], None
@@ -2229,7 +2229,7 @@ class ISS(Clock):
 
 @reg("kosmonauci")
 class Astronauts(Clock):
-    """Ilu ludzi jest teraz w kosmosie (open-notify): ludziki w nieważkości, a potem przewijają się ich nazwiska."""
+    """Ilu ludzi jest teraz w kosmosie i kto."""
 
     SUIT = [".o.", "www", ".w.", "w.w"]
 
@@ -2266,7 +2266,7 @@ class Astronauts(Clock):
 
 @reg("trzesienia")
 class Quakes(Clock):
-    """Trzęsienia ziemi z ostatniej doby (USGS, M2.5+): pulsujące kręgi na mapie świata; największe opisane w rogu."""
+    """Trzęsienia ziemi z ostatniej doby na mapie."""
 
     def draw(self, f, now, t, dt):
         world_map(f, dtm.datetime.now().astimezone(), 0.45)
@@ -2293,7 +2293,7 @@ class Quakes(Clock):
 
 @reg("zorza")
 class Aurora(Clock):
-    """Zorza polarna o sile z prawdziwego indeksu Kp (NOAA SWPC): Kp 0–2 ledwo widać, 5+ = burza geomagnetyczna."""
+    """Zorza polarna o sile z prawdziwego indeksu Kp."""
 
     def __init__(self):
         rnd = random.Random(5)
@@ -2325,7 +2325,7 @@ class Aurora(Clock):
 
 @reg("bloki")
 class Blocks(Clock):
-    """Bitcoin na żywo (mempool.space): numer ostatniego bloku; gdy zostanie wykopany nowy, spada kolejny klocek."""
+    """Bitcoin na żywo: nowy blok spada jak klocek."""
 
     def __init__(self):
         self.last, self.drop_t = None, -99
@@ -2354,7 +2354,7 @@ class Blocks(Clock):
 
 @reg("hackernews")
 class HackerNews(Clock):
-    """Najpopularniejsze tytuły z Hacker News przewijane jeden po drugim; z lewej pomarańczowe logo Y."""
+    """Najpopularniejsze tytuły z Hacker News."""
 
     def draw(self, f, now, t, dt):
         titles = NET.get("hn")
@@ -2370,7 +2370,7 @@ class HackerNews(Clock):
 
 @reg("wiadomosci")
 class News(Clock):
-    """Najnowsze nagłówki TVN24 (RSS) jak pasek w telewizji informacyjnej – z polskimi znakami i zegarem."""
+    """Nagłówki TVN24 jak pasek w telewizji."""
 
     def draw(self, f, now, t, dt):
         titles = NET.get("news")
@@ -2390,7 +2390,7 @@ class News(Clock):
 
 @reg("imieniny")
 class NameDays(Clock):
-    """Dzisiejsze imieniny (nameday.abalin.net): imiona płyną nad kwitnącymi kwiatkami."""
+    """Dzisiejsze imieniny nad kwitnącymi kwiatkami."""
 
     def draw(self, f, now, t, dt):
         for i in range(14):
@@ -2413,7 +2413,7 @@ class NameDays(Clock):
 
 @reg("rakieta")
 class Launch(Clock):
-    """Odliczanie T- do najbliższego startu rakiety na świecie (The Space Devs); rakieta dymi na wyrzutni."""
+    """Odliczanie do najbliższego startu rakiety."""
 
     ROCKET = ["..r..", ".www.", ".wbw.", ".www.", ".www.", ".www.", ".www.", "rwwwr", "r...r"]
 
@@ -2461,7 +2461,7 @@ class Launch(Clock):
 
 @reg("zart")
 class Joke(Clock):
-    """Suchar z icanhazdadjoke.com (po angielsku) przewijany obok mrugającej buźki; nowy co 5 minut."""
+    """Suchar po angielsku, nowy co 5 minut."""
 
     def draw(self, f, now, t, dt):
         disc(f, 5, 5.5, 5.2, (255, 210, 0))
@@ -2480,7 +2480,7 @@ class Joke(Clock):
 
 @reg("slonce")
 class SunArc(Clock):
-    """Dzisiejszy wschód i zachód słońca (Open-Meteo): łuk dnia, słońce w obecnym miejscu, długość dnia."""
+    """Wschód i zachód słońca, długość dnia."""
 
     def draw(self, f, now, t, dt):
         m = NET.get("meteo")
@@ -2524,7 +2524,7 @@ class SunArc(Clock):
 
 @reg("uv")
 class UV(Clock):
-    """Indeks UV teraz i maksymalny dziś (Open-Meteo) na kolorowej skali 0–11+; słońce ma tyle promieni, ile UV."""
+    """Indeks UV teraz i maksymalny dziś."""
 
     def draw(self, f, now, t, dt):
         m = NET.get("meteo")
@@ -2562,7 +2562,7 @@ class UV(Clock):
 
 @reg("barometr")
 class Barometer(Clock):
-    """Ciśnienie z Open-Meteo i trend z 3 h: wskazówka na skali starego barometru (burza – deszcz – zmiennie – ładnie – sucho)."""
+    """Ciśnienie i trend na skali starego barometru."""
 
     ZONES = [(990, "BURZA", (150, 0, 200)), (1005, "DESZCZ", (0, 110, 255)), (1020, "ZMIENNIE", (140, 140, 140)),
              (1035, "ŁADNIE", (255, 200, 0)), (9999, "SUCHO", (255, 110, 0))]
@@ -2605,7 +2605,7 @@ class Barometer(Clock):
 # ================================================================ STYLE ZEGARÓW
 @reg("binarny")
 class Binary(Clock):
-    """Zegar binarny BCD: kolumny to cyfry HH MM SS, zapalony kwadrat = bit (8-4-2-1); obok zwykły czas do sprawdzenia."""
+    """Zegar binarny BCD (8-4-2-1) ze zwykłym czasem obok."""
 
     def draw(self, f, now, t, dt):
         digs = now.strftime("%H%M%S")
@@ -2625,7 +2625,7 @@ class Binary(Clock):
 
 @reg("analogowy")
 class Analog(Clock):
-    """Klasyczne tarcze ze wskazówkami: z lewej godzina, z prawej sekundnik; pośrodku cyfrowy czas i data."""
+    """Tarcze ze wskazówkami, pośrodku cyfrowy czas i data."""
 
     def dial(self, f, cx, cy, hands):
         for k in range(12):
@@ -2672,7 +2672,7 @@ def pl_time_words(now):
 
 @reg("slownie")
 class Words(Clock):
-    """Godzina słownie, tak jak się mówi: „za kwadrans dziewiąta”, „dwadzieścia po ósmej”, „wpół do trzeciej”."""
+    """Godzina słownie: „za kwadrans dziewiąta”."""
 
     def draw(self, f, now, t, dt):
         s = pl_time_words(now)
@@ -2696,7 +2696,7 @@ def roman(n):
 
 @reg("rzymski")
 class Roman(Clock):
-    """Godzina cyframi rzymskimi, złotem na marmurze między kolumnami (N = nulla, czyli zero)."""
+    """Godzina cyframi rzymskimi, złotem na marmurze."""
 
     def draw(self, f, now, t, dt):
         for y in range(H):
@@ -2722,7 +2722,7 @@ class Roman(Clock):
 
 @reg("morse")
 class Morse(Clock):
-    """Czas nadawany alfabetem Morse'a: kropki i kreski pod cyframi, a lampka po prawej naprawdę go nadaje."""
+    """Czas nadawany alfabetem Morse'a."""
 
     CODE = {"0": "-----", "1": ".----", "2": "..---", "3": "...--", "4": "....-", "5": ".....", "6": "-....",
             "7": "--...", "8": "---..", "9": "----."}
@@ -2777,7 +2777,7 @@ class Morse(Clock):
 
 @reg("klepsydra")
 class Hourglass(Clock):
-    """Klepsydra minutowa: piasek sypie się z ruchomego lejka, kupka rośnie, a z nową minutą dno się otwiera."""
+    """Klepsydra minutowa; z nową minutą dno się otwiera."""
 
     def __init__(self):
         self.g = [[None] * W for _ in range(H)]
@@ -2826,7 +2826,7 @@ class Hourglass(Clock):
 
 @reg("postep")
 class Progress(Clock):
-    """Paski postępu z procentami: na zmianę rok i miesiąc, a potem doba i godzina."""
+    """Paski postępu roku, miesiąca, doby i godziny."""
 
     def draw(self, f, now, t, dt):
         y0 = dtm.datetime(now.year, 1, 1, tzinfo=now.tzinfo)
@@ -2866,7 +2866,7 @@ class Progress(Clock):
 
 @reg("kalendarz")
 class Calendar(Clock):
-    """Kartka z kalendarza: dzień miesiąca, dzień tygodnia, miesiąc, numer tygodnia i na zmianę godzina."""
+    """Kartka z kalendarza: data, dzień tygodnia, tydzień."""
 
     def draw(self, f, now, t, dt):
         f.rect(0, 0, 16, 11, (170, 165, 150))
@@ -2909,7 +2909,7 @@ def easter(y):
 
 @reg("odliczanie")
 class Countdown(Clock):
-    """Odliczania na zmianę: do północy, do weekendu, do Wigilii, do Wielkanocy i do Nowego Roku."""
+    """Odliczanie do północy, weekendu, świąt i Nowego Roku."""
 
     def targets(self, now):
         tz = now.tzinfo
@@ -2947,7 +2947,7 @@ class Countdown(Clock):
 
 @reg("nixie")
 class Nixie(Clock):
-    """Lampy Nixie: pomarańczowe cyfry z poświatą, widoczna siatka i duchy nieświecących katod; co minutę „przepłukanie” cyfr."""
+    """Lampy Nixie: pomarańczowe cyfry z poświatą."""
 
     def draw(self, f, now, t, dt):
         s = now.strftime("%H%M" if NARROW else "%H%M%S")
@@ -2987,7 +2987,7 @@ def seg_px(d, x0, y0, w=10):
 
 @reg("segmenty")
 class SevenSeg(Clock):
-    """Wyświetlacz siedmiosegmentowy jak w starym radiobudziku: czerwone segmenty, słabo widoczne wygaszone, lekkie migotanie."""
+    """Czerwony wyświetlacz siedmiosegmentowy jak w radiobudziku."""
 
     def draw(self, f, now, t, dt):
         s = now.strftime("%H%M" if NARROW else "%H%M%S")
@@ -3006,7 +3006,7 @@ class SevenSeg(Clock):
 
 @reg("klapki")
 class SplitFlap(Clock):
-    """Tablica z klapkami jak na starym dworcu: przy zmianie cyfry górna klapka opada i odsłania nową."""
+    """Tablica z opadającymi klapkami jak na starym dworcu."""
 
     def __init__(self):
         self.slots = {}
@@ -3062,7 +3062,7 @@ class SplitFlap(Clock):
 
 @reg("lustro")
 class Mirror(Clock):
-    """Godzina nad taflą wody i jej falujące odbicie."""
+    """Godzina nad wodą i jej falujące odbicie."""
 
     def draw(self, f, now, t, dt):
         for y in range(7):
@@ -3089,7 +3089,7 @@ class Mirror(Clock):
 
 @reg("cien")
 class Shadow(Clock):
-    """Cyfry na ścianie rzucają długi cień, który obraca się jak w zegarze słonecznym, zgodnie z prawdziwym słońcem."""
+    """Cień cyfr obraca się za prawdziwym słońcem."""
 
     def draw(self, f, now, t, dt):
         elev, solar = sun_position(now)
@@ -3113,7 +3113,7 @@ class Shadow(Clock):
 
 @reg("tetris")
 class Tetris(Clock):
-    """Cyfry układają się z klocków spadających z góry jak w Tetrisie; z nową minutą stare się rozsypują."""
+    """Cyfry układają się z klocków Tetrisa."""
 
     PAL = [(0, 240, 240), (240, 240, 0), (160, 0, 240), (0, 240, 0), (240, 0, 0), (0, 0, 240), (240, 160, 0)]
 
@@ -3142,7 +3142,7 @@ class Tetris(Clock):
 
 @reg("hex")
 class HexTime(Clock):
-    """Czas szesnastkowy: doba = 16 hexgodzin × 256 hexminut × 16 hexsekund, zapis „A_3F_2”; pasek = hexgodzina."""
+    """Czas szesnastkowy: doba = 16 hexgodzin."""
 
     def draw(self, f, now, t, dt):
         sec = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
@@ -3164,7 +3164,7 @@ class HexTime(Clock):
 
 @reg("kolor")
 class ColorTime(Clock):
-    """Kolor czasu: godzina, minuta i sekunda to składowe R, G, B tła, zapisane jak kolor #HHMMSS."""
+    """Godzina, minuta i sekunda jako kolor tła #HHMMSS."""
 
     def draw(self, f, now, t, dt):
         c = (now.hour / 23 * 255, now.minute / 59 * 255, now.second / 59 * 255)
@@ -3179,7 +3179,7 @@ class ColorTime(Clock):
 
 @reg("dziesietny")
 class Decimal(Clock):
-    """Czas dziesiętny z Rewolucji Francuskiej: 10 godzin po 100 minut po 100 sekund; obok zwykły czas."""
+    """Czas dziesiętny z Rewolucji Francuskiej."""
 
     def draw(self, f, now, t, dt):
         sec = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
@@ -3202,7 +3202,7 @@ class Decimal(Clock):
 
 @reg("beaty")
 class Swatch(Clock):
-    """Czas internetowy Swatch: doba = 1000 beatów liczonych od Biel (UTC+1), wszędzie na świecie ten sam; obok kręci się Ziemia."""
+    """Czas internetowy Swatch: doba = 1000 beatów."""
 
     def draw(self, f, now, t, dt):
         u = now.astimezone(dtm.timezone.utc)
@@ -3230,7 +3230,7 @@ class Swatch(Clock):
 
 @reg("unix")
 class Unix(Clock):
-    """Znacznik czasu Unix – sekundy od 1 stycznia 1970; cyfry, które właśnie się zmieniły, rozbłyskują."""
+    """Znacznik czasu Unix – sekundy od 1970."""
 
     def __init__(self):
         self.prev, self.flash = "", {}
@@ -3286,7 +3286,7 @@ def tz_off(std, rule, u):
 
 @reg("strefy")
 class WorldClocks(Clock):
-    """Zegary świata przewijane jak na lotnisku: Warszawa, Londyn, Nowy Jork, Tokio, Sydney…; dzień na żółto, noc na niebiesko."""
+    """Zegary świata przewijane jak na lotnisku."""
 
     CITIES = [("Warszawa", 1, "eu"), ("Londyn", 0, "eu"), ("Nowy Jork", -5, "us"), ("Los Angeles", -8, "us"),
               ("Rio", -3, None), ("Reykjavik", 0, None), ("Dubaj", 4, None), ("Delhi", 5.5, None),
@@ -3304,7 +3304,7 @@ class WorldClocks(Clock):
 
 @reg("obwod")
 class Perimeter(Clock):
-    """Sekundnik jako świetlny wąż biegnący dookoła krawędzi panelu (pełne okrążenie = minuta), w środku godzina."""
+    """Sekundnik jako świetlny wąż wokół panelu."""
 
     def __init__(self):
         self.path = ([(x, 0) for x in range(W)] + [(W - 1, y) for y in range(1, H)]
@@ -3323,7 +3323,7 @@ class Perimeter(Clock):
 
 @reg("wahadlo")
 class Pendulum(Clock):
-    """Dwa wahadła po bokach tykają co sekundę jak w zegarze stojącym; cyfry lekko rozbłyskują przy każdym tyknięciu."""
+    """Dwa wahadła tykają co sekundę jak w zegarze stojącym."""
 
     def draw(self, f, now, t, dt):
         s = now.second + now.microsecond / 1e6
@@ -3340,7 +3340,7 @@ class Pendulum(Clock):
 
 @reg("fala")
 class WaveText(Clock):
-    """Godzina z sekundami kołysze się na fali, pod nią morze z pianą."""
+    """Godzina kołysze się na fali."""
 
     def draw(self, f, now, t, dt):
         for x in range(W):
@@ -3357,7 +3357,7 @@ class WaveText(Clock):
 
 @reg("glitch")
 class Glitch(Clock):
-    """Cyfrowy glitch: rozjechane kanały RGB, przesunięte linie i szum, który co chwilę psuje obraz."""
+    """Cyfrowy glitch: rozjechane kanały i szum."""
 
     def __init__(self):
         self.until, self.nxt = 0, 1
@@ -3386,7 +3386,7 @@ class Glitch(Clock):
 
 @reg("neon")
 class Neon(Clock):
-    """Neon na ceglanym murze: różowe cyfry z poświatą, które czasem zamrugają, i szyld „OTWARTE”."""
+    """Różowe neonowe cyfry na ceglanym murze."""
 
     def __init__(self):
         self.off = {}
@@ -3415,7 +3415,7 @@ class Neon(Clock):
 
 @reg("pismo")
 class Handwriting(Clock):
-    """Pióro co minutę pisze godzinę na papierze w linie – piksel po pikselu, z błyszczącą stalówką."""
+    """Pióro co minutę pisze godzinę na papierze w linie."""
 
     def __init__(self):
         self.txt, self.t0 = None, 0
@@ -3445,7 +3445,7 @@ class Handwriting(Clock):
 
 @reg("kreskowy")
 class Barcode(Clock):
-    """Kod kreskowy EAN z godziną i datą (HHMMSSDDMM), z czerwonym laserem skanera."""
+    """Godzina i data jako kod kreskowy z laserem skanera."""
 
     L = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"]
 
@@ -3472,7 +3472,7 @@ class Barcode(Clock):
 
 @reg("maszyna")
 class Typewriter(Clock):
-    """Maszyna do pisania co minutę wystukuje godzinę i datę; karetka przesuwa się, na końcu dzwonek."""
+    """Maszyna do pisania co minutę wystukuje godzinę."""
 
     def __init__(self):
         self.txt, self.t0 = None, 0
@@ -3496,7 +3496,7 @@ class Typewriter(Clock):
 
 @reg("radar")
 class Radar(Clock):
-    """Radar: wiązka omiata niebo, cyfry godziny pojawiają się jak wykryte obiekty i powoli gasną."""
+    """Wiązka radaru odsłania cyfry, które powoli gasną."""
 
     def __init__(self):
         c, sy = W / 2, 5 * W / 120
@@ -3526,7 +3526,7 @@ class Radar(Clock):
 
 @reg("domino")
 class Domino(Clock):
-    """Czas jako trzy kostki domina: oczka pokazują cyfry godzin, minut i sekund."""
+    """Czas jako trzy kostki domina."""
 
     PIPS = {0: [], 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
             7: [0, 2, 3, 4, 5, 6, 8], 8: [0, 1, 2, 3, 5, 6, 7, 8], 9: list(range(9))}
@@ -3550,7 +3550,7 @@ class Domino(Clock):
 
 @reg("ksiezyc")
 class MoonPhase(Clock):
-    """Faza Księżyca liczona z daty: tarcza z oświetloną częścią, nazwa fazy, procent oświetlenia i ile do pełni."""
+    """Faza Księżyca i ile do pełni."""
 
     def draw(self, f, now, t, dt):
         syn = 29.530588853
@@ -3585,7 +3585,7 @@ class MoonPhase(Clock):
 # ================================================================ SCENY, SYMULACJE I GRY
 @reg("plazma")
 class Plasma(Clock):
-    """Klasyczna plazma z demosceny w płynących kolorach, godzina wycięta na czarno z białym środkiem."""
+    """Plazma z demosceny w płynących kolorach."""
 
     def draw(self, f, now, t, dt):
         cx, cy = W / 2 + math.sin(t * 0.7) * W / 3, 6 + math.cos(t * 0.9) * 4
@@ -3600,7 +3600,7 @@ class Plasma(Clock):
 
 @reg("lawa")
 class Lava(Clock):
-    """Lampa lawa: bąble gorącego wosku łączą się i rozdzielają w fioletowej butelce."""
+    """Lampa lawa w fioletowej butelce."""
 
     def __init__(self):
         self.b = [(random.uniform(0.1, 0.3), random.uniform(0.2, 0.5), random.random() * 6, random.uniform(3, 4.5)) for _ in range(7)]
@@ -3625,7 +3625,7 @@ class Lava(Clock):
 
 @reg("swietliki")
 class Fireflies(Clock):
-    """Nocna łąka: świetliki krążą i mrugają nad sylwetkami drzew, godzina świeci jak księżyc."""
+    """Świetliki nad nocną łąką."""
 
     def __init__(self):
         rnd = random.Random(11)
@@ -3648,7 +3648,7 @@ class Fireflies(Clock):
 
 @reg("fajerwerki")
 class Fireworks(Clock):
-    """Fajerwerki ze smugami; na początku każdej minuty salwa, a o pełnej godzinie pokaz przez całą minutę."""
+    """Fajerwerki, salwa co minutę, pokaz o pełnej godzinie."""
 
     def __init__(self):
         self.rk, self.pt, self.buf, self.acc = [], [], Persist(), 0.0
@@ -3692,7 +3692,7 @@ class Fireworks(Clock):
 
 @reg("snieg")
 class Snow(Clock):
-    """Śnieg pada i osiada na cyfrach oraz na ziemi; po chwili topnieje, a z nową minutą zsuwa się z cyfr."""
+    """Śnieg osiada na cyfrach i topnieje."""
 
     def __init__(self):
         self.fl, self.set_ = [], {}
@@ -3728,7 +3728,7 @@ class Snow(Clock):
 
 @reg("burza")
 class Storm(Clock):
-    """Burza: ukośny deszcz, kłębiące się chmury i pioruny, w których błysku lepiej widać godzinę."""
+    """Deszcz, chmury i pioruny podświetlające godzinę."""
 
     def __init__(self):
         self.drops = [[random.uniform(0, W), random.uniform(0, H)] for _ in range(80)]
@@ -3765,7 +3765,7 @@ class Storm(Clock):
 
 @reg("gwiazdy")
 class Stars(Clock):
-    """Nocne niebo: migoczące gwiazdy, pasmo Drogi Mlecznej i od czasu do czasu spadająca gwiazda."""
+    """Migoczące gwiazdy, Droga Mleczna, spadające gwiazdy."""
 
     def __init__(self):
         rnd = random.Random(21)
@@ -3793,7 +3793,7 @@ class Stars(Clock):
 
 @reg("ocean")
 class Ocean(Clock):
-    """Morze o prawdziwej porze dnia: fale z pianą, odbicie słońca lub księżyca i żaglówka na horyzoncie."""
+    """Morze z falami i żaglówką o prawdziwej porze dnia."""
 
     def draw(self, f, now, t, dt):
         elev, solar = sun_position(now)
@@ -3822,7 +3822,7 @@ class Ocean(Clock):
 
 @reg("dym")
 class Smoke(Clock):
-    """Dym z kadzidła snuje się w górę; cyfry wyłaniają się tam, gdzie dym jest gęsty."""
+    """Dym z kadzidła, cyfry tam, gdzie gęsty."""
 
     def draw(self, f, now, t, dt):
         dset = set(centered(now.strftime("%H:%M")))
@@ -3837,7 +3837,7 @@ class Smoke(Clock):
 
 @reg("kalejdoskop")
 class Kaleido(Clock):
-    """Kalejdoskop: kolorowy wzór odbity czterokrotnie, obracający się i zmieniający barwy."""
+    """Obracający się kolorowy kalejdoskop."""
 
     def draw(self, f, now, t, dt):
         for y in range(6):
@@ -3852,7 +3852,7 @@ class Kaleido(Clock):
 
 @reg("labirynt")
 class Maze(Clock):
-    """Labirynt: generuje się na oczach, potem wąż szuka wyjścia; po rozwiązaniu wyświetla się godzina."""
+    """Labirynt generuje się i rozwiązuje."""
 
     CW, CH = (W - 1) // 2, 5
 
@@ -3919,7 +3919,7 @@ class Maze(Clock):
 
 @reg("waz")
 class Snake(Clock):
-    """Gra w węża, w którą gra komputer: szuka najkrótszej drogi do jabłka i rośnie, aż się zapętli."""
+    """Komputer gra w węża."""
 
     GW, GH = W // 2, 6
 
@@ -3978,7 +3978,7 @@ class Snake(Clock):
 
 @reg("arkanoid")
 class Arkanoid(Clock):
-    """Arkanoid, w którym cegiełkami są cyfry godziny: piłka je rozbija, a z nową minutą ściana się odbudowuje."""
+    """Arkanoid, w którym cegiełkami są cyfry godziny."""
 
     def __init__(self):
         self.txt, self.bricks, self.sparks = None, set(), []
@@ -4035,7 +4035,7 @@ class Arkanoid(Clock):
 
 @reg("najezdzcy")
 class Invaders(Clock):
-    """Space Invaders: szereg kosmitów maszeruje w rytm kroków, działko strzela samo, godzina jako wynik w rogu."""
+    """Space Invaders grane przez komputer."""
 
     SPR = [["#...#", ".###.", "##.##", "#####", "#.#.#"], [".#.#.", ".###.", "##.##", "#####", ".#.#."]]
 
@@ -4085,7 +4085,7 @@ class Invaders(Clock):
 
 @reg("pacman")
 class Pacman(Clock):
-    """Pac-Man zjada kropki uciekając duszkom, aż trafi na dużą pigułkę – wtedy role się odwracają."""
+    """Pac-Man ucieka duszkom i zjada kropki."""
 
     GC = [(255, 0, 0), (255, 180, 255), (0, 255, 255), (255, 180, 80)]
 
@@ -4148,7 +4148,7 @@ class Pacman(Clock):
 
 @reg("dino")
 class Dino(Clock):
-    """Dinozaur z Chrome'a biegnie przez pustynię i sam przeskakuje kaktusy; wynik to godzina."""
+    """Dinozaur z Chrome'a przeskakuje kaktusy."""
 
     DINO = ["....####", "....#.##", "....####", "#..###..", "#.#####.", "######..", ".####...", ".#..#..."]
     DINO2 = DINO[:-1] + ["..#..#.."]
@@ -4188,7 +4188,7 @@ class Dino(Clock):
 
 @reg("flappy")
 class Flappy(Clock):
-    """Flappy Bird na autopilocie: ptaszek przelatuje między rurami, godzina jako wynik u góry."""
+    """Flappy Bird na autopilocie."""
 
     def __init__(self):
         self.y, self.vy, self.pipes, self.off = 5.0, 0.0, [[W + 5, 5]], 0.0
@@ -4222,7 +4222,7 @@ class Flappy(Clock):
 
 @reg("wyscig")
 class Race(Clock):
-    """Wyścig: czerwone auto wyprzedza ruch na dwupasmówce, w tle przesuwają się wzgórza."""
+    """Czerwone auto wyprzedza na dwupasmówce."""
 
     def __init__(self):
         self.lane, self.ly, self.cars, self.off = 0, 6.0, [], 0.0
@@ -4264,7 +4264,7 @@ class Race(Clock):
 
 @reg("pociag")
 class Train(Clock):
-    """Parowóz ciągnie wagony, a na każdym wagonie jedna cyfra aktualnej godziny; z komina bucha para."""
+    """Parowóz ciągnie wagony z cyframi godziny."""
 
     LOCO = ["...........##...", "..######...##...", "..#....#.######.", "..#....#########", "################",
             ".o..o.......o..o"]
@@ -4306,7 +4306,7 @@ class Train(Clock):
 
 @reg("miasto")
 class City(Clock):
-    """Miasto o prawdziwej porze dnia: niebo według słońca, okna zapalają się wieczorem, po ulicy jeżdżą auta."""
+    """Miasto o prawdziwej porze dnia, z autami."""
 
     def __init__(self):
         rnd = random.Random(8)
@@ -4348,7 +4348,7 @@ class City(Clock):
 
 @reg("las")
 class Forest(Clock):
-    """Las w trzech warstwach przesuwa się jak z okna pociągu; niebo według prawdziwej pory dnia, nocą świetliki."""
+    """Las przesuwa się jak z okna pociągu."""
 
     def draw(self, f, now, t, dt):
         elev, _ = sun_position(now)
@@ -4385,7 +4385,7 @@ class Forest(Clock):
 
 @reg("gory")
 class Mountains(Clock):
-    """Pasma gór z ośnieżonymi szczytami, chmury i krążący orzeł; niebo według prawdziwej pory dnia."""
+    """Ośnieżone góry, chmury i krążący orzeł."""
 
     def draw(self, f, now, t, dt):
         elev, _ = sun_position(now)
@@ -4416,7 +4416,7 @@ class Mountains(Clock):
 
 @reg("dna")
 class DNA(Clock):
-    """Podwójna helisa DNA obraca się; szczeble to pary zasad A-T i G-C w swoich kolorach."""
+    """Obracająca się podwójna helisa DNA."""
 
     BASES = [((255, 60, 60), (60, 255, 60)), ((60, 120, 255), (255, 220, 0))]
 
@@ -4444,7 +4444,7 @@ class DNA(Clock):
 
 @reg("oscyloskop")
 class Scope(Clock):
-    """Oscyloskop rysuje figury Lissajous z fosforową poświatą; proporcja częstotliwości zmienia się co minutę."""
+    """Figury Lissajous na oscyloskopie."""
 
     RATIOS = [(1, 2), (2, 3), (3, 4), (3, 5), (4, 5), (1, 3), (2, 5), (5, 6)]
 
@@ -4468,7 +4468,7 @@ class Scope(Clock):
 
 @reg("equalizer")
 class Equalizer(Clock):
-    """Korektor graficzny jak w wieży stereo: słupki skaczą w rytm 120 BPM, a kreski szczytów powoli opadają."""
+    """Korektor graficzny jak w wieży stereo."""
 
     def __init__(self):
         self.n = W // 5
@@ -4490,7 +4490,7 @@ class Equalizer(Clock):
 
 @reg("ekg")
 class ECG(Clock):
-    """Monitor EKG: zielona linia z załamkami P-QRS-T, serce bije w rytm; obok tętno i godzina."""
+    """Monitor EKG z bijącym sercem."""
 
     def __init__(self):
         self.tw = W - 30
@@ -4528,7 +4528,7 @@ class ECG(Clock):
 
 @reg("mrowka")
 class Ant(Clock):
-    """Mrówki Langtona (wariant LRRL, 4 kolory): z prostych reguł wyrastają szalone wzory; restart co 3 minuty."""
+    """Mrówki Langtona rysują szalone wzory."""
 
     RULE = "LRRL"
     PAL = [(0, 0, 0), (255, 60, 60), (60, 200, 255), (255, 210, 60)]
@@ -4562,7 +4562,7 @@ class Ant(Clock):
 
 @reg("piasek")
 class Sand(Clock):
-    """Symulacja sypiącego się piasku: ziarna zatrzymują się na cyfrach godziny; gdy jest pełno, dno się otwiera."""
+    """Piasek sypie się i osiada na cyfrach."""
 
     def __init__(self):
         self.g = [[None] * W for _ in range(H)]
@@ -4609,7 +4609,7 @@ class Sand(Clock):
 
 @reg("kule")
 class Balls(Clock):
-    """Kolorowe kulki odbijają się od ścian i od siebie nawzajem (zderzenia sprężyste), w tle godzina."""
+    """Kulki odbijają się od ścian i od siebie."""
 
     def __init__(self):
         self.b = [[random.uniform(5, W - 5), random.uniform(2, 8), random.uniform(-30, 30), random.uniform(-10, 10),
@@ -4654,7 +4654,7 @@ class Balls(Clock):
 
 @reg("kregi")
 class Ripples(Clock):
-    """Krople wpadają do wody, a rozchodzące się kręgi nakładają się na siebie; godzina faluje pod powierzchnią."""
+    """Kręgi na wodzie od spadających kropli."""
 
     def __init__(self):
         self.drops, self.nxt = [], 0
@@ -4680,7 +4680,7 @@ class Ripples(Clock):
 
 @reg("wir")
 class Vortex(Clock):
-    """Hipnotyczna tęczowa spirala wciągająca do środka, z godziną w oku cyklonu."""
+    """Hipnotyczna tęczowa spirala."""
 
     def draw(self, f, now, t, dt):
         for y in range(H):
@@ -4696,7 +4696,7 @@ class Vortex(Clock):
 
 @reg("synthwave")
 class Synthwave(Clock):
-    """Retro synthwave: pasiasty zachód słońca, neonowe góry i siatka pędząca pod horyzont."""
+    """Retro synthwave: zachód słońca i neonowa siatka."""
 
     def draw(self, f, now, t, dt):
         for y in range(7):
@@ -4731,7 +4731,7 @@ class Synthwave(Clock):
 
 @reg("pory")
 class Seasons(Clock):
-    """Pora roku według daty: wiosną kwiaty i motyle, latem pszczoły, jesienią spadające liście, zimą śnieg i bałwan."""
+    """Pora roku: kwiaty, pszczoły, liście albo śnieg."""
 
     def __init__(self):
         self.p = []
@@ -4788,7 +4788,7 @@ class Seasons(Clock):
 
 @reg("planety")
 class Planets(Clock):
-    """Układ Słoneczny z prawdziwym położeniem planet na dziś (średnie długości orbitalne); po kolei podpisujemy każdą planetę."""
+    """Układ Słoneczny z dzisiejszym położeniem planet."""
 
     P = [("MERKURY", 0.387, 252.25, 4.09233, (180, 160, 140)), ("WENUS", 0.723, 181.98, 1.60213, (255, 220, 150)),
          ("ZIEMIA", 1.0, 100.46, 0.98561, (60, 140, 255)), ("MARS", 1.524, 355.45, 0.52403, (255, 80, 40)),
@@ -4974,13 +4974,7 @@ def ludzik_len(name):
 
 @reg("ludzik")
 class Worker(Clock):
-    """Robotnik w kasku sam przestawia cyfry, na jeden z 11 sposobów (przepycha, maluje wałkiem, zapadnia, bazooka,
-    kopniak, zamiatanie, czary, spawanie laserem, lina, holowanie autem, obrót korbą) – nowe cyfry wchodzą równo z pełną
-    minutą; z nudów spaceruje po obu stronach zegara, czyta, śpi w łóżku, je, gra na gitarze, podbija piłkę, buduje
-    zamek z piasku, goni balonik, głaszcze kota albo psa, gasi płonący śmietnik (przyjeżdża wozem strażackim),
-    żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem, autem, karetką, radiowozem, traktorem z przyczepami, kombajnem i koparką, lata samolotem (kilka okrążeń:
-    wyjeżdża za krawędź i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą.
-    Zajęcia trwają tyle, ile zostało do przestawiania cyfr (najwyżej górna granica z TRICKS)."""
+    """Robotnik w kasku przestawia cyfry na 11 sposobów, a w przerwach się bawi."""
 
     POSES = {k: [r.ljust(max(map(len, v)), ".") for r in v] for k, v in {  # twarzą w lewo; kolumna 0 = dłonie
         "stoi": ["..YYYYY.", ".YYYYYYY", "..SESES.", "..SSSSS.", "..SMMMS.", "..BBBBB.", ".BBBBBBB", ".SBBBBBS",
@@ -6481,9 +6475,7 @@ def clock_color(now):
 
 @reg("zegar")
 class PlainClock(Clock):
-    """Zwykły, czytelny zegar: godzina z sekundami, dzień tygodnia (zawsze cały – długie nazwy węższymi literami)
-    i data, wszystko jednym kolorem. Barwa z listy albo dowolny kolor; „pora dnia” idzie za słońcem – w południe
-    biały, wieczorem ciepły żółty, w nocy bursztyn; „temperatura” przesuwa barwę. Cyfry w jednej z kilku czcionek."""
+    """Zwykły, czytelny zegar: godzina z sekundami, dzień tygodnia i data."""
 
     @staticmethod
     def fit(texts, room, fonts=(SMALL, NARROW_TXT)):
@@ -6531,8 +6523,7 @@ TEST_COLORS = [("czerwony", (255, 0, 0)), ("pomarańczowy", (255, 120, 0)), ("ż
 
 @reg("kolory")
 class ColorTest(Clock):
-    """Test kolorów: 8 pasów (czerwony, pomarańczowy, żółty, zielony, błękitny, niebieski, fioletowy, biały), u góry
-    pełne, u dołu przygaszone. Do kalibracji: ustawienia „diody: …” dopasowują podgląd do tego, co widać na panelu."""
+    """Test kolorów do kalibracji podglądu."""
 
     def draw(self, f, now, t, dt):
         n = len(TEST_COLORS)
@@ -6590,11 +6581,7 @@ def rich(text, t=0.0, extras=True):
 
 @reg("napisz")
 class Inbound(Clock):
-    """Wiadomości od widzów (np. uczestników calla): sam adres (domena:port – tunel bore.pub albo własny),
-    pod który wysyła się tekst – echo do /dev/tcp, curl albo przeglądarka – na zmianę z własną zachętą, a potem
-    po kolei to, co przyszło (w kolorze z „[czerwony] …”, z emotkami :) :D <3 jako obrazkami). Do tego ankieta
-    (pytanie, słupki z wynikami, adres i – jeśli włączona – zachęta) i reakcje widzów (serca, brawa, konfetti,
-    fajerwerki na wierzchu). Skrzynkę otwiera się w panelu WWW – tylko wtedy coś przyjmuje."""
+    """Wiadomości, ankiety i reakcje od widzów (skrzynka w panelu WWW)."""
 
     X0 = 13  # tekst zaczyna się za kopertą
 
@@ -6898,9 +6885,7 @@ def draw_load(hexs):
 
 @reg("daily")
 class Daily(Clock):
-    """Daily: lista osób (skróty 2–3 litery) w dwóch rzędach – kto już mówił, jest przekreślony na zielono, kto mówi
-    teraz – świeci na złoto ze strzałką (chyba że „mówi” jest wyłączone – wtedy zwykła lista do odhaczania). Osoby i odhaczanie w panelu WWW albo przez skrzynkę „napisz” („x mar”,
-    „teraz mar”). Gdy skrzynka jest otwarta, co pół minuty na chwilę jej adres."""
+    """Lista osób na daily do odhaczania."""
 
     def draw(self, f, now, t, dt):
         if not getattr(THUMB, "on", False):
@@ -6940,9 +6925,7 @@ class Daily(Clock):
 
 @reg("rysunek")
 class Drawing(Clock):
-    """Wspólny rysunek: widzowie zapalają piksele panelu przez skrzynkę „napisz” – klikając siatkę na swojej stronie
-    albo wysyłając „45 3 czerwony” (kolumna 1–120, wiersz 1–12, kolor; „45-60 3 niebieski” – kreska, „gumka”
-    gasi). Nowy piksel błyska na biało. Pusty panel zaprasza do rysowania; co jakiś czas na chwilę adres."""
+    """Wspólny rysunek: widzowie zapalają piksele przez skrzynkę."""
 
     def draw(self, f, now, t, dt):
         if not getattr(THUMB, "on", False):
@@ -6983,7 +6966,7 @@ CAT = {
 
 @reg("kotek")
 class Kitten(Clock):
-    """Kotek: chodzi po panelu, goni czerwoną kropkę lasera i rzuca się na nią, siada, myje się, zasypia (Zzz)."""
+    """Kotek goni kropkę lasera, myje się i śpi."""
     PAL = {"O": (230, 120, 25), "S": (150, 60, 10), "E": (60, 255, 60), "N": (255, 110, 150), "P": (255, 110, 150),
            "C": (90, 40, 10)}
 
@@ -7074,7 +7057,7 @@ DOG = {
 
 @reg("pies")
 class Dog(Clock):
-    """Pies: goni rzuconą piłkę, przynosi ją w pysku, siada i merda ogonem, czasem kopie dołek, aż leci ziemia."""
+    """Pies aportuje piłkę i kopie dołki."""
     PAL = {"O": (170, 100, 40), "D": (90, 50, 20), "E": (20, 20, 20), "K": (10, 10, 10)}
 
     def __init__(self):
@@ -7156,8 +7139,7 @@ GOOMBA = [["..MMMM..", ".MMMMMM.", "MEMMMMEM", "MMMMMMMM", "..SSSS..", ".KK..KK.
 
 @reg("platformowka")
 class Platformer(Clock):
-    """Platformówka: ludzik w czerwonej czapce biegnie przez przewijany świat, przeskakuje rury, dziury i grzyby,
-    zbiera monety i wybija je z bloków ze znakiem zapytania."""
+    """Platformówka: ludzik skacze i zbiera monety."""
     SPEED, HX = 22, 24
 
     def __init__(self):
@@ -7250,7 +7232,7 @@ class Platformer(Clock):
 
 @reg("ptaki")
 class Birds(Clock):
-    """Ptaki: klucze ptaków lecą przez niebo o zachodzie słońca, machając skrzydłami; słońce chowa się za horyzont."""
+    """Klucze ptaków o zachodzie słońca."""
 
     def __init__(self):
         self.flocks, self.next = [], 0.0
@@ -7290,8 +7272,7 @@ class Birds(Clock):
 
 @reg("nietoperze")
 class Bats(Clock):
-    """Nietoperze: noc, wielki księżyc, gwiazdy; nietoperze trzepoczą zygzakiem po niebie, czasem przelatują
-    na tle księżyca."""
+    """Nietoperze na tle wielkiego księżyca."""
 
     def __init__(self):
         self.bats = [self.new(random.uniform(0, W)) for _ in range(6)]
@@ -7342,8 +7323,7 @@ TURTLE = ["...........GGGGG.......", ".........GGHGGGHGG.....", "..F.....GGGGHGG
 
 @reg("zolw")
 class Turtle(Clock):
-    """Żółw morski: płynie powoli przez cały panel, macha płetwami; promienie światła z góry, bąbelki,
-    falujące wodorosty na dnie."""
+    """Żółw morski powoli płynie przez panel."""
 
     def __init__(self):
         self.bub = []
@@ -7385,8 +7365,7 @@ SNAIL = ["......E...E", ".......E.E.", "..SSSS..BB.", ".SPPPPS.BB.", "SPSSSPPS.B
 
 @reg("slimak")
 class Snail(Clock):
-    """Ślimak: bardzo powoli pełznie przez łąkę, rusza czułkami, zostawia błyszczący ślad; kwiatki się kołyszą,
-    czasem przelatuje motyl."""
+    """Ślimak pełznie przez łąkę."""
 
     def draw(self, f, now, t, dt):
         for x in range(W):
@@ -7424,8 +7403,7 @@ class Snail(Clock):
 # ================================================================ światło (bez zegara)
 @reg("polarna")
 class AuroraCurtain(Clock):
-    """Zorza polarna z bliska: falujące kurtyny światła z pionowymi promieniami, zielone u dołu, fioletowe
-    u góry; pod nimi ośnieżone góry i gwiazdy."""
+    """Zorza polarna z bliska nad górami."""
 
     def draw(self, f, now, t, dt):
         for k in range(25):
@@ -7449,8 +7427,7 @@ class AuroraCurtain(Clock):
 
 @reg("tesla")
 class PlasmaBall(Clock):
-    """Lampa plazmowa: szklane kule, w środku elektroda, z której biegną do szkła drżące fioletowe wyładowania;
-    co jakiś czas „dotyk” – wszystkie pioruny zbiegają się w jednym miejscu."""
+    """Lampa plazmowa z fioletowymi wyładowaniami."""
 
     def __init__(self):
         self.touch, self.tx = None, 0
@@ -7495,8 +7472,7 @@ NEON_SIGNS = [("OPEN", (255, 30, 60)), ("BAR", (0, 200, 255)), ("CAFE", (255, 16
 
 @reg("szyld")
 class NeonSign(Clock):
-    """Neonowy szyld: świecące rurki z napisem (OPEN, BAR, CAFE, PIZZA…) i ikonką (serce, kubek, strzałka),
-    z poświatą; jarzeniówka się zapala z migotaniem, czasem jedna litera przerywa."""
+    """Neonowy szyld z napisem i ikonką."""
     ICONS = {"serce": [".RR.RR.", "RRRRRRR", "RRRRRRR", ".RRRRR.", "..RRR..", "...R..."],
              "kubek": ["..R.R..", ".R.R...", "RRRRR..", "R...RR.", "R...R.R", "R...RR.", ".RRR..."],
              "strzałka": ["...R...", "...RR..", "RRRRRR.", "RRRRRRR", "RRRRRR.", "...RR..", "...R..."]}
@@ -7553,8 +7529,7 @@ class NeonSign(Clock):
 
 @reg("witraz")
 class StainedGlass(Clock):
-    """Witraż: kolorowe szybki w ołowianych ramkach, przez które przesuwa się słońce – po kolei rozjaśnia
-    szkło, a szybki mienią się delikatnie."""
+    """Witraż rozświetlany przez słońce."""
     COLS = [(200, 20, 30), (20, 60, 200), (230, 170, 0), (20, 150, 60), (140, 30, 170), (0, 150, 170)]
 
     def draw(self, f, now, t, dt):
@@ -7575,7 +7550,7 @@ class StainedGlass(Clock):
 
 @reg("basen")
 class Caustics(Clock):
-    """Dno basenu w słońcu: falujące świetliste sieci kaustyk na turkusowych kafelkach."""
+    """Świetliste refleksy na dnie basenu."""
 
     def draw(self, f, now, t, dt):
         for y in range(H):
@@ -7593,8 +7568,7 @@ class Caustics(Clock):
 
 @reg("iskry")
 class Sparks(Clock):
-    """Szlifierka: tarcza się kręci, strumień rozżarzonych iskier leci łukiem, odbija się od podłogi i gaśnie;
-    szlifierka przesuwa się po stalowym pręcie."""
+    """Szlifierka sypie strumieniem iskier."""
 
     def __init__(self):
         self.sp, self.acc = [], 0.0
@@ -7636,8 +7610,7 @@ class Sparks(Clock):
 
 @reg("swieca")
 class Candles(Clock):
-    """Świece: kilka świec różnej wysokości, żywe płomienie drżą i chwieją się jak od przeciągu, ciepła poświata;
-    wosk powoli spływa."""
+    """Świece z drżącymi płomieniami."""
 
     def draw(self, f, now, t, dt):
         cs = [(W * k / 7 + W / 14, 3 + int(hash1(k * 3) * 4), hash1(k * 7)) for k in range(7)]
@@ -7666,7 +7639,7 @@ class Candles(Clock):
 
 @reg("lampa")
 class LavaLamp(Clock):
-    """Lampa lava: w szklanych lampach wielkie krople wosku powoli wznoszą się, łączą, rozciągają i opadają."""
+    """Lampy lava z wolno płynącym woskiem."""
 
     def __init__(self):
         self.lamps = [[{"x": random.uniform(-3, 3), "y": random.uniform(0, 11), "ph": random.random() * 9,
@@ -7697,8 +7670,7 @@ class LavaLamp(Clock):
 # ================================================================ fizyka (bez zegara)
 @reg("wahadla")
 class PendulumWave(Clock):
-    """Fala wahadeł: rząd kulek, każda waha się odrobinę wolniej od sąsiadki – powstają węże, fale i chaos, a co
-    minutę wszystkie znów zgrywają się w jedną linię. Widok z góry, z tęczowymi smugami."""
+    """Fala wahadeł: węże, fale i chaos."""
     N, CYCLE = 40, 60.0  # w CYCLE sekund wahadło i robi 30 + i wahnięć
 
     def __init__(self):
@@ -7719,8 +7691,7 @@ class PendulumWave(Clock):
 
 @reg("newton")
 class NewtonsCradle(Clock):
-    """Kołyska Newtona: trzy kołyski z błyszczącymi kulkami na niciach – odchylona kulka uderza w rząd, a z drugiej
-    strony odskakuje tyle samo; w każdej kołysce inna liczba kulek w ruchu."""
+    """Kołyski Newtona z błyszczącymi kulkami."""
 
     def draw(self, f, now, t, dt):
         f.rect(0, 0, W - 1, 0, visible((60, 60, 70)))
@@ -7750,8 +7721,7 @@ class NewtonsCradle(Clock):
 
 @reg("kostki")
 class DominoRun(Clock):
-    """Domino: długi rząd kolorowych kostek przewraca się jedna po drugiej przez cały panel; po ostatniej kostki
-    same wstają (cofnięcie filmu) i od nowa."""
+    """Rząd kostek domina przewraca się po kolei."""
     N, GAP, HGT = 38, 3.1, 7.0
 
     def draw(self, f, now, t, dt):
@@ -7781,8 +7751,7 @@ class DominoRun(Clock):
 
 @reg("kulodrom")
 class MarbleRun(Clock):
-    """Tor kulkowy: kolorowe kulki toczą się po falistej rynnie, spadają na dół, wracają po podłodze, a winda
-    zabiera je z powrotem na górę."""
+    """Kulki toczą się po torze i wracają windą."""
 
     def __init__(self):
         self.m = [{"s": -i * 26.0, "c": hsv(i / 8, 0.85, 1)} for i in range(8)]
@@ -7833,8 +7802,7 @@ class MarbleRun(Clock):
 
 @reg("pileczki")
 class BouncyBalls(Clock):
-    """Piłeczki: kolorowe kauczukowe kulki wpadają z góry, odbijają się od podłogi i od siebie nawzajem,
-    tracą energię; co jakiś czas ktoś podrzuca je wszystkie naraz."""
+    """Kauczukowe piłeczki odbijają się od podłogi."""
 
     def __init__(self):
         self.b, self.kick = [], 0.0
@@ -7883,8 +7851,7 @@ class BouncyBalls(Clock):
 
 @reg("slinky")
 class Slinky(Clock):
-    """Slinky: tęczowa sprężynka schodzi po schodach – przelewa się łukiem stopień po stopniu, a na końcu
-    wraca na górę."""
+    """Tęczowa sprężynka schodzi po schodach."""
     STEP_W, STEP_H, N = 15, 0.85, 18
 
     def draw(self, f, now, t, dt):
@@ -7912,8 +7879,7 @@ class Slinky(Clock):
 # ================================================================ sceny (bez zegara)
 @reg("okno")
 class TrainWindow(Clock):
-    """Nocą z okna pociągu: daleko powoli suną góry i księżyc, bliżej światła miasteczek, a tuż za szybą migają
-    słupy i drzewa (paralaksa); co jakiś czas mija nas oświetlony pociąg z naprzeciwka."""
+    """Nocny widok z okna pociągu."""
 
     def __init__(self):
         self.other = None
@@ -7965,8 +7931,7 @@ class TrainWindow(Clock):
 
 @reg("szyba")
 class RainWindow(Clock):
-    """Deszcz na szybie: za szybą rozmyte kolorowe światła miasta, po szybie spływają krople – stoją, nabierają
-    wody, ruszają zygzakiem, zostawiają ślad i łykają mniejsze krople po drodze."""
+    """Krople deszczu spływają po szybie, za nią miasto."""
 
     def __init__(self):
         self.still = [[random.uniform(0, W), random.uniform(0, H), random.uniform(0.3, 0.8)] for _ in range(70)]
@@ -8012,8 +7977,7 @@ class RainWindow(Clock):
 
 @reg("latarnia")
 class Lighthouse(Clock):
-    """Latarnia morska: biało-czerwona wieża na skale, snop światła obraca się nad ciemnym morzem i omiata niebo,
-    fale błyszczą w jego blasku, w oddali przepływa statek."""
+    """Latarnia morska omiata morze snopem światła."""
 
     def draw(self, f, now, t, dt):
         lx, ly = W * 0.18, 2.5
@@ -8053,8 +8017,7 @@ class Lighthouse(Clock):
 
 @reg("wulkan")
 class Volcano(Clock):
-    """Wulkan: stożek na tle nocnego nieba, z krateru tryska lawa, rozżarzone bomby lecą łukiem, strumienie
-    lawy spływają po zboczach, w górę bucha dym; co chwilę silniejsza erupcja."""
+    """Wulkan nocą: lawa, bomby i dym."""
 
     def __init__(self):
         self.p, self.boom = [], 0.0
@@ -8107,8 +8070,7 @@ class Volcano(Clock):
 
 @reg("start")
 class Launch(Clock):
-    """Start rakiety z bliska: rakieta na wyrzutni, odliczanie, zapłon, kłęby dymu rozlewają się po ziemi,
-    rakieta wznosi się z ognistym ogonem i znika u góry; potem następna."""
+    """Start rakiety z bliska: odliczanie, zapłon, dym."""
     T = 22.0
 
     def __init__(self):
@@ -8163,8 +8125,7 @@ class Launch(Clock):
 
 @reg("saturn")
 class Saturn(Clock):
-    """Przelot obok planety z pierścieniami: wielki pasiasty glob z cieniem przesuwa się powoli przez panel,
-    pierścienie z przerwą przecinają go ukośnie, w tle gwiazdy w paralaksie."""
+    """Powolny przelot obok planety z pierścieniami."""
 
     def draw(self, f, now, t, dt):
         for k in range(50):  # gwiazdy dwiema warstwami
@@ -8199,8 +8160,7 @@ class Saturn(Clock):
 # ================================================================ impreza (bez zegara)
 @reg("disco")
 class Disco(Clock):
-    """Disco: obracająca się kula lustrzana z migoczącymi lusterkami, kolorowe plamki światła wędrują po
-    panelu, reflektory zmieniają kolor do rytmu."""
+    """Kula disco i kolorowe reflektory."""
 
     def draw(self, f, now, t, dt):
         beat = (t * 2.1) % 1
@@ -8234,8 +8194,7 @@ class Disco(Clock):
 
 @reg("vumetr")
 class VuMeter(Clock):
-    """VU-metry retro: dwa podświetlone wskaźniki wychyłowe ze skalą i czerwonym polem, wskazówki tańczą do
-    muzyki (symulowanej), obok słupkowe wskaźniki LED."""
+    """Retro VU-metry tańczą do muzyki."""
 
     def __init__(self):
         self.n = [0.0, 0.0]
@@ -8281,8 +8240,7 @@ class VuMeter(Clock):
 
 @reg("sylwester")
 class NewYear(Clock):
-    """Sylwester: wielkie odliczanie 10… 3, 2, 1, potem fajerwerki i napis z nowym rokiem; w kółko, jak pokaz.
-    W ostatniej minucie roku odlicza naprawdę do północy."""
+    """Odliczanie do Nowego Roku i fajerwerki."""
 
     def __init__(self):
         self.pt, self.buf = [], Persist()
@@ -8330,8 +8288,7 @@ class NewYear(Clock):
 
 @reg("bsod")
 class Bsod(Clock):
-    """Żart dla widzów: panel „ładuje się” z kręcącym się kółkiem i paskiem postępu, który zwalnia przy 99%,
-    potem niebieski ekran :( „your panel ran into a problem”, aktualizacja 0% … i od nowa."""
+    """Żart: panel się „ładuje” i dostaje niebieski ekran."""
 
     def draw(self, f, now, t, dt):
         p = t % 30
@@ -8442,8 +8399,7 @@ class Eyes(Clock):
 
 @reg("kot")
 class CatEyes(Eyes):
-    """Kocie oczy: bursztynowe tęczówki z pionową źrenicą, która rozszerza się i zwęża; mruga, czasem
-    powoli przymyka oczy po kociemu. Kolor oczu – w ustawieniach efektu."""
+    """Kocie oczy z pionową źrenicą."""
     COL = (255, 160, 0)
 
     def __init__(self):
@@ -8486,8 +8442,7 @@ class CatEyes(Eyes):
 
 @reg("czlowiek")
 class HumanEyes(Eyes):
-    """Ludzkie oczy: białka, tęczówka z ciemniejszym brzegiem i źrenicą, powieki z rzęsami, brwi, które czasem
-    unoszą się ze zdziwienia. Rozgląda się i mruga. Kolor tęczówek – w ustawieniach efektu."""
+    """Ludzkie oczy, które się rozglądają i mrugają."""
     COL = (40, 110, 255)
     CY = 6.8
 
@@ -8534,8 +8489,7 @@ class HumanEyes(Eyes):
 
 @reg("bajka")
 class CartoonEyes(Eyes):
-    """Bajkowe oczy jak z kreskówki: duże, z wielkimi tęczówkami i błyskami. Robią miny: radość ^^, zakochanie
-    (serduszka), zdziwienie, mrugnięcie. Kolor tęczówek – w ustawieniach efektu."""
+    """Bajkowe oczy z kreskówki robią miny."""
     COL = (30, 190, 255)
     MOODS = ("zwykłe", "zwykłe", "radość", "serca", "zdziwienie", "oczko")
 
@@ -8582,8 +8536,7 @@ class CartoonEyes(Eyes):
 
 @reg("sowa")
 class OwlEyes(Eyes):
-    """Sowa: dwa wielkie okrągłe oczy obok siebie, dziób i pióra. Sowa nie rusza oczami – obraca głowę (cała twarz
-    przesuwa się po panelu), mruga powoli, czasem jednym okiem. Kolor tęczówek – w ustawieniach efektu."""
+    """Sowa obraca głową i powoli mruga."""
     COL = (255, 150, 0)
 
     def __init__(self):
@@ -8631,8 +8584,7 @@ class OwlEyes(Eyes):
 
 @reg("robot")
 class RobotEyes(Eyes):
-    """Oczy robota: świecące zaokrąglone prostokąty jak na ekranie. Robią miny: zadowolenie, złość, smutek,
-    senność, zdziwienie, rozglądają się całymi oczami. Kolor świecenia – w ustawieniach efektu."""
+    """Świecące oczy robota robią miny."""
     COL = (0, 170, 255)
     MOODS = ("zwykłe", "zwykłe", "radość", "złość", "smutek", "senność", "zdziwienie")
 
@@ -8676,8 +8628,7 @@ class RobotEyes(Eyes):
 
 @reg("sauron")
 class SauronEye(Eyes):
-    """Oko Saurona: jedno wielkie ogniste oko z czarną pionową źrenicą, płomienie wokół, powoli wodzi wzrokiem
-    po panelu. Kolor ognia – w ustawieniach efektu."""
+    """Ogniste Oko Saurona wodzi wzrokiem."""
     COL = (255, 90, 0)
 
     def draw(self, f, now, t, dt):
@@ -8704,8 +8655,7 @@ class SauronEye(Eyes):
 
 @reg("hal")
 class Hal(Eyes):
-    """Oko HAL 9000: czerwony obiektyw w czarnej szybie i metalowej oprawie, powoli pulsuje. Kolor – w ustawieniach
-    efektu."""
+    """Pulsujące czerwone oko HAL 9000."""
     COL = (255, 0, 0)
 
     def draw(self, f, now, t, dt):
@@ -8733,8 +8683,7 @@ class Hal(Eyes):
 
 @reg("mrok")
 class DarkEyes(Eyes):
-    """Oczy w ciemności: pary świecących oczu pojawiają się w mroku, mrugają, rozglądają się i znikają – jak
-    w lesie nocą. Kolor – w ustawieniach efektu (naturalny: różne zwierzęta, różne kolory)."""
+    """Świecące oczy zwierząt w ciemności."""
     COL = (255, 220, 60)
     KINDS = ((255, 220, 60), (120, 255, 60), (255, 60, 20), (255, 150, 0), (180, 230, 255))
 
@@ -9052,9 +9001,9 @@ class Engine:
             self.new_width = 60 if W != 60 else 120
             self.running = False          # main() zapisze i uruchomi skrypt ponownie z nową szerokością
 
-        def opt(values, get, put, fmt=str, kind="list"):
-            """Wybór dla panelu WWW: kind „range” = suwak, „list” = lista rozwijana; values może być funkcją."""
-            return {"values": values, "get": get, "put": put, "fmt": fmt, "kind": kind}
+        def opt(values, get, put, fmt=str):
+            """Wybór dla panelu WWW (lista rozwijana); values może być funkcją."""
+            return {"values": values, "get": get, "put": put, "fmt": fmt, "kind": "list"}
 
         def flag(get, put, on="włączone", off="wyłączone"):
             return opt([True, False], get, put, lambda v: on if v else off)
@@ -9064,26 +9013,26 @@ class Engine:
                 s_width(1)
 
         x = lambda v: f"x{v:g}"
-        led = lambda ch: opt(COLOR_STEPS, lambda: COLOR[ch], lambda v: COLOR.update({ch: v}), x, "range")
+        led = lambda ch: opt(COLOR_STEPS, lambda: COLOR[ch], lambda v: COLOR.update({ch: v}), x)
         self.choices = {
             "popraw kolory": flag(lambda: COLOR["fix"], lambda v: COLOR.update(fix=v)),
             "diody: czerwony": led("r"),
             "diody: zielony": led("g"),
-            "diody: niebieski": led("b"),  # ustawienia z listą wartości – w panelu WWW suwak albo lista zamiast strzałek
-            "jasność WLED": opt(bris, lambda: PANEL["bri"], put_bri, lambda v: f"{v}/255", "range"),
+            "diody: niebieski": led("b"),  # ustawienia z listą wartości – w panelu WWW lista rozwijana zamiast strzałek
+            "jasność WLED": opt(bris, lambda: PANEL["bri"], put_bri, lambda v: f"{v}/255"),
             "zasilacz": opt(psus, lambda: POWER["psu"], lambda v: POWER.update(psu=v),
                             lambda v: f"{v / 1000:g} A" if v else "bez limitu"),
             "auto przyciemnianie": flag(lambda: POWER["auto"], lambda v: POWER.update(auto=v)),
             "ciężkie efekty": flag(lambda: self.skip_heavy, lambda v: setattr(self, "skip_heavy", v),
                                    "pomijaj w cyklu", "pokazuj"),
-            "tempo anim.": opt(self.TEMPOS, lambda: self.tempo, lambda v: setattr(self, "tempo", v), x, "range"),
-            "tempo tekstu": opt(self.TEMPOS, lambda: self.text, lambda v: setattr(self, "text", v), x, "range"),
-            "fps": opt(self.FPSES, lambda: self.fps, lambda v: setattr(self, "fps", v), lambda v: f"{v:g}", "range"),
+            "tempo anim.": opt(self.TEMPOS, lambda: self.tempo, lambda v: setattr(self, "tempo", v), x),
+            "tempo tekstu": opt(self.TEMPOS, lambda: self.text, lambda v: setattr(self, "text", v), x),
+            "fps": opt(self.FPSES, lambda: self.fps, lambda v: setattr(self, "fps", v), lambda v: f"{v:g}"),
             "cykl co": opt(list(range(10, 601, 10)), lambda: self.cycle.every,
-                           lambda v: setattr(self.cycle, "every", v), lambda v: f"{v} s", "range"),
+                           lambda v: setattr(self.cycle, "every", v), lambda v: f"{v} s"),
             "kolejność": flag(lambda: self.cycle.shuffle, lambda v: setattr(self.cycle, "shuffle", v), "losowo", "po kolei"),
             "przenikanie": opt(self.FADES, lambda: self.fade, lambda v: (setattr(self, "fade", v),
-                               setattr(self.cycle, "fade", max(v, 0.01))), lambda v: f"{v:g} s", "range"),
+                               setattr(self.cycle, "fade", max(v, 0.01))), lambda v: f"{v:g} s"),
             "czas": opt(lambda: self.SPEEDS, lambda: self.speed, lambda v: setattr(self, "speed_i", self.SPEEDS.index(v)), x),
             "odbicie lustrz.": flag(lambda: PANEL["mirror"], lambda v: PANEL.update(mirror=v)),
             "ludzik co ile": opt(list(range(len(LUDZIK_FREQ))), lambda: LUDZIK["freq"], lambda v: LUDZIK.update(freq=v),
@@ -9101,7 +9050,7 @@ class Engine:
             "czcionka": opt(list(range(len(CLOCK_FONTS))), lambda: CLOCK["font"], lambda v: CLOCK.update(font=v),
                             lambda v: CLOCK_FONTS[v][0]),
             "temperatura": opt(CLOCK_TEMPS, lambda: CLOCK["temp"], lambda v: CLOCK.update(temp=v),
-                               lambda v: f"{v:+d} K" if v else "0 K", "range"),
+                               lambda v: f"{v:+d} K" if v else "0 K"),
             "wysyłanie": flag(lambda: self.sending, lambda v: v != self.sending and self.toggle_send()),
             "szerokość": opt([60, 120], lambda: W, put_width, lambda v: f"{v} kolumn"),
             "poziomy": opt(levels, lambda: PANEL["levels"] if panel_manual() else None, put_levels,
@@ -10070,7 +10019,7 @@ def web_cmd(e, c):
         name = c.get("name")
         if name not in [s[0] for s in e.settings]:
             raise ValueError(f"nie ma ustawienia {name!r}")
-        if "i" in c:  # suwak / lista w panelu WWW: konkretna wartość
+        if "i" in c:  # lista w panelu WWW: konkretna wartość
             if name not in e.choices:
                 raise ValueError(f"ustawienie {name!r} nie ma listy wartości")
             i = int(c["i"])

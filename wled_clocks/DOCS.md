@@ -125,7 +125,7 @@ Pod efektami skryptu lista pokazuje też efekty wbudowane w WLED, w trzech kateg
 ♪ = reaguje na dźwięk (potrzebny mikrofon w WLED), 2D = dla matrycy i 1D. Po wybraniu skrypt przestaje wysyłać obraz, a efekt rysuje sam WLED – podglądu w panelu wtedy nie
 ma. Jasność i limit prądu takich efektów ustawia WLED. Wybranie efektu skryptu wraca do strumienia.
 
-Ustawienia efektu WLED (szybkość, intensywność, własne suwaki, opcje, paleta, kolory) są w „Ustawienia efektu” –
+Ustawienia efektu WLED (szybkość, intensywność, własne parametry liczbowe, opcje, paleta, kolory) są w „Ustawienia efektu” –
 tylko te, których dany efekt używa, z nazwami z WLED. Każdy efekt pamięta swoje ustawienia.
 
 ## Skróty klawiszowe w panelu

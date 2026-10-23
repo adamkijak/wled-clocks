@@ -127,8 +127,7 @@ main > *, .cols > * { min-width: 0; }
 }
 .list li:hover { background: var(--btn); }
 .list li .n { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
-.list li .d { grid-column: 2 / 4; color: var(--muted); font-size: 12px; display: none; }
-.list li:hover .d, .list li.sel .d { display: block; }
+.list li .d { grid-column: 2 / 4; color: var(--muted); font-size: 12px; font-weight: 400; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list li.sel { background: var(--btn); font-weight: 600; }
 .list li.sel .name::before { content: "● "; color: var(--ok); }
 .list li.incycle .name::before { content: "↻ "; color: var(--accent); }
@@ -182,7 +181,6 @@ details.common[open] > summary { margin-bottom: 8px; }
 .srow .wide { grid-column: 2 / 5; display: flex; gap: 6px; }
 .srow .wide input { flex: 1; }
 .pick { align-items: center; gap: 10px; }
-.pick input[type="range"] { flex: 1; min-width: 0; padding: 0; border: 0; background: none; accent-color: var(--accent); }
 .pick select {
   flex: 1;
   min-width: 0;

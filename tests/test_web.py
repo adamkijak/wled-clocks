@@ -270,7 +270,7 @@ class EngineTest(unittest.TestCase):
             wc.POWER.update(old)
 
     def test_settings_pick_from_list(self):
-        """Suwaki i listy w panelu WWW: każde ustawienie z listą da się ustawić na każdą jej wartość."""
+        """Listy w panelu WWW: każde ustawienie z listą da się ustawić na każdą jej wartość."""
         saved = dict(wc.PANEL), dict(wc.POWER), dict(wc.CLOCK), dict(wc.LUDZIK)
         try:
             e = wc.Engine(args(), {})
@@ -288,7 +288,7 @@ class EngineTest(unittest.TestCase):
             e.tick()
             self.assertEqual((wc.CLOCK_HUES[wc.CLOCK["hue"]][0], e.fps), ("niebieski", 15))
             row = {x["name"]: x for x in e.snap["settings"]}
-            self.assertEqual((row["fps"]["kind"], row["fps"]["labels"][row["fps"]["index"]]), ("range", "15"))
+            self.assertEqual((row["fps"]["kind"], row["fps"]["labels"][row["fps"]["index"]]), ("list", "15"))
             self.assertEqual(row["barwa"]["kind"], "list")
             self.assertNotIn("kind", row["host"])                           # pole tekstowe, nie lista
             for bad in ({"op": "setting", "name": "fps", "i": 99}, {"op": "setting", "name": "host", "i": 0}):

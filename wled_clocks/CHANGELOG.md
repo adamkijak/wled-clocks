@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.28.0
+
+- Lista efektów w panelu WWW nie rozwija się już po najechaniu myszą – każdy efekt ma stały, jednolinijkowy opis.
+- Opisy wszystkich efektów skrócone do jednego krótkiego zdania.
+- Koniec z suwakami (niewygodne na telefonie): ustawienia skryptu wybiera się z list rozwijanych, a liczbowe
+  ustawienia efektów WLED (szybkość, intensywność…) wpisuje się w pole liczbowe 0–255.
+
 ## 1.27.0
 
 - Daily: przełącznik „pokazuj, kto mówi” – wyłączony daje zwykłą listę do odhaczania (bez złotego mówcy,
