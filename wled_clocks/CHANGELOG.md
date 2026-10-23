@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.29.0
+
+- Strona widzów „Draw on the panel”: siatka na całą szerokość okna (bez przewijania w bok), paleta i siatka
+  na samej górze, pole tekstowe nie przejmuje fokusu (na telefonie nie wyskakuje klawiatura).
+- Daily i rysunek: adres skrzynki (np. bore.pub:41234) pokazuje się dopiero po chwili, w której nikt nic nie
+  przysłał (domyślnie 10 s, ustawienie „adres po ciszy” w skrzynce; 0 = nigdy) – na 5 s, z kopertą i tą samą czcionką co w „napisz” (rysunek miał dotąd mały adres w rogu co 45 s,
+  daily – co 34 s niezależnie od ruchu).
+
 ## 1.28.0
 
 - Lista efektów w panelu WWW nie rozwija się już po najechaniu myszą – każdy efekt ma stały, jednolinijkowy opis.

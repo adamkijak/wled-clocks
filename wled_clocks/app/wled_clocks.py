@@ -6739,12 +6739,31 @@ class Inbound(Clock):
             if k < hdur:
                 self.draw_hint(f, k)
                 return
-        addr = addr.split("://", 1)[-1]  # sam adres: domena:port (własny port – jeszcze kod w ścieżce)
+        self.draw_addr(f, addr.split("://", 1)[-1], t)  # sam adres: domena:port (własny port – jeszcze kod w ścieżce)
+
+    @staticmethod
+    def draw_addr(f, addr, t):
+        """Adres skrzynki za kopertą: krótki na środku, długi przewijany."""
         tw = text_w(addr, TXT)
-        if tw <= W - self.X0:
-            f.text(addr, self.X0 + (W - self.X0 - tw) // 2, 0, (80, 200, 255), TXT)
+        if tw <= W - Inbound.X0:
+            f.text(addr, Inbound.X0 + (W - Inbound.X0 - tw) // 2, 0, (80, 200, 255), TXT)
         else:
-            scroll_segs(f, [(addr, (80, 200, 255))], t, 30, 0, self.X0, gap=40)
+            scroll_segs(f, [(addr, (80, 200, 255))], t, 30, 0, Inbound.X0, gap=40)
+
+
+ADDR_SHOW = 5  # daily i rysunek: adres skrzynki na 5 s po INBOX.addr_idle s bez żadnej wiadomości (i tak w kółko)
+
+
+def idle_addr(f, t):
+    """Daily i rysunek: gdy nikt nic nie przysłał od INBOX.addr_idle s, na ADDR_SHOW s zamiast efektu koperta
+    z adresem (jak w „napisz”); dalsza cisza – znów po tylu s. -> True, gdy adres narysowany."""
+    addr, wait = INBOX.address() if INBOX.is_open() else "", INBOX.addr_idle
+    idle = time.time() - INBOX.active
+    if not addr or not wait or idle < wait or (idle - wait) % (wait + ADDR_SHOW) >= ADDR_SHOW:
+        return False
+    sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
+    Inbound.draw_addr(f, addr.split("://", 1)[-1], t)
+    return True
 
 
 # ================================================================ daily i wspólny rysunek (efekty „daily” i „rysunek”)
@@ -6894,10 +6913,7 @@ class Daily(Clock):
         if not ppl:
             scroll_segs(f, [("DAILY", (255, 190, 30)), ("– dodaj osoby w ustawieniach efektu", (200, 200, 215))], t, 30)
             return
-        addr = INBOX.address().split("://", 1)[-1] if INBOX.is_open() and INBOX.address() else ""
-        if addr and t % 34 > 30:  # adres skrzynki – żeby było wiadomo, gdzie odhaczać
-            sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
-            f.text(addr, Inbound.X0 + max(0, (W - Inbound.X0 - text_w(addr, TXT)) // 2), 0, (80, 200, 255), TXT)
+        if idle_addr(f, t):  # cisza – adres skrzynki, żeby było wiadomo, gdzie odhaczać
             return
         if all(p["done"] for p in ppl) and t % 10 > 6:  # wszyscy byli
             msg = "Wszyscy byli!"
@@ -6939,13 +6955,10 @@ class Drawing(Clock):
             segs.append(("  np. 45 3 czerwony", (200, 200, 215)))
             scroll_segs(f, segs, t, 30, gap=30)
             return
+        if idle_addr(f, t):  # cisza – adres skrzynki zamiast rysunku
+            return
         for (x, y), c in px.items():
             f.set(x, y, (255, 255, 255) if wall - at.get((x, y), 0) < 0.35 else c)
-        if addr and t % 45 > 40:  # adres na chwilę, w ramce u dołu
-            w = text_w(addr, NARROW_TXT)
-            x0 = W - w - 2
-            f.rect(x0 - 1, 5, W - 1, 11, (0, 0, 0))
-            f.text(addr, x0, 6, (80, 200, 255), NARROW_TXT)
 
 
 # ================================================================ postacie i zwierzęta (bez zegara)
@@ -9223,7 +9236,8 @@ class Engine:
                "oczy_kolor": eye_hex(EYES["col"]),
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "msg_filters": INBOX.filters, "msg_words": INBOX.words, "msg_hint": INBOX.hint,
-               "msg_hint_every": INBOX.hint_every, "msg_extras": INBOX.extras, "msg_poll_hint": INBOX.poll_hint,
+               "msg_hint_every": INBOX.hint_every, "msg_addr_idle": INBOX.addr_idle, "msg_extras": INBOX.extras,
+               "msg_poll_hint": INBOX.poll_hint,
                "daily": {"people": DAILY["people"], "cur": DAILY["cur"], "auto": DAILY["auto"],
                          "speak": DAILY["speak"]},
                "rysunek": draw_hex() if DRAW["px"] else "",
@@ -10081,6 +10095,7 @@ def web_cmd(e, c):
             v = [int(m[1][k:k + 2], 16) for k in (0, 2, 4)]
         return lambda: e.wled_set(key, v)
     if op == "daily":
+        INBOX.active = time.time()  # zmiana z panelu WWW też odsuwa adres skrzynki
         act = c.get("act")
         if act == "set":
             text = str(c.get("v", ""))[:2000]
@@ -10094,6 +10109,7 @@ def web_cmd(e, c):
             return lambda: daily_act(act)
         raise ValueError(f"złe polecenie daily {act!r}")
     if op == "draw":
+        INBOX.active = time.time()
         act = c.get("act")
         if act == "clear":
             return lambda: DRAW.update(px={}, at={})
@@ -10157,6 +10173,11 @@ def web_cmd(e, c):
             if not 0 <= every <= 600:
                 raise ValueError("zachęta: co 0–600 s (0 = nigdy)")
             return lambda: (setattr(INBOX, "hint", text), setattr(INBOX, "hint_every", every))
+        if act == "addr_idle":  # daily i rysunek: adres po tylu s ciszy
+            v = int(c.get("v", -1))
+            if not 0 <= v <= 600:
+                raise ValueError("adres po ciszy: 0–600 s (0 = nigdy)")
+            return lambda: setattr(INBOX, "addr_idle", v)
         if act in ("approve", "reject", "block", "again", "clear"):
             mid = int(c.get("id", 0))
             return lambda: INBOX.act(act, mid)
@@ -10374,9 +10395,9 @@ MSG_STYLE = """body{font:16px/1.5 system-ui,sans-serif;max-width:520px;margin:32
 form{display:flex;gap:8px;margin:0}input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #444;
 background:#222;color:#eee}input{flex:1;min-width:0}button{cursor:pointer}p,li{color:#9a9ca3}.m{color:#ffd54f}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}h2{font-size:18px;margin:24px 0 4px}code{color:#9cf}
-ul{padding-left:20px}.gw{overflow-x:auto;padding-bottom:6px}.grid{display:grid;gap:1px;background:#333;
-width:max-content}.grid button{width:9px;height:9px;padding:0;border:0;border-radius:0;background:#000}
-.grid button:hover{outline:1px solid #fff}.sw{width:28px;height:28px;border-radius:6px;border:2px solid #444}
+ul{padding-left:20px}body.wide{max-width:none;margin:12px auto}.wide h1{margin:0;font-size:22px}
+.grid{display:grid;width:100%;background:#000;margin:8px 0}.grid button{aspect-ratio:1;min-width:0;padding:0;
+border:0;border-radius:0;background:#000;box-shadow:inset 0 0 0 .5px #2a2a2a}.grid button:hover{outline:1px solid #fff}.sw{width:28px;height:28px;border-radius:6px;border:2px solid #444}
 .sw.on{border-color:#fff}.daily{display:grid;gap:6px}.daily div{display:flex;gap:10px;align-items:center}
 .daily button{padding:6px 10px}.done{text-decoration:line-through;color:#6c6}"""
 
@@ -10460,10 +10481,11 @@ def msg_grid(color):
     cells = "".join(f'<button name="message" value="{x + 1} {y + 1} {color}" title="{x + 1}, {y + 1}"'
                     + (f' style="background:#%02x%02x%02x"' % px[(x, y)] if (x, y) in px else "") + "></button>"
                     for y in range(H) for x in range(W))
-    return (f'<h2 id="g">Draw together</h2><p>Pick a colour, hold the mouse button and draw. Or send <code>45 3 red</code> (column, row, '
-            f'colour; <code>45-60 3 blue</code> draws a line, <code>erase</code> clears).</p><div class="row">{pal}</div>'
-            f'<div class="gw"><form method="post" action="?c={color}#g" class="grid" data-c="{color}" '
-            f'data-h="{hexs[color]}" style="grid-template-columns:repeat({W},9px)">{cells}</form></div>')
+    return (f'<div class="row" id="g">{pal}</div><form method="post" action="?c={color}#g" class="grid" '
+            f'data-c="{color}" data-h="{hexs[color]}" style="grid-template-columns:repeat({W},minmax(0,1fr));'
+            f'max-width:calc((100vh - 180px) * {W} / {H})">{cells}'
+            f'</form><p>Pick a colour, hold the mouse button and draw. Or send <code>45 3 red</code> (column, row, '
+            f'colour; <code>45-60 3 blue</code> draws a line, <code>erase</code> clears).</p>')
 
 
 def msg_daily():
@@ -10486,20 +10508,20 @@ def msg_page(msg, query=""):
     ex, poll = INBOX.extras, INBOX.poll
     btn = lambda value, label: (f'<form method="post"><button name="message" value="{e(value)}">{e(label)}</button>'
                                 f'</form>')
-    field = lambda hint: (f'<form method="post" accept-charset="utf-8"><input name="message" maxlength="{MSG_MAX}" '
-                          f'required autofocus placeholder="{e(hint)}" aria-label="{e(hint)}"><button>Send</button>'
-                          f'</form>')
+    field = lambda hint, focus=True: (f'<form method="post" accept-charset="utf-8"><input name="message" '
+                                      f'maxlength="{MSG_MAX}" required{" autofocus" if focus else ""} '
+                                      f'placeholder="{e(hint)}" aria-label="{e(hint)}"><button>Send</button></form>')
     fx, key = msg_live()
-    head = lambda title: (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
-                          f'content="width=device-width, initial-scale=1"><title>{e(title)}</title>'
-                          f'<style>{MSG_STYLE}</style></head><body data-fx="{fx}" data-k="{key}"><h1>{e(title)}</h1>'
-                          f'<p class="m">{e(msg)}</p>')
+    head = lambda title, cls="": (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
+                                  f'content="width=device-width, initial-scale=1"><title>{e(title)}</title>'
+                                  f'<style>{MSG_STYLE}</style></head><body class="{cls}" data-fx="{fx}" data-k="{key}">'
+                                  f'<h1>{e(title)}</h1>' + (f'<p class="m">{e(msg)}</p>' if msg else ""))
     end = f"<script>{LIVE_JS}</script></body></html>"
     if fx == "daily":
         return head("Daily") + msg_daily() + field("e.g. x mar") + end
     if fx == "draw":
-        return (head("Draw on the panel") + msg_grid((urllib.parse.parse_qs(query).get("c") or ["red"])[0])
-                + field("e.g. 45 3 red") + end)
+        return (head("Draw on the panel", "wide") + msg_grid((urllib.parse.parse_qs(query).get("c") or ["red"])[0])
+                + field("e.g. 45 3 red", focus=False) + end)
     out = [head("Write something on the panel"), field("Your message"),
            f'<p>Up to {MSG_MAX} characters. Messages show up on the panel one by one.</p>']
     if poll and poll["on"]:
@@ -10723,6 +10745,8 @@ class Inbox:
         self.hits, self.misses, self.blocked = {}, {}, set()
         self.geo = {}                         # adres nadawcy -> skąd jest (miasto, kraj), sprawdzane w tle
         self.next_id = 1
+        self.active = 0.0                     # kiedy ktoś ostatnio coś przysłał (daily i rysunek: adres po ciszy)
+        self.addr_idle = 10                   # daily i rysunek: adres po tylu s ciszy (0 = nigdy)
 
     def is_open(self):
         return self.until > time.time()
@@ -10887,6 +10911,7 @@ class Inbox:
         with self.lock:
             if self.until <= now or ip in self.blocked:
                 return 404, "not found"
+            self.active = now
             special = self.special(text)
             if special:
                 return self.do_special(special, ip, now)
@@ -11083,7 +11108,8 @@ class Inbox:
             return {"enabled": self.enabled(), "open": op, "until": hm(self.until) if op else "",
                     "address": self.address() if op else "", "auto": self.auto, "hours": self.hours,
                     "filters": dict(self.filters), "words": ", ".join(self.words), "hint": self.hint,
-                    "hint_every": self.hint_every, "extras": dict(self.extras), "poll_hint": self.poll_hint,
+                    "hint_every": self.hint_every, "addr_idle": self.addr_idle, "extras": dict(self.extras),
+                    "poll_hint": self.poll_hint,
                     "poll": {k: v for k, v in self.poll.items() if k != "voters"} if self.poll else None,
                     "limits": f"najwyżej {MSG_MAX} znaków; z jednego adresu co {MSG_GAP} s i najwyżej {MSG_PER} "
                               f"na {MSG_WINDOW // 60} min; przez tunel wszyscy razem {MSG_ALL[0]} na minutę; "
@@ -11305,6 +11331,8 @@ def main():
         INBOX.hint = msg_clean(cfg["msg_hint"])[:120]
     if isinstance(cfg.get("msg_hint_every"), int) and 0 <= cfg["msg_hint_every"] <= 600:
         INBOX.hint_every = cfg["msg_hint_every"]
+    if isinstance(cfg.get("msg_addr_idle"), int) and 0 <= cfg["msg_addr_idle"] <= 600:
+        INBOX.addr_idle = cfg["msg_addr_idle"]
     for k, v in (cfg.get("msg_extras") or {}).items():
         if k in INBOX.extras:
             INBOX.extras[k] = bool(v)

@@ -765,8 +765,13 @@ const saveHint = () => {
   if (!(every >= 0 && every <= 600)) return toast("zachęta: co 0–600 s");
   inboxCmd("hint", { v: $("#inbox-hint").value, every: Math.round(every) });
 };
-for (const id of ["#inbox-hint", "#inbox-hint-every"]) {
-  $(id).addEventListener("change", saveHint);
+for (const id of ["#inbox-hint", "#inbox-hint-every"]) $(id).addEventListener("change", saveHint);
+$("#inbox-addr-idle").addEventListener("change", (e) => {
+  const v = Number(e.target.value);
+  if (!(v >= 0 && v <= 600)) return toast("adres po ciszy: 0–600 s");
+  inboxCmd("addr_idle", { v: Math.round(v) });
+});
+for (const id of ["#inbox-hint", "#inbox-hint-every", "#inbox-addr-idle"]) {
   $(id).addEventListener("keydown", (e) => e.key === "Enter" && e.target.blur());
 }
 
@@ -826,6 +831,7 @@ function renderInbox(ib) {
   if (!wordsDirty) $("#inbox-words").value = ib.words; // niezapisanych zmian nie nadpisujemy
   if (document.activeElement !== $("#inbox-hint")) $("#inbox-hint").value = ib.hint;
   if (document.activeElement !== $("#inbox-hint-every")) $("#inbox-hint-every").value = String(ib.hint_every);
+  if (document.activeElement !== $("#inbox-addr-idle")) $("#inbox-addr-idle").value = String(ib.addr_idle);
   setText($("#inbox-limits"), ib.limits);
   // podsumowania w nagłówkach zwiniętych grup
   setText($("#inbox-pending-n"), ib.pending.length ? `(${ib.pending.length})` : "– nic nie czeka");

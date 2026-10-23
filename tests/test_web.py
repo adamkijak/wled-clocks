@@ -802,6 +802,10 @@ class InboxTest(unittest.TestCase):
             wc.web_cmd(e, {"op": "inbox", "act": "hint", "v": "x", "every": 9999})
         wc.web_cmd(e, {"op": "inbox", "act": "hint", "v": "  Pisz\tśmiało! 👋 ", "every": 10})()
         self.assertEqual((self.ib.hint, self.ib.hint_every), ("Pisz śmiało!", 10))
+        with self.assertRaises(ValueError):
+            wc.web_cmd(e, {"op": "inbox", "act": "addr_idle", "v": 601})
+        wc.web_cmd(e, {"op": "inbox", "act": "addr_idle", "v": 15})()
+        self.assertEqual(self.ib.snapshot()["addr_idle"], 15)
         snap = self.ib.snapshot()
         self.assertEqual(snap["filters"], {"words": False, "links": False, "dupes": False})
         self.assertIn("znaków", snap["limits"])
