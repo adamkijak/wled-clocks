@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.24.2
+
+- Panel WWW: ustawienia wspólne (jasność, płynność, szerokość, kolory diod…) schowane pod rozwijanym nagłówkiem
+  „⚙ Ustawienia wspólne” – zwinięte, dopóki ich nie rozwiniesz; przeglądarka pamięta, czy są otwarte.
+
 ## 1.24.1
 
 - Napisz: zachęta także w czasie ankiety – przełącznik w sekcji „Ankieta” (domyślnie włączony); na panelu po

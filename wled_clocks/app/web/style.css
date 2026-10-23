@@ -157,7 +157,14 @@ main > *, .cols > * { min-width: 0; }
 .chars .char canvas { width: 90px; height: 36px; border-radius: 3px; }
 
 .settings { display: grid; gap: 2px; }
-.card-head.common { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+details.common { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+details.common > summary { list-style: none; cursor: pointer; user-select: none; margin-bottom: 0; }
+details.common > summary::-webkit-details-marker { display: none; }
+details.common > summary h2 { margin: 0; }
+details.common > summary:hover h2 { color: var(--accent, var(--text)); }
+details.common .arrow { display: inline-block; width: 1em; transition: transform .15s; }
+details.common[open] .arrow { transform: rotate(90deg); }
+details.common[open] > summary { margin-bottom: 8px; }
 #fx-none { margin: 0; }
 .srow {
   display: grid;

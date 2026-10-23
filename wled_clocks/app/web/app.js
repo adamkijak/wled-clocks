@@ -129,6 +129,11 @@ const wledGroup = (fx) => WLED_GROUPS[fx.tags.includes("♪") ? 0 : fx.tags.incl
 let collapsed = {};
 try { collapsed = JSON.parse(localStorage.getItem("wc-collapsed")) || {}; } catch (e) { /* bez pamięci */ }
 const isCollapsed = (g) => (g in collapsed ? collapsed[g] : g !== "Na start");
+// ustawienia wspólne: zwinięte, dopóki ich nie rozwiniesz (przeglądarka pamięta)
+try { $("#common").open = localStorage.getItem("wc-common") === "1"; } catch (e) { /* bez pamięci */ }
+$("#common").addEventListener("toggle", () => {
+  try { localStorage.setItem("wc-common", $("#common").open ? "1" : "0"); } catch (e) { /* bez pamięci */ }
+});
 let anchor = null; // kliknięty nagłówek kategorii: po przebudowie listy zostaje w tym samym miejscu ekranu
 function setCollapsed(g, v, h) {
   collapsed[g] = v;
