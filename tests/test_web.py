@@ -49,7 +49,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ludzik_first(self):
         self.assertEqual(wc.Engine.NAMES[:3], ["ludzik", "zegar", "napisz"])
-        self.assertEqual(len(wc.CLOCKS), 143)
+        self.assertEqual(len(wc.CLOCKS), 145)
 
     def test_ludzik_rides(self):
         old = dict(wc.LUDZIK["lvl"]), wc.LUDZIK["freq"]
@@ -855,6 +855,61 @@ class InboxTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             wc.web_cmd(e, {"op": "inbox", "act": "poll", "q": "?", "opts": ["jedna"]})
         json.dumps(self.ib.snapshot())
+
+    def test_daily_and_drawing(self):
+        """Daily (lista, skróty, odhaczanie ze skrzynki i z panelu, następna osoba) i wspólny rysunek (piksel, kreska,
+        gumka, siatka na stronie) – polecenia działają tylko, gdy ich efekt jest na panelu."""
+        e = wc.Engine(args(mode="daily"), {})
+        old_d, old_px = dict(wc.DAILY), dict(wc.DRAW["px"])
+        try:
+            self.ib.proxy = True
+            self.ib.open()
+            code = self.ib.code
+            wc.web_cmd(e, {"op": "daily", "act": "set", "v": "Marta MAR\nBartek\nBarbara\n\nŁukasz ŁK"})()
+            self.assertEqual([p["id"] for p in wc.DAILY["people"]], ["MAR", "BAR", "BA2", "ŁK"])
+            self.assertEqual(wc.DAILY["cur"], 0)
+            wc.DAILY["seen"] = 0
+            self.assertEqual(self.send(code, "x mar", ip="5.0.0.1")[0], 202)           # daily nie na panelu: wiadomość
+            wc.DAILY["seen"] = time.time()
+            self.assertEqual(self.send(code, "x mar", ip="5.0.0.2")[0], 200)
+            self.assertEqual((wc.DAILY["people"][0]["done"], wc.DAILY["cur"]), (True, 1))  # mówi następna osoba
+            self.assertEqual(self.send(code, "teraz łk", ip="5.0.0.3")[0], 200)
+            self.assertEqual(wc.DAILY["cur"], 3)
+            self.assertEqual(self.send(code, "x", ip="5.0.0.4")[0], 200)              # samo x: mówca
+            self.assertTrue(wc.DAILY["people"][3]["done"])
+            self.assertEqual(self.send(code, "x kto", ip="5.0.0.5")[0], 422)
+            self.assertEqual(self.send(code, "-x MAR", ip="5.0.0.6")[0], 200)
+            self.assertFalse(wc.DAILY["people"][0]["done"])
+            self.assertIn('value="x BAR"', self.send(code)[1])                         # przyciski na stronie
+            wc.web_cmd(e, {"op": "daily", "act": "next"})()
+            wc.web_cmd(e, {"op": "daily", "act": "reset"})()
+            self.assertFalse(any(p["done"] for p in wc.DAILY["people"]))
+            with self.assertRaises(ValueError):
+                wc.web_cmd(e, {"op": "daily", "act": "done", "i": 99})
+            f = wc.Frame()
+            wc.CLOCKS["daily"]().draw(f, wc.dtm.datetime.now().astimezone(), 0.0, 0.05)
+            self.assertTrue(any(c[0] > 150 and c[0] > c[1] > 90 and c[2] < 60 for row in f.px for c in row))  # mówca
+            wc.DRAW.update(px={}, seen=time.time())                                   # rysunek na panelu
+            self.assertEqual(self.send(code, "45 3 czerwony", ip="6.0.0.1")[0], 200)
+            self.assertEqual(wc.DRAW["px"][(44, 2)], wc.MSG_COLORS["czerwony"])
+            self.assertEqual(self.send(code, "10-12 12 blue", ip="6.0.0.2")[0], 200)
+            self.assertEqual({k for k in wc.DRAW["px"] if k[1] == 11}, {(9, 11), (10, 11), (11, 11)})
+            self.assertEqual(self.send(code, "45 3 gumka", ip="6.0.0.3")[0], 200)
+            self.assertNotIn((44, 2), wc.DRAW["px"])
+            self.assertEqual(self.send(code, f"{wc.W + 1} 1 red", ip="6.0.0.4")[0], 422)
+            self.assertEqual(self.send(code, "1 1 nijaki", ip="6.0.0.5")[0], 422)
+            page = self.send(code + "?c=blue")[1]
+            self.assertIn('value="1 1 blue"', page)                                  # siatka w wybranym kolorze
+            self.assertEqual(page.count('name="message" value="'), wc.W * wc.H + len(wc.DAILY["people"]) + 4)  # + reakcje
+            wc.web_cmd(e, {"op": "draw", "act": "px", "x": 0, "y": 0, "c": "#00ff00"})()
+            self.assertEqual(wc.draw_hex()[:6], "00ff00")
+            with self.assertRaises(ValueError):
+                wc.web_cmd(e, {"op": "draw", "act": "px", "x": wc.W, "y": 0, "c": ""})
+            wc.web_cmd(e, {"op": "draw", "act": "clear"})()
+            self.assertEqual(wc.DRAW["px"], {})
+        finally:
+            wc.DAILY.update(old_d)
+            wc.DRAW.update(px=old_px, seen=0)
 
     def frame(self, fx, t):
         f = wc.Frame()

@@ -337,6 +337,7 @@ NARROW_TXT = _rows({  # 3x5 (M, N, W szersze) – długie nazwy dni i daty na w�
     "0": "###|#.#|#.#|#.#|###", "1": ".#.|##.|.#.|.#.|###", "2": "##.|..#|.#.|#..|###", "3": "##.|..#|.#.|..#|##.",
     "4": "#.#|#.#|###|..#|..#", "5": "###|#..|##.|..#|##.", "6": ".##|#..|###|#.#|###", "7": "###|..#|.#.|.#.|.#.",
     "8": "###|#.#|###|#.#|###", "9": "###|#.#|###|..#|##.", ".": ".|.|.|.|#", " ": "..|..|..|..|..",
+    ":": ".|#|.|#|.", "-": "...|...|###|...|...",
 })
 SMALL_BOLD = {k: _thick(g) for k, g in SMALL.items() if k in "0123456789. "}  # pogrubiona data przy „gruba”
 # dzień tygodnia i data w stylu czcionki godziny: nazwa -> (czcionki dnia, czcionki daty), od najszerszej –
@@ -6735,6 +6736,200 @@ class Inbound(Clock):
             scroll_segs(f, [(addr, (80, 200, 255))], t, 30, 0, self.X0, gap=40)
 
 
+# ================================================================ daily i wspólny rysunek (efekty „daily” i „rysunek”)
+# stan zmieniają panel WWW i skrzynka (wątki serwera), czyta efekt – stąd zamek
+DAILY = {"people": [], "cur": None, "auto": True, "seen": 0.0}  # people: [{"name", "id", "done"}]; cur: kto mówi
+DAILY_MAX = 16
+DRAW = {"px": {}, "at": {}, "seen": 0.0}  # px: (x, y) -> (r, g, b); at: kiedy narysowany (błysk); seen: efekt na panelu
+DRAW_ERASE = {"czarny", "black", "off", "gumka", "erase", "x"}
+DRAW_RE = re.compile(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?\s*[ ,;]\s*(\d{1,2})(?:\s+(\S+))?$")
+DAILY_RE = re.compile(r"^(-x|x|undo|teraz|now)(?:\s+(\S+))?$", re.I)
+SHARED_LOCK = threading.Lock()
+
+
+def on_panel(state):
+    """Czy efekt jest teraz na panelu (rysował w ostatnich sekundach) – dopiero wtedy przyjmuje polecenia."""
+    return time.time() - state["seen"] < 15
+
+
+def daily_parse(text):
+    """Lista osób z tekstu: wiersz „Marta MAR” (skrót 2–3 znaki na końcu) albo samo „Marta” (skrót z imienia)."""
+    out, ids = [], set()
+    for line in text.splitlines():
+        words = msg_clean(line).split()
+        if not words:
+            continue
+        if len(words) > 1 and 2 <= len(words[-1]) <= 3:
+            name, pid = " ".join(words[:-1]), words[-1].upper()
+        else:
+            name = " ".join(words)
+            pid = msg_fold(name).replace(" ", "")[:3].upper() or "?"
+        base, k = pid, 1
+        while pid in ids:  # ten sam skrót: druga litera zamieniona na kolejną z imienia albo cyfrę
+            k += 1
+            pid = (base[:2] + str(k))[:3]
+        ids.add(pid)
+        out.append({"name": name[:30], "id": pid[:3], "done": False})
+    return out[:DAILY_MAX]
+
+
+def daily_set(text):
+    old = {p["name"]: p["done"] for p in DAILY["people"]}
+    with SHARED_LOCK:
+        DAILY["people"] = [dict(p, done=old.get(p["name"], False)) for p in daily_parse(text)]
+        DAILY["cur"] = daily_next(-1)
+
+
+def daily_next(after):
+    """Pierwsza osoba po after, która jeszcze nie mówiła (od początku listy w kółko) albo None."""
+    ppl = DAILY["people"]
+    for k in range(1, len(ppl) + 1):
+        i = (after + k) % len(ppl)
+        if not ppl[i]["done"]:
+            return i
+    return None
+
+
+def daily_find(key):
+    """Numer osoby po skrócie albo imieniu (bez wielkości liter i ogonków) albo None."""
+    k = msg_fold(key)
+    return next((i for i, p in enumerate(DAILY["people"]) if k in (msg_fold(p["id"]), msg_fold(p["name"]))), None)
+
+
+def daily_act(act, i=None):
+    """done / undo / now / next / reset / auto – z panelu WWW albo ze skrzynki."""
+    with SHARED_LOCK:
+        ppl = DAILY["people"]
+        if act == "reset":
+            for p in ppl:
+                p["done"] = False
+            DAILY["cur"] = 0 if ppl else None
+        elif act == "auto":
+            DAILY["auto"] = not DAILY["auto"]
+        elif act == "next":  # mówca odhaczony, podświetla się kolejna osoba
+            if DAILY["cur"] is not None:
+                ppl[DAILY["cur"]]["done"] = True
+            DAILY["cur"] = daily_next(DAILY["cur"] if DAILY["cur"] is not None else -1)
+        elif i is not None and 0 <= i < len(ppl):
+            if act == "now":
+                DAILY["cur"] = i
+            elif act == "done":
+                ppl[i]["done"] = True
+                if DAILY["auto"] and DAILY["cur"] in (i, None):
+                    DAILY["cur"] = daily_next(i)
+                elif DAILY["cur"] == i:
+                    DAILY["cur"] = None
+            elif act == "undo":
+                ppl[i]["done"] = False
+
+
+def draw_color(name):
+    """Kolor pędzla z nazwy (jak w wiadomościach, tęcza = losowy) -> (r, g, b), None = gumka, False = nieznany."""
+    k = msg_fold(name or "bialy")
+    if k in DRAW_ERASE:
+        return None
+    if k in MSG_COLORS:
+        return MSG_COLORS[k] or hsv(random.random(), 0.9, 1)
+    rgb = eye_rgb(name if name.startswith("#") else "#" + name)
+    return rgb if rgb else False
+
+
+def draw_put(x0, x1, y, col):
+    """Piksele od x0 do x1 w wierszu y (0..W-1, 0..H-1), col None = gumka."""
+    now = time.time()
+    with SHARED_LOCK:
+        for x in range(min(x0, x1), max(x0, x1) + 1):
+            if col is None:
+                DRAW["px"].pop((x, y), None)
+            else:
+                DRAW["px"][(x, y)] = tuple(int(v) for v in col)
+                DRAW["at"][(x, y)] = now
+
+
+def draw_hex():
+    """Rysunek jako napis: W*H pól po 6 znaków hex (puste „------”) – do panelu WWW i zapisu."""
+    px = DRAW["px"]
+    return "".join("%02x%02x%02x" % px[(x, y)] if (x, y) in px else "------" for y in range(H) for x in range(W))
+
+
+def draw_load(hexs):
+    with SHARED_LOCK:
+        DRAW["px"] = {}
+        for k in range(min(len(hexs) // 6, W * H)):
+            c = hexs[k * 6:k * 6 + 6]
+            if re.fullmatch(r"[0-9a-f]{6}", c):
+                DRAW["px"][(k % W, k // W)] = tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
+
+
+@reg("daily")
+class Daily(Clock):
+    """Daily: lista osób (skróty 2–3 litery) w dwóch rzędach – kto już mówił, jest przekreślony na zielono, kto mówi
+    teraz – świeci na złoto ze strzałką. Osoby i odhaczanie w panelu WWW albo przez skrzynkę „napisz” („x mar”,
+    „teraz mar”). Gdy skrzynka jest otwarta, co pół minuty na chwilę jej adres."""
+
+    def draw(self, f, now, t, dt):
+        if not getattr(THUMB, "on", False):
+            DAILY["seen"] = time.time()
+        ppl, cur = list(DAILY["people"]), DAILY["cur"]
+        if not ppl:
+            scroll_segs(f, [("DAILY", (255, 190, 30)), ("– dodaj osoby w ustawieniach efektu", (200, 200, 215))], t, 30)
+            return
+        addr = INBOX.address().split("://", 1)[-1] if INBOX.is_open() and INBOX.address() else ""
+        if addr and t % 34 > 30:  # adres skrzynki – żeby było wiadomo, gdzie odhaczać
+            sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
+            f.text(addr, Inbound.X0 + max(0, (W - Inbound.X0 - text_w(addr, TXT)) // 2), 0, (80, 200, 255), TXT)
+            return
+        if all(p["done"] for p in ppl) and t % 10 > 6:  # wszyscy byli
+            msg = "Wszyscy byli!"
+            f.text(msg, (W - text_w(msg, TXT)) // 2, 0, hsv(t * 0.3, 0.6, 1), TXT)
+            return
+        rows = 1 if len(ppl) <= 4 else 2
+        cols = -(-len(ppl) // rows)
+        slot = W // cols
+        font = SMALL if max(text_w(p["id"], SMALL) for p in ppl) + 6 <= slot else NARROW_TXT
+        for i, p in enumerate(ppl):
+            w = text_w(p["id"], font)
+            x = (i % cols) * slot + (slot - w) // 2 + 2
+            y = 3 if rows == 1 else (i // cols) * 6
+            if i == cur:  # mówi: złoty, ze strzałką, lekko pulsuje
+                c = mul((255, 190, 30), 0.75 + 0.25 * math.sin(t * 4))
+                f.text(p["id"], x, y, c, font)
+                for dy in range(5):
+                    f.rect(x - 4, y + dy, x - 4 + (2 - abs(dy - 2)) // 2, y + dy, c)
+            elif p["done"]:  # już był: przygaszony i przekreślony
+                f.text(p["id"], x, y, (70, 95, 70), font)
+                f.rect(x - 1, y + 2, x + w, y + 2, (50, 215, 90))
+            else:
+                f.text(p["id"], x, y, (235, 235, 245), font)
+
+
+@reg("rysunek")
+class Drawing(Clock):
+    """Wspólny rysunek: widzowie zapalają piksele panelu przez skrzynkę „napisz” – klikając siatkę na swojej stronie
+    albo wysyłając „45 3 czerwony” (kolumna 1–120, wiersz 1–12, kolor; „45-60 3 niebieski” – kreska, „gumka”
+    gasi). Nowy piksel błyska na biało. Pusty panel zaprasza do rysowania; co jakiś czas na chwilę adres."""
+
+    def draw(self, f, now, t, dt):
+        if not getattr(THUMB, "on", False):
+            DRAW["seen"] = time.time()
+        px, at, wall = dict(DRAW["px"]), DRAW["at"], time.time()
+        addr = INBOX.address().split("://", 1)[-1] if INBOX.is_open() and INBOX.address() else ""
+        if not px:
+            segs = [("Rysujcie razem! ", (255, 190, 30))]
+            if addr:
+                segs.append((addr, (80, 200, 255)))
+            segs.append(("  np. 45 3 czerwony", (200, 200, 215)))
+            scroll_segs(f, segs, t, 30, gap=30)
+            return
+        for (x, y), c in px.items():
+            f.set(x, y, (255, 255, 255) if wall - at.get((x, y), 0) < 0.35 else c)
+        if addr and t % 45 > 40:  # adres na chwilę, w ramce u dołu
+            w = text_w(addr, NARROW_TXT)
+            x0 = W - w - 2
+            f.rect(x0 - 1, 5, W - 1, 11, (0, 0, 0))
+            f.text(addr, x0, 6, (80, 200, 255), NARROW_TXT)
+
+
 # ================================================================ postacie i zwierzęta (bez zegara)
 CAT = {
     "idzie1": ["............O.O.", "O...........OOO.", "O...........OEON", ".O.SOSOSOSOOOOO.", "..OOOOOOOOOOOO..",
@@ -8545,7 +8740,7 @@ class DarkEyes(Eyes):
 
 
 CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lista, numery i cykl
-    ("Na start", "⭐", "ludzik zegar napisz"),
+    ("Na start", "⭐", "ludzik zegar napisz daily rysunek"),
     ("Tarcze i wyświetlacze", "🕰", "analogowy nixie segmenty klapki licznik wahadlo klepsydra maszyna pismo kreskowy "
                                    "neon radar obwod kalendarz postep lustro cien"),
     ("Inne zapisy czasu", "🔢", "binarny hex kolor dziesietny beaty unix rzymski morse slownie domino strefy odliczanie"),
@@ -9045,6 +9240,8 @@ class Engine:
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "msg_filters": INBOX.filters, "msg_words": INBOX.words, "msg_hint": INBOX.hint,
                "msg_hint_every": INBOX.hint_every, "msg_extras": INBOX.extras, "msg_poll_hint": INBOX.poll_hint,
+               "daily": {"people": DAILY["people"], "cur": DAILY["cur"], "auto": DAILY["auto"]},
+               "rysunek": draw_hex() if DRAW["px"] else "",
                "msg_poll": {"q": INBOX.poll["q"], "opts": INBOX.poll["opts"]} if INBOX.poll else None,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
@@ -9407,6 +9604,8 @@ class Engine:
             "ludzik": {a: ludzik_lvl(a) for a in LUDZIK_ACTS}, "ludzik_len": {a: ludzik_len(a) for a in LUDZIK_TIMED},
             "ludzik_next": LUDZIK["next"], "ludzik_status": dict(LUDZIK_STATUS),
             "inbox": INBOX.snapshot(),
+            "daily": {"people": [dict(p) for p in DAILY["people"]], "cur": DAILY["cur"], "auto": DAILY["auto"]},
+            "draw": draw_hex() if "rysunek" in self.setting_fx() else None,
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
                       "psu": POWER["psu"], "auto": POWER["auto"]},
             "bri": PANEL["bri"], "levels": panel_levels(),
@@ -9895,6 +10094,29 @@ def web_cmd(e, c):
                 raise ValueError("zły kolor")
             v = [int(m[1][k:k + 2], 16) for k in (0, 2, 4)]
         return lambda: e.wled_set(key, v)
+    if op == "daily":
+        act = c.get("act")
+        if act == "set":
+            text = str(c.get("v", ""))[:2000]
+            return lambda: daily_set(text)
+        if act in ("done", "undo", "now"):
+            i = int(c.get("i", -1))
+            if not 0 <= i < len(DAILY["people"]):
+                raise ValueError("daily: nie ma takiej osoby")
+            return lambda: daily_act(act, i)
+        if act in ("next", "reset", "auto"):
+            return lambda: daily_act(act)
+        raise ValueError(f"złe polecenie daily {act!r}")
+    if op == "draw":
+        act = c.get("act")
+        if act == "clear":
+            return lambda: DRAW.update(px={}, at={})
+        if act == "px":
+            x, y, h = int(c.get("x", -1)), int(c.get("y", -1)), str(c.get("c", ""))
+            if not (0 <= x < W and 0 <= y < H) or (h and not eye_rgb(h)):
+                raise ValueError("rysunek: x 0..W-1, y 0..11, kolor #rrggbb albo pusty (gumka)")
+            return lambda: draw_put(x, x, y, eye_rgb(h))
+        raise ValueError(f"złe polecenie rysunku {act!r}")
     if op == "inbox":
         act = c.get("act")
         if act == "open":
@@ -10140,7 +10362,8 @@ MSG_BAD = ["kurw", "chuj", "huj", "pierdol", "jeba", "jebi", "jebn", "pizd", "cw
            "fuck", "shit", "cunt", "bitch", "nigg", "fag"]
 MSG_URL = re.compile(r"https?:|www\.|\b[a-z0-9-]+\.(pl|com|net|org|io|ru|xyz|info|me|eu|ly|gg|tk|co)\b", re.I)
 _LEET = str.maketrans("013457@$!", "oieastasi")
-MSG_FX_GAP, MSG_FX_ALL = 2, 60  # głosy i reakcje: z jednego adresu co 2 s; bez adresu wszyscy razem 60/min
+MSG_FX_GAP, MSG_FX_ALL = 2, 60  # głosy, reakcje, daily: z jednego adresu co 2 s; bez adresu wszyscy razem 60/min
+MSG_DRAW_GAP, MSG_DRAW_ALL = 0.2, 900  # rysunek: piksel co 0,2 s z jednego adresu; bez adresu razem 900/min
 # reakcje: wiadomość -> animacja na panelu (bez akceptacji, nic nie wypisuje)
 MSG_REACT = {"<3": "serca", "!serce": "serca", "!heart": "serca", "!brawo": "brawo", "!bravo": "brawo",
              "!clap": "brawo", "!konfetti": "konfetti", "!confetti": "konfetti", "!fajerwerki": "fajerwerki",
@@ -10157,11 +10380,50 @@ MSG_STYLE = """body{font:16px/1.5 system-ui,sans-serif;max-width:520px;margin:32
 form{display:flex;gap:8px;margin:0}input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #444;
 background:#222;color:#eee}input{flex:1;min-width:0}button{cursor:pointer}p,li{color:#9a9ca3}.m{color:#ffd54f}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}h2{font-size:18px;margin:24px 0 4px}code{color:#9cf}
-ul{padding-left:20px}"""
+ul{padding-left:20px}.gw{overflow-x:auto;padding-bottom:6px}.grid{display:grid;gap:1px;background:#333;
+width:max-content}.grid button{width:9px;height:9px;padding:0;border:0;border-radius:0;background:#000}
+.grid button:hover{outline:1px solid #fff}.sw{width:28px;height:28px;border-radius:6px;border:2px solid #444}
+.sw.on{border-color:#fff}.daily{display:grid;gap:6px}.daily div{display:flex;gap:10px;align-items:center}
+.daily button{padding:6px 10px}.done{text-decoration:line-through;color:#6c6}"""
 
 
-def msg_page(msg):
-    """Strona do pisania: pole, przyciski reakcji i głosowania, krótka instrukcja (tylko włączone dodatki)."""
+DRAW_PALETTE = [("red", "#ff2d23"), ("orange", "#ff8200"), ("yellow", "#ffe100"), ("green", "#3cf046"),
+                ("cyan", "#00d2ff"), ("blue", "#326eff"), ("purple", "#aa46ff"), ("pink", "#ff50b4"),
+                ("white", "#ffffff"), ("erase", "#000000")]
+
+
+def msg_grid(color):
+    """Siatka W x H przycisków – każdy maluje swój piksel wybranym kolorem; tło = to, co już jest na panelu."""
+    hexs = dict(DRAW_PALETTE)
+    color = color if color in hexs else "red"
+    pal = "".join(f'<a href="?c={n}#g" class="sw{" on" if n == color else ""}" style="background:{h}" title="{n}">'
+                  f'</a>' for n, h in DRAW_PALETTE)
+    px = dict(DRAW["px"])
+    cells = "".join(f'<button name="message" value="{x + 1} {y + 1} {color}" title="{x + 1}, {y + 1}"'
+                    + (f' style="background:#%02x%02x%02x"' % px[(x, y)] if (x, y) in px else "") + "></button>"
+                    for y in range(H) for x in range(W))
+    return (f'<h2 id="g">Draw together</h2><p>Pick a colour, tap pixels. Or send <code>45 3 red</code> (column, row, '
+            f'colour; <code>45-60 3 blue</code> draws a line, <code>erase</code> clears).</p><div class="row">{pal}</div>'
+            f'<div class="gw"><form method="post" action="?c={color}#g" class="grid" '
+            f'style="grid-template-columns:repeat({W},9px)">{cells}</form></div>')
+
+
+def msg_daily():
+    """Daily: przycisk przy każdej osobie – odhacz / cofnij, kto mówi."""
+    e = html.escape
+    rows = []
+    for i, p in enumerate(DAILY["people"]):
+        now = " ← speaking" if i == DAILY["cur"] else ""
+        act, label = ("-x", "↺ undo") if p["done"] else ("x", "✓ done")
+        rows.append(f'<form method="post"><button name="message" value="{act} {e(p["id"])}">{label}</button></form>'
+                    f'<span class="{"done" if p["done"] else ""}">{e(p["id"])} – {e(p["name"])}{now}</span>')
+    return ('<h2>Daily</h2><p>Mark who already had their turn – or send <code>x mar</code> (code from the panel).</p>'
+            '<div class="daily">' + "".join(f"<div>{r}</div>" for r in rows) + "</div>")
+
+
+def msg_page(msg, query=""):
+    """Strona do pisania: pole, przyciski reakcji i głosowania, daily, siatka do rysowania, krótka instrukcja
+    (tylko włączone dodatki i efekty, które są teraz na panelu)."""
     e = html.escape
     ex, poll = INBOX.extras, INBOX.poll
     btn = lambda value, label: (f'<form method="post"><button name="message" value="{e(value)}">{e(label)}</button>'
@@ -10172,6 +10434,10 @@ def msg_page(msg):
            f'<form method="post" accept-charset="utf-8"><input name="message" maxlength="{MSG_MAX}" required '
            f'autofocus placeholder="Your message" aria-label="Your message"><button>Send</button></form>'
            f'<p>Up to {MSG_MAX} characters. Messages show up on the panel one by one.</p>']
+    if DAILY["people"] and on_panel(DAILY):
+        out.append(msg_daily())
+    if on_panel(DRAW):
+        out.append(msg_grid((urllib.parse.parse_qs(query).get("c") or ["red"])[0]))
     if poll and poll["on"]:
         out.append(f'<h2>Poll: {e(poll["q"])}</h2><p>Tap an answer – or send just its letter.</p><div class="row">')
         out += [btn(chr(65 + i), f"{chr(65 + i)}: {o}") for i, o in enumerate(poll["opts"])]
@@ -10304,7 +10570,7 @@ class MsgHandler(httpd.BaseHTTPRequestHandler):
 
     def answer(self, code, text, page=False):
         if page:
-            body = msg_page(text).encode("utf-8")
+            body = msg_page(text, urllib.parse.urlsplit(self.path).query).encode("utf-8")
             ctype = "text/html; charset=utf-8"
         else:
             body, ctype = (text + "\n").encode("utf-8"), "text/plain; charset=utf-8"
@@ -10380,7 +10646,8 @@ class Inbox:
         self.poll_hint = True  # zachęta także w czasie ankiety (po adresie, w każdym obiegu)
         self.poll = None    # {"q", "opts", "votes", "on", "voters": {ip: nr}} – ankieta
         self.events = []    # reakcje dla efektu: ("react", rodzaj)
-        self.fx_all, self.fx_hits = [], {}  # lżejsze limity głosów i reakcji
+        self.fx_all, self.fx_hits = [], {}  # lżejsze limity głosów, reakcji i daily
+        self.draw_all, self.draw_hits = [], {}  # jeszcze lżejsze – rysunek
         self.until, self.opened, self.code, self.srv = 0.0, 0.0, "", None
         self.pending, self.queue, self.shown = [], [], []
         self.hits, self.misses, self.blocked = {}, {}, set()
@@ -10585,8 +10852,15 @@ class Inbox:
             return 202, "thanks! your message is waiting for approval"
 
     def special(self, text):
-        """Głos w ankiecie albo reakcja -> (rodzaj, wartość) albo None (zwykła wiadomość)."""
+        """Głos w ankiecie, odhaczenie na daily, piksel rysunku albo reakcja -> (rodzaj, wartość) albo None (zwykła
+        wiadomość). Daily i rysunek tylko wtedy, gdy ich efekt jest na panelu."""
         low = text.strip().casefold()
+        m = DAILY_RE.match(text.strip())
+        if m and DAILY["people"] and on_panel(DAILY):
+            return "daily", (m[1].casefold(), m[2])
+        m = DRAW_RE.match(text.strip())
+        if m and on_panel(DRAW):
+            return "draw", m
         p = self.poll
         if p and p["on"]:
             for i, o in enumerate(p["opts"]):
@@ -10597,20 +10871,33 @@ class Inbox:
         return None
 
     def do_special(self, special, ip, now):
-        """Głos albo reakcja: bez akceptacji (nic obcego nie trafia na panel), z lżejszym limitem. Pod zamkiem."""
-        if ip:
-            last = self.fx_hits.get(ip, 0)
-            if now - last < MSG_FX_GAP:
-                return 429, f"too fast – try again in {int(MSG_FX_GAP - (now - last)) + 1} s"
-            if len(self.fx_hits) > 5000:
-                self.fx_hits = {k: v for k, v in self.fx_hits.items() if now - v < 60}
-            self.fx_hits[ip] = now
-        else:
-            self.fx_all = [h for h in self.fx_all if now - h < 60]
-            if len(self.fx_all) >= MSG_FX_ALL:
-                return 429, "too many right now – try again in a moment"
-            self.fx_all.append(now)
+        """Głos, daily, piksel albo reakcja: bez akceptacji (nic obcego nie trafia na panel), z lżejszym limitem.
+        Pod zamkiem."""
         kind, val = special
+        draw = kind == "draw"
+        gap, cap = (MSG_DRAW_GAP, MSG_DRAW_ALL) if draw else (MSG_FX_GAP, MSG_FX_ALL)
+        hits = self.draw_hits if draw else self.fx_hits
+        if ip:
+            last = hits.get(ip, 0)
+            if now - last < gap:
+                return 429, f"too fast – try again in {gap - (now - last):.1f} s"
+            if len(hits) > 5000:
+                hits = {k: v for k, v in hits.items() if now - v < 60}
+                if draw:
+                    self.draw_hits = hits
+                else:
+                    self.fx_hits = hits
+            hits[ip] = now
+        else:
+            every = self.draw_all if draw else self.fx_all
+            every[:] = [h for h in every if now - h < 60]
+            if len(every) >= cap:
+                return 429, "too many right now – try again in a moment"
+            every.append(now)
+        if kind == "daily":
+            return self.do_daily(*val)
+        if draw:
+            return self.do_draw(val)
         if kind == "vote":
             p = self.poll
             if ip:  # znany nadawca: jeden głos, drugi raz zmienia głos
@@ -10624,6 +10911,34 @@ class Inbox:
             return 503, "busy – try again in a moment"
         self.events.append((kind, val))
         return 200, "thanks!"
+
+    @staticmethod
+    def do_daily(cmd, key):
+        """x / -x / undo / teraz / now [skrót] – samo „x” odhacza tego, kto mówi."""
+        i = DAILY["cur"] if key is None else daily_find(key)
+        if i is None:
+            return 422, "who? use the 2–3 letter code from the panel, e.g. x mar"
+        name = DAILY["people"][i]["name"]
+        if cmd == "x":
+            daily_act("done", i)
+            return 200, f"done: {name}"
+        if cmd in ("-x", "undo"):
+            daily_act("undo", i)
+            return 200, f"back on the list: {name}"
+        daily_act("now", i)
+        return 200, f"now speaking: {name}"
+
+    @staticmethod
+    def do_draw(m):
+        """„45 3 czerwony” / „45-60 3 niebieski” / „45 3 gumka” – kolumny 1..W, wiersze 1..12."""
+        x0, x1, y = int(m[1]), int(m[2] or m[1]), int(m[3])
+        col = draw_color(m[4] or "")
+        if not (1 <= x0 <= W and 1 <= x1 <= W and 1 <= y <= H):
+            return 422, f"column 1–{W}, row 1–{H}"
+        if col is False:
+            return 422, "unknown colour – e.g. red, green, blue, yellow, pink, white, rainbow or erase"
+        draw_put(x0 - 1, x1 - 1, y - 1, col)
+        return 200, "painted"
 
     def take_events(self):
         """Reakcje dla efektu „napisz” (podgląd na liście ich nie zabiera)."""
@@ -10913,6 +11228,16 @@ def main():
         if k in INBOX.extras:
             INBOX.extras[k] = bool(v)
     INBOX.poll_hint = bool(cfg.get("msg_poll_hint", True))
+    dl = cfg.get("daily") or {}
+    if isinstance(dl.get("people"), list):
+        ppl = [p for p in dl["people"] if isinstance(p, dict) and isinstance(p.get("name"), str)][:DAILY_MAX]
+        DAILY["people"] = [{"name": msg_clean(p["name"])[:30], "id": msg_clean(str(p.get("id", "")))[:3].upper() or "?",
+                            "done": bool(p.get("done"))} for p in ppl]
+        cur = dl.get("cur")
+        DAILY["cur"] = cur if isinstance(cur, int) and 0 <= cur < len(DAILY["people"]) else None
+        DAILY["auto"] = bool(dl.get("auto", True))
+    if isinstance(cfg.get("rysunek"), str):
+        draw_load(cfg["rysunek"])
     mp = cfg.get("msg_poll")
     if isinstance(mp, dict) and isinstance(mp.get("opts"), list) and len(mp["opts"]) >= 2:  # bez głosów, wyłączona
         INBOX.set_poll(msg_clean(str(mp.get("q", "")))[:MSG_MAX], [msg_clean(str(o))[:30] for o in mp["opts"][:4]])

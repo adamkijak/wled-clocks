@@ -1,6 +1,6 @@
 # WLED zegary
 
-143 zegary i efekty dla panelu WLED 120x12, wysyłanych protokołem DDP. Po starcie add-onu w pasku bocznym
+145 zegary i efekty dla panelu WLED 120x12, wysyłanych protokołem DDP. Po starcie add-onu w pasku bocznym
 Home Assistant pojawia się **WLED zegary**: podgląd panelu na żywo, lista efektów z wyszukiwarką, cykl, pauza
 i wszystkie ustawienia znane z TUI.
 
@@ -58,7 +58,15 @@ Zabezpieczenia:
   - **kolor** – `[czerwony] tekst` (zielony, niebieski, żółty, pomarańczowy, różowy, fioletowy, błękitny, złoty,
     tęcza; po angielsku też) i **emotki** `:) :( :D ;) :P :O <3` jako obrazki – w zwykłych wiadomościach, które
     dalej przechodzą przez filtry i akceptację.
-  - Głosy i reakcje mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę.
+  - **daily** (efekt „daily”) – lista osób na spotkanie (w ustawieniach efektu: jedna osoba w wierszu, skrót 2–3
+    litery); kto już mówił, jest przekreślony na zielono, kto mówi – świeci na złoto. Odhacza się w panelu WWW albo
+    z calla: `x mar`, `-x mar` (cofnij), `teraz mar`, samo `x` (mówca); po odhaczeniu mówcy podświetla się
+    następna osoba;
+  - **wspólny rysunek** (efekt „rysunek”) – widzowie klikają siatkę 120 × 12 na swojej stronie (z wyborem koloru)
+    albo wysyłają `45 3 czerwony` (kolumna, wiersz, kolor), `45-60 3 niebieski` (kreska), `45 3 gumka`; Ty
+    malujesz myszą w panelu WWW i czyścisz jednym przyciskiem.
+  - Polecenia daily i rysunku działają tylko, gdy ich efekt jest na panelu – inaczej to zwykłe wiadomości.
+  - Głosy, reakcje i daily mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę. Rysunek jeszcze lżejszy: piksel co 0,2 s, przez tunel razem 900 na minutę.
 - Dziennik dodatku zapisuje każdą wiadomość.
 - Przy wiadomości widać IP nadawcy i przybliżone miejsce (ipwho.is, dostaje tylko adres IP) – o ile IP jest znane:
   za tunelem bore nie jest, przy własnym porcie (i `--msg-proxy` za Cloudflare) tak.

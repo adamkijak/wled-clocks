@@ -65,6 +65,30 @@
       <div id="fx-settings" class="settings"></div>
       <div id="wled-settings" class="settings"></div>
       <p id="fx-none" class="muted">Ten efekt nie ma własnych ustawień.</p>
+      <div id="daily" class="daily" hidden>
+        <div class="card-head"><h3>Daily – osoby</h3><span id="daily-state" class="pill">…</span></div>
+        <textarea id="daily-text" rows="5" spellcheck="false" aria-label="Osoby na daily" placeholder="Marta MAR&#10;Bartek BAR&#10;Kuba"></textarea>
+        <div class="inbox-btns">
+          <button id="daily-save" class="small">Zapisz listę</button>
+          <span class="muted">jedna osoba w wierszu; skrót 2–3 znaki na końcu albo weźmie się z imienia</span>
+        </div>
+        <ul id="daily-list" class="daily-list"></ul>
+        <div class="inbox-btns">
+          <button id="daily-next" title="Mówca odhaczony, podświetla się następna osoba">✓ Następna osoba</button>
+          <button id="daily-reset" title="Wszyscy od nowa, na następne daily">Od nowa</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="daily-auto"> po odhaczeniu mówcy podświetl następną osobę</label>
+        <p class="muted">Z calla (przez skrzynkę, gdy jest otwarta): <code>x mar</code> odhacza, <code>-x mar</code> cofa,
+          <code>teraz mar</code> – mówi, samo <code>x</code> odhacza mówcę. Widzowie mają też przyciski na swojej stronie.</p>
+      </div>
+      <div id="draw" class="drawbox" hidden>
+        <div class="card-head"><h3>Wspólny rysunek</h3><button id="draw-clear" class="small">Wyczyść</button></div>
+        <div id="draw-pal" class="draw-pal"></div>
+        <canvas id="draw-cv" class="draw-cv" width="120" height="12" aria-label="Rysunek – kliknij albo przeciągnij, żeby malować"></canvas>
+        <p class="muted">Malujesz kliknięciem albo przeciągnięciem. Widzowie (przez skrzynkę, gdy jest otwarta) klikają
+          siatkę na swojej stronie albo wysyłają <code>45 3 czerwony</code> (kolumna, wiersz, kolor),
+          <code>45-60 3 niebieski</code> – kreska, <code>45 3 gumka</code> – gasi.</p>
+      </div>
       <div id="inbox" class="inbox" hidden>
         <div class="card-head">
           <h3>Skrzynka na wiadomości od widzów</h3>

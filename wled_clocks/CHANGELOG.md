@@ -1,5 +1,17 @@
 # Zmiany
 
+## 1.25.0
+
+2 nowe efekty w „Na start” (razem 145), sterowane z panelu WWW i z calla przez skrzynkę „napisz”:
+
+- **daily** – lista osób (do 16, skróty 2–3 litery) w dwóch rzędach: kto już mówił – przekreślony na zielono,
+  kto mówi – złoty ze strzałką. W panelu WWW: lista do wpisania, ✓ / ↺ / ▶ przy każdej osobie, „Następna osoba”,
+  „Od nowa”. Z calla: `x mar`, `-x mar`, `teraz mar`, samo `x`; widzowie mają przyciski na swojej stronie.
+- **rysunek** – wspólny rysunek piksel po pikselu: widzowie klikają siatkę 120 × 12 na swojej stronie (paleta,
+  gumka, siatka pokazuje to, co już jest na panelu) albo wysyłają `45 3 czerwony` / `45-60 3 niebieski`; w panelu
+  WWW malowanie myszą i „Wyczyść”. Nowy piksel błyska; rysunek zostaje po restarcie.
+- Skrzynka „napisz” widoczna też w ustawieniach tych dwóch efektów.
+
 ## 1.24.2
 
 - Panel WWW: ustawienia wspólne (jasność, płynność, szerokość, kolory diod…) schowane pod rozwijanym nagłówkiem

@@ -1,5 +1,5 @@
 name: WLED zegary
-version: "1.24.2"
+version: "1.25.0"
 slug: wled_clocks
 description: 104 zegary i efektów dla panelu WLED (DDP) ze sterowaniem w pasku bocznym Home Assistant
 arch:

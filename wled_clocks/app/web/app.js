@@ -497,7 +497,7 @@ function renderSettings() {
     if (r.hint) r.hint.classList.toggle("warn", s.hint.includes("skacze")); // ruch nie będzie płynny
   }
   $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : $("#now-name").textContent;
-  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown || fx.has("napisz");
+  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown || ["napisz", "daily", "rysunek"].some((n) => fx.has(n));
   if (!fx.has("ludzik")) $("#acts").hidden = true;
 }
 
@@ -644,6 +644,95 @@ function renderPoll(p) {
   });
 }
 
+// ------------------------------------------------------------ daily
+let dailyDirty = false;
+$("#daily-text").addEventListener("input", () => (dailyDirty = true));
+$("#daily-save").onclick = () => { dailyDirty = false; cmd("daily", { act: "set", v: $("#daily-text").value }); };
+$("#daily-next").onclick = () => cmd("daily", { act: "next" });
+$("#daily-reset").onclick = () => cmd("daily", { act: "reset" });
+$("#daily-auto").addEventListener("change", (e) => {
+  if (e.target.checked !== state.daily.auto) cmd("daily", { act: "auto" });
+});
+
+function renderDaily(d) {
+  $("#daily").hidden = !(state.setting_fx || []).includes("daily");
+  if ($("#daily").hidden) return;
+  const left = d.people.filter((p) => !p.done).length;
+  setText($("#daily-state"), d.people.length ? `zostało ${left} z ${d.people.length}` : "pusta lista");
+  $("#daily-auto").checked = d.auto;
+  if (!dailyDirty && document.activeElement !== $("#daily-text")) {
+    $("#daily-text").value = d.people.map((p) => `${p.name} ${p.id}`).join("\n");
+  }
+  const key = JSON.stringify(d);
+  if (key === renderDaily.key) return;
+  renderDaily.key = key;
+  const ul = $("#daily-list");
+  ul.textContent = "";
+  d.people.forEach((p, i) => {
+    const li = el("li", (p.done ? "done" : "") + (i === d.cur ? " cur" : ""));
+    const tick = el("button", "small", p.done ? "↺" : "✓");
+    tick.title = p.done ? "Cofnij – jeszcze nie mówił(a)" : "Odhacz – już mówił(a)";
+    tick.onclick = () => cmd("daily", { act: p.done ? "undo" : "done", i });
+    const now = el("button", "small", "▶");
+    now.title = "Teraz mówi";
+    now.onclick = () => cmd("daily", { act: "now", i });
+    const who = el("span", "who");
+    who.append(el("b", "", p.id), document.createTextNode(` ${p.name}${i === d.cur ? " – mówi" : ""}`));
+    li.append(tick, now, who);
+    ul.append(li);
+  });
+}
+
+// ------------------------------------------------------------ wspólny rysunek
+const DRAW_PAL = ["#ff2d23", "#ff8200", "#ffe100", "#3cf046", "#00d2ff", "#326eff", "#aa46ff", "#ff50b4", "#ffffff", ""];
+let brush = DRAW_PAL[0];
+DRAW_PAL.forEach((c) => {
+  const b = el("button");
+  b.style.background = c || "#000";
+  b.title = c ? c : "gumka";
+  if (!c) b.textContent = "⌫";
+  b.onclick = () => {
+    brush = c;
+    $("#draw-pal").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+  };
+  if (c === brush) b.classList.add("on");
+  $("#draw-pal").append(b);
+});
+$("#draw-clear").onclick = () => cmd("draw", { act: "clear" });
+let painting = false, lastPx = "";
+const paintAt = (e) => {
+  const cv = $("#draw-cv");
+  const r = cv.getBoundingClientRect();
+  const x = Math.floor(((e.clientX - r.left) / r.width) * cv.width);
+  const y = Math.floor(((e.clientY - r.top) / r.height) * cv.height);
+  if (x < 0 || y < 0 || x >= cv.width || y >= cv.height || `${x},${y}` === lastPx) return;
+  lastPx = `${x},${y}`;
+  const ctx = cv.getContext("2d"); // od razu u siebie, panel dogoni
+  ctx.fillStyle = brush || "#000";
+  ctx.fillRect(x, y, 1, 1);
+  cmd("draw", { act: "px", x, y, c: brush });
+};
+$("#draw-cv").addEventListener("pointerdown", (e) => { painting = true; lastPx = ""; paintAt(e); });
+$("#draw-cv").addEventListener("pointermove", (e) => painting && paintAt(e));
+addEventListener("pointerup", () => (painting = false));
+
+function renderDraw(hex) {
+  $("#draw").hidden = hex == null;
+  if (hex == null || painting || hex === renderDraw.key) return;
+  renderDraw.key = hex;
+  const cv = $("#draw-cv");
+  cv.width = state.w;
+  cv.style.aspectRatio = `${state.w} / 12`;
+  const ctx = cv.getContext("2d");
+  const img = ctx.createImageData(cv.width, cv.height);
+  for (let k = 0; k < cv.width * cv.height; k++) {
+    const h = hex.slice(k * 6, k * 6 + 6);
+    if (h === "------") continue;
+    img.data.set([parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 255], k * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 let wordsDirty = false; // niezapisane zmiany listy – odświeżenie stanu ich nie nadpisze
 $("#inbox-words").addEventListener("input", () => (wordsDirty = true));
 $("#inbox-words-save").onclick = () => { wordsDirty = false; inboxCmd("words", { v: $("#inbox-words").value }); };
@@ -684,7 +773,7 @@ function msgList(id, items, buttons) {
 let inboxKey = "";
 function renderInbox(ib) {
   // skrzynka to ustawienia efektu „napisz” – widać ją, gdy „napisz” jest na panelu
-  $("#inbox").hidden = !ib || !(state.setting_fx || []).includes("napisz");
+  $("#inbox").hidden = !ib || !(state.setting_fx || []).some((n) => ["napisz", "daily", "rysunek"].includes(n));
   if (!ib || $("#inbox").hidden) return;
   const st = $("#inbox-state");
   setText(st, !ib.enabled ? "wyłączona" : ib.open ? `otwarta do ${ib.until}` : "zamknięta");
@@ -798,6 +887,8 @@ function render(s) {
   renderActs();
   renderLudzikStatus();
   renderInbox(s.inbox);
+  renderDaily(s.daily);
+  renderDraw(s.draw);
 }
 
 // ------------------------------------------------------------ przyciski i klawisze (jak w TUI)

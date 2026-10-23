@@ -283,3 +283,21 @@ details.common[open] > summary { margin-bottom: 8px; }
   padding: 8px 14px;
   border-radius: 8px;
 }
+
+/* daily i wspólny rysunek */
+.daily, .drawbox { margin: 4px 0 12px; display: grid; gap: 6px; }
+.daily h3, .drawbox h3 { margin: 0; font-size: 14px; }
+.daily textarea { width: 100%; box-sizing: border-box; font: 13px/1.4 ui-monospace, monospace; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; resize: vertical; }
+.daily .chk { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.daily-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.daily-list li { display: flex; align-items: center; gap: 8px; }
+.daily-list .who { flex: 1; min-width: 0; }
+.daily-list .who b { display: inline-block; min-width: 3.2em; font-family: ui-monospace, monospace; }
+.daily-list li.done .who { text-decoration: line-through; color: var(--muted); }
+.daily-list li.cur .who { color: #ffbe1e; font-weight: 600; }
+.draw-pal { display: flex; flex-wrap: wrap; gap: 6px; }
+.draw-pal button { width: 28px; height: 28px; padding: 0; border-radius: 6px; border: 2px solid var(--line); }
+.draw-pal button.on { border-color: var(--text); }
+.draw-cv { width: 100%; image-rendering: pixelated; background: #000; border-radius: 6px; cursor: crosshair;
+  touch-action: none; aspect-ratio: 10 / 1; }
