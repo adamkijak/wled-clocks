@@ -1,5 +1,14 @@
 # Zmiany
 
+## 1.29.2
+
+- Rysunek: nowe piksele pojawiają się od razu w swoim kolorze, bez białego błysku.
+- Panel WWW: „Skrzynka na wiadomości od widzów” to teraz **Strona dla widzów** – wspólna dla napisz, daily
+  i rysunku: adres z przyciskami „Kopiuj” i nowym „↗ Otwórz” (strona widzów w nowej karcie), Otwórz dla widzów /
+  Zamknij, „Otwarcie i adres na panelu” (czas otwarcia; przy daily i rysunku – adres po ciszy). Wiadomości,
+  kolejka, zachęta, ankieta, akceptacja z filtrami i dodatki widać tylko przy „napisz” (przy daily i rysunku nic
+  nie dawały). Akceptacja przeniesiona do „Akceptacja i filtry”.
+
 ## 1.29.1
 
 - Rysunek: pusty panel pokazuje sam adres strony (np. bore.pub:41234), bez „Rysujcie razem!” i przykładu;

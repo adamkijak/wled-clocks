@@ -546,7 +546,7 @@ function renderLudzikStatus() {
 }
 $("#acts-close").onclick = () => ($("#acts").hidden = true);
 
-// ------------------------------------------------------------ wiadomości od widzów (efekt „napisz”)
+// ------------------------------------------------------------ strona dla widzów (napisz, daily, rysunek)
 const inboxCmd = (act, extra = {}) => cmd("inbox", { act, ...extra });
 $("#inbox-open").onclick = () => inboxCmd("open");
 $("#inbox-close").onclick = () => inboxCmd("close");
@@ -570,6 +570,10 @@ $("#inbox-copy").onclick = async () => {
     if (!document.execCommand("copy")) return toast("Zaznaczone – skopiuj Ctrl+C");
   }
   toast(`Skopiowano: ${text}`);
+};
+$("#inbox-visit").onclick = () => {
+  const a = $("#inbox-addr-text").textContent;
+  if (a) window.open(a.includes("://") ? a : `http://${a}`, "_blank", "noopener");
 };
 $("#inbox-clear").onclick = () => confirm("Usunąć wszystkie czekające wiadomości?") && inboxCmd("clear");
 // filtry: wł./wył. od razu; lista słów – przyciskiem; zachęta – po Enter albo wyjściu z pola
@@ -798,9 +802,13 @@ function msgList(id, items, buttons) {
 
 let inboxKey = "";
 function renderInbox(ib) {
-  // skrzynka to ustawienia efektu „napisz” – widać ją, gdy „napisz” jest na panelu
-  $("#inbox").hidden = !ib || !(state.setting_fx || []).some((n) => ["napisz", "daily", "rysunek"].includes(n));
+  // strona dla widzów: wspólna dla „napisz”, „daily” i „rysunek”; wiadomości, ankieta, zachęta i filtry – tylko „napisz”
+  const fx = state.setting_fx || [];
+  $("#inbox").hidden = !ib || !fx.some((n) => ["napisz", "daily", "rysunek"].includes(n));
   if (!ib || $("#inbox").hidden) return;
+  const napisz = fx.includes("napisz"), idleFx = fx.some((n) => n === "daily" || n === "rysunek");
+  $("#inbox-msgs").hidden = !napisz;
+  $("#inbox-idle-row").hidden = !idleFx;
   const st = $("#inbox-state");
   setText(st, !ib.enabled ? "wyłączona" : ib.open ? `otwarta do ${ib.until}` : "zamknięta");
   st.classList.toggle("ok", ib.open);
@@ -811,17 +819,19 @@ function renderInbox(ib) {
     ? "Uruchom skrypt z --msg-tunnel bore.pub albo --msg-port PORT."
     : !ib.open
       ? (ib.tunnel
-        ? `Zamknięta skrzynka nic nie wystawia. Otwarcie zestawia tunel ${ib.tunnel} z nowym losowym portem – znają go tylko ci, którzy widzą panel.`
-        : "Zamknięta skrzynka nie słucha na porcie. Otwarcie losuje nowy kod w adresie – znają go tylko ci, którzy widzą panel.")
+        ? `Zamknięta – nic nie jest wystawione. Otwarcie zestawia tunel ${ib.tunnel} z nowym losowym portem – znają go tylko ci, którzy widzą panel.`
+        : "Zamknięta – nic nie słucha na porcie. Otwarcie losuje nowy kod w adresie – znają go tylko ci, którzy widzą panel.")
       : ib.tunnel
         ? (ib.address
-          ? `Wysyła się: echo hi > /dev/tcp/${host}/${port}  albo  curl -d hi ${ib.address}  albo przeglądarka.` +
-            "  Przez tunel nie widać, kto pisze: limit jest wspólny, ⛔ niedostępne."
+          ? (napisz
+            ? `Widzowie otwierają adres w przeglądarce albo wysyłają: echo hi > /dev/tcp/${host}/${port}  albo  curl -d hi ${ib.address}.` +
+              "  Przez tunel nie widać, kto pisze: limit jest wspólny, ⛔ niedostępne."
+            : "Widzowie otwierają ten adres w przeglądarce.")
           : `Łączę z ${ib.tunnel}…`) + (ib.err ? `  ${ib.err}` : "")
-        : `Na panelu: curl -d hi ${ib.address}  –  albo ten adres w przeglądarce.` +
+        : `Widzowie otwierają ten adres w przeglądarce` + (napisz ? ` albo wysyłają: curl -d hi ${ib.address}.` : ".") +
           (ib.public ? "" : "  Ustaw adres publiczny (msg_public), żeby zamiast „adres” było widać prawdziwy.") +
           (ib.blocked ? `  Zablokowane adresy: ${ib.blocked}.` : ""));
-  setText($("#inbox-open"), ib.open ? "Nowy kod i czas od teraz" : "Otwórz skrzynkę");
+  setText($("#inbox-open"), ib.open ? "Nowy kod i czas od teraz" : "Otwórz dla widzów");
   $("#inbox-open").disabled = !ib.enabled;
   $("#inbox-close").disabled = !ib.open;
   if (document.activeElement !== $("#inbox-hours")) $("#inbox-hours").value = String(ib.hours);
@@ -833,14 +843,16 @@ function renderInbox(ib) {
   if (document.activeElement !== $("#inbox-hint-every")) $("#inbox-hint-every").value = String(ib.hint_every);
   if (document.activeElement !== $("#inbox-addr-idle")) $("#inbox-addr-idle").value = String(ib.addr_idle);
   setText($("#inbox-limits"), ib.limits);
+  $("#inbox-pending").hidden = !ib.pending.length; // „nic nie czeka” jest już w nagłówku
   // podsumowania w nagłówkach zwiniętych grup
-  setText($("#inbox-pending-n"), ib.pending.length ? `(${ib.pending.length})` : "– nic nie czeka");
+  setText($("#inbox-pending-n"), ib.pending.length ? `– ${ib.pending.length} czeka na ✓` : "– nic nie czeka na akceptację");
   const ex = [ib.extras.reactions && "reakcje", ib.extras.colors && "kolory i emotki"].filter(Boolean);
   setText($("#sum-extras"), ex.length ? ex.join(", ") : "wyłączone");
   const fl = [ib.filters.words && "słowa", ib.filters.links && "linki", ib.filters.dupes && "powtórki"].filter(Boolean);
-  setText($("#sum-filters"), fl.length ? fl.join(", ") : "bez cenzury");
+  setText($("#sum-filters"), `akceptacja ${ib.auto ? "automatyczna" : "ręczna"}; ${fl.length ? fl.join(", ") : "bez cenzury"}`);
   setText($("#sum-hint"), ib.hint && ib.hint_every ? `„${ib.hint}” co ${ib.hint_every} s` : "wyłączona");
-  setText($("#sum-open"), `${String(ib.hours).replace(".", ",")} h, akceptacja ${ib.auto ? "automatyczna" : "ręczna"}`);
+  setText($("#sum-open"), `${String(ib.hours).replace(".", ",")} h` +
+    (idleFx ? `, adres po ${ib.addr_idle ? `${ib.addr_idle} s ciszy` : "ciszy – nigdy"}` : ""));
   setText($("#sum-msgs"), `w kolejce ${ib.queue.length}, pokazane ${ib.shown.length}`);
   for (const key of ["reactions", "colors"]) $(`#inbox-x-${key}`).checked = ib.extras[key];
   $("#inbox-poll-hint").checked = ib.poll_hint;

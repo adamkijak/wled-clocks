@@ -6581,7 +6581,7 @@ def rich(text, t=0.0, extras=True):
 
 @reg("napisz")
 class Inbound(Clock):
-    """Wiadomości, ankiety i reakcje od widzów (skrzynka w panelu WWW)."""
+    """Wiadomości, ankiety i reakcje od widzów."""
 
     X0 = 13  # tekst zaczyna się za kopertą
 
@@ -6778,7 +6778,7 @@ def idle_addr(f, t):
 DAILY = {"people": [], "cur": None, "auto": True, "speak": True, "seen": 0.0}
 # people: [{"name", "id", "done"}]; cur: kto mówi; speak: False – zwykła lista do odhaczania, bez „mówi”
 DAILY_MAX = 16
-DRAW = {"px": {}, "at": {}, "seen": 0.0}  # px: (x, y) -> (r, g, b); at: kiedy narysowany (błysk); seen: efekt na panelu
+DRAW = {"px": {}, "seen": 0.0}  # px: (x, y) -> (r, g, b); seen: kiedy efekt był na panelu
 DRAW_ERASE = {"czarny", "black", "off", "gumka", "erase", "x"}
 DRAWS_RE = re.compile(r"^px\s+(\S+)((?:\s+\d{1,3},\d{1,2}){1,300})$")  # paczka z przeciągania: px kolor x,y x,y …
 DRAW_RE = re.compile(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?\s*[ ,;]\s*(\d{1,2})(?:\s+(\S+))?$")
@@ -6884,14 +6884,12 @@ def draw_color(name):
 
 def draw_put(x0, x1, y, col):
     """Piksele od x0 do x1 w wierszu y (0..W-1, 0..H-1), col None = gumka."""
-    now = time.time()
     with SHARED_LOCK:
         for x in range(min(x0, x1), max(x0, x1) + 1):
             if col is None:
                 DRAW["px"].pop((x, y), None)
             else:
                 DRAW["px"][(x, y)] = tuple(int(v) for v in col)
-                DRAW["at"][(x, y)] = now
 
 
 def draw_hex():
@@ -6948,12 +6946,12 @@ class Daily(Clock):
 
 @reg("rysunek")
 class Drawing(Clock):
-    """Wspólny rysunek: widzowie zapalają piksele przez skrzynkę."""
+    """Wspólny rysunek: widzowie malują piksele na swojej stronie."""
 
     def draw(self, f, now, t, dt):
         if not getattr(THUMB, "on", False):
             DRAW["seen"] = time.time()
-        px, at, wall = dict(DRAW["px"]), DRAW["at"], time.time()
+        px = dict(DRAW["px"])
         addr = INBOX.address().split("://", 1)[-1] if INBOX.is_open() and INBOX.address() else ""
         if not px or idle_due(keep=True):  # pusty rysunek albo cisza: sam adres strony, aż ktoś zacznie rysować
             if not addr:  # skrzynka zamknięta albo tunel się łączy – szary stan jak w „napisz”
@@ -6967,7 +6965,7 @@ class Drawing(Clock):
                 scroll_segs(f, [(addr, (80, 200, 255))], t, 30, gap=40)
             return
         for (x, y), c in px.items():
-            f.set(x, y, (255, 255, 255) if wall - at.get((x, y), 0) < 0.35 else c)
+            f.set(x, y, c)
 
 
 # ================================================================ postacie i zwierzęta (bez zegara)
@@ -10121,7 +10119,7 @@ def web_cmd(e, c):
         INBOX.active = time.time()
         act = c.get("act")
         if act == "clear":
-            return lambda: DRAW.update(px={}, at={})
+            return lambda: DRAW.update(px={})
         if act == "px":
             x, y, h = int(c.get("x", -1)), int(c.get("y", -1)), str(c.get("c", ""))
             if not (0 <= x < W and 0 <= y < H) or (h and not eye_rgb(h)):

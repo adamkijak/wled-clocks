@@ -27,14 +27,15 @@ Na callu kamerka pokazuje panel z samym adresem skrzynki, np. `bore.pub:41234`. 
 w formularz. Nadawca zobaczy swoją wiadomość na panelu –
 po kolei, jedna po drugiej.
 
-1. W panelu wybierz efekt **napisz** – skrzynka jest w jego „Ustawieniach efektu” – i kliknij **Otwórz skrzynkę**.
+1. W panelu wybierz efekt **napisz** (albo daily czy rysunek) – w jego „Ustawieniach efektu” jest sekcja **Strona dla
+   widzów** – i kliknij **Otwórz dla widzów**. „↗ Otwórz” obok adresu pokazuje tę stronę w nowej karcie.
    Jeśli kamerka odwraca obraz, włącz ⇋ Odbicie. Czekające wiadomości widać też na liście efektów (✉ przy „napisz”).
 2. Po kilku sekundach na panelu pojawia się adres. Nic nie trzeba ustawiać: dodatek sam zestawia tunel na publiczny
    serwer **bore.pub** (domena stała, port losowy) – działa za NAT-em, bez własnej domeny i przekierowań w routerze.
 
 Zabezpieczenia:
 
-- Tunel istnieje **tylko, gdy skrzynka jest otwarta**; zamyka się sama po czasie wpisanym w „otwarta przez”
+- Tunel istnieje **tylko, gdy strona dla widzów jest otwarta**; zamyka się sama po czasie wpisanym w „otwarta przez”
   (domyślnie 2 h, od 0,25 do 24 h; zmiana przy otwartej skrzynce liczy się od chwili otwarcia).
   Przy każdym otwarciu jest **nowy losowy port** – znają go tylko ci, którzy widzą panel.
 - Serwer wiadomości słucha tylko lokalnie (dla tunelu) i umie wyłącznie przyjąć tekst: nie zmieni efektu ani ustawień,
@@ -42,13 +43,13 @@ Zabezpieczenia:
 - Do 80 znaków, bez emoji i znaków sterujących; binarne śmieci (np. skanery portów) są odrzucane bez odpowiedzi.
 - Przez tunel nie widać adresów nadawców, więc limit jest wspólny: najwyżej 12 wiadomości na minutę, w kolejce
   najwyżej 20; blokowanie nadawcy (⛔) jest niedostępne.
-- Filtry (w ustawieniach skrzynki, każdy do wyłączenia – wszystkie wyłączone = bez cenzury): słowa z listy
+- Filtry („Akceptacja i filtry” w „napisz”, każdy do wyłączenia – wszystkie wyłączone = bez cenzury): słowa z listy
   (wbudowane wulgaryzmy PL i EN; listę można dowolnie zmienić – rdzenie słów, „kurw” łapie każdą odmianę, także
   „k.u.r.w.a” i „k0rw@”), linki i powtórki tej samej wiadomości. Filtr jest prosty – łatwo go obejść, dlatego
   domyślnie **akceptacja ręczna**: każda wiadomość czeka w panelu na ✓.
 - Zachęta: własny tekst (np. „Napisz coś na panel!”) pokazywany na panelu na zmianę z adresem, co ustawioną liczbę
   sekund.
-- Zabawa dla widzów (każdy dodatek do wyłączenia w ustawieniach skrzynki; widzowie mają instrukcję i przyciski
+- Zabawa dla widzów (każdy dodatek do wyłączenia w ustawieniach „napisz”; widzowie mają instrukcję i przyciski
   na stronie, na której piszą):
   - **ankieta** – pytanie i 2–4 odpowiedzi w panelu; widzowie wysyłają literę (A, B…) albo treść odpowiedzi,
     na panelu na zmianę pytanie, słupki z wynikami, adres i – jeśli zaznaczone „zachęta także w czasie
@@ -70,7 +71,7 @@ Zabezpieczenia:
     Gdy przez 10 s nikt nic nie przyśle (ani nie zmieni w panelu WWW), daily na 5 s ustępuje kopercie z adresem
     skrzynki (tą samą czcionką co w „napisz”) i tak co 10 s ciszy, a rysunek pokazuje sam adres, aż ktoś zacznie
     rysować (pusty rysunek – zawsze sam adres). Ile sekund ciszy, ustawia się
-    w skrzynce, w „Zachęta na panelu” → „adres po ciszy” (0 = nigdy).
+    w „Strona dla widzów” → „Otwarcie i adres na panelu” → „adres po ciszy” (0 = nigdy).
     Strona dla widzów też pokazuje tylko to, co ma efekt na panelu: przy daily – listę osób z przyciskami, przy
     rysunku – siatkę, w pozostałych przypadkach – pole na wiadomość, ankietę, reakcje i instrukcję.
     Strona odświeża się sama co sekundę: rysunek pokazuje na bieżąco piksele innych, a po zmianie efektu, listy
