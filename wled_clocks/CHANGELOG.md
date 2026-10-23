@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.25.1
+
+- Panel WWW: ustawienia skrzynki uporządkowane – na wierzchu stan, adres, otwórz/zamknij i wiadomości czekające
+  na akceptację; reszta w zwijanych grupach z podsumowaniem w nagłówku (Ankieta – „trwa – głosów: 12”, Zachęta,
+  Dla widzów, Filtry, Otwarcie i akceptacja, Kolejka i pokazane). Przeglądarka pamięta, które są rozwinięte.
+- Daily: edycja listy osób i opcje schowane pod „Edytuj listę osób” / „Opcje i polecenia z calla” (pusta lista
+  otwiera się sama).
+
 ## 1.25.0
 
 2 nowe efekty w „Na start” (razem 145), sterowane z panelu WWW i z calla przez skrzynkę „napisz”:

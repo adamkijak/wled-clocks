@@ -134,6 +134,13 @@ try { $("#common").open = localStorage.getItem("wc-common") === "1"; } catch (e)
 $("#common").addEventListener("toggle", () => {
   try { localStorage.setItem("wc-common", $("#common").open ? "1" : "0"); } catch (e) { /* bez pamięci */ }
 });
+// zwijane grupy ustawień: przeglądarka pamięta, które są rozwinięte
+document.querySelectorAll("details.grp[data-k]").forEach((d) => {
+  try { d.open = localStorage.getItem(`wc-grp-${d.dataset.k}`) === "1"; } catch (e) { /* bez pamięci */ }
+  d.addEventListener("toggle", () => {
+    try { localStorage.setItem(`wc-grp-${d.dataset.k}`, d.open ? "1" : "0"); } catch (e) { /* bez pamięci */ }
+  });
+});
 let anchor = null; // kliknięty nagłówek kategorii: po przebudowie listy zostaje w tym samym miejscu ekranu
 function setCollapsed(g, v, h) {
   collapsed[g] = v;
@@ -618,7 +625,8 @@ $("#poll-toggle").onclick = () => state.inbox.poll && inboxCmd(state.inbox.poll.
 $("#poll-reset").onclick = () => confirm("Wyzerować głosy?") && inboxCmd("poll_reset");
 
 function renderPoll(p) {
-  setText($("#poll-state"), !p ? "" : p.on ? "– trwa, wyniki na panelu" : "– zakończona");
+  const votes = p ? p.votes.reduce((a, b) => a + b, 0) : 0;
+  setText($("#sum-poll"), !p ? "brak" : p.on ? `trwa – głosów: ${votes}` : `zakończona – głosów: ${votes}`);
   $("#poll-toggle").disabled = $("#poll-reset").disabled = !p;
   setText($("#poll-toggle"), p && !p.on ? "Wznów" : "Zakończ");
   if (p && !pollDirty && !pollInputs().includes(document.activeElement)) {
@@ -659,6 +667,10 @@ function renderDaily(d) {
   if ($("#daily").hidden) return;
   const left = d.people.filter((p) => !p.done).length;
   setText($("#daily-state"), d.people.length ? `zostało ${left} z ${d.people.length}` : "pusta lista");
+  if (!d.people.length && !renderDaily.opened) { // pusta lista: od razu pole do wpisania osób
+    renderDaily.opened = true;
+    $("#daily-edit").open = true;
+  }
   $("#daily-auto").checked = d.auto;
   if (!dailyDirty && document.activeElement !== $("#daily-text")) {
     $("#daily-text").value = d.people.map((p) => `${p.name} ${p.id}`).join("\n");
@@ -806,6 +818,15 @@ function renderInbox(ib) {
   if (document.activeElement !== $("#inbox-hint")) $("#inbox-hint").value = ib.hint;
   if (document.activeElement !== $("#inbox-hint-every")) $("#inbox-hint-every").value = String(ib.hint_every);
   setText($("#inbox-limits"), ib.limits);
+  // podsumowania w nagłówkach zwiniętych grup
+  setText($("#inbox-pending-n"), ib.pending.length ? `(${ib.pending.length})` : "– nic nie czeka");
+  const ex = [ib.extras.reactions && "reakcje", ib.extras.colors && "kolory i emotki"].filter(Boolean);
+  setText($("#sum-extras"), ex.length ? ex.join(", ") : "wyłączone");
+  const fl = [ib.filters.words && "słowa", ib.filters.links && "linki", ib.filters.dupes && "powtórki"].filter(Boolean);
+  setText($("#sum-filters"), fl.length ? fl.join(", ") : "bez cenzury");
+  setText($("#sum-hint"), ib.hint && ib.hint_every ? `„${ib.hint}” co ${ib.hint_every} s` : "wyłączona");
+  setText($("#sum-open"), `${String(ib.hours).replace(".", ",")} h, akceptacja ${ib.auto ? "automatyczna" : "ręczna"}`);
+  setText($("#sum-msgs"), `w kolejce ${ib.queue.length}, pokazane ${ib.shown.length}`);
   for (const key of ["reactions", "colors"]) $(`#inbox-x-${key}`).checked = ib.extras[key];
   $("#inbox-poll-hint").checked = ib.poll_hint;
   renderPoll(ib.poll);

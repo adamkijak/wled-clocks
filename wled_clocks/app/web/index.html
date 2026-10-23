@@ -67,19 +67,25 @@
       <p id="fx-none" class="muted">Ten efekt nie ma własnych ustawień.</p>
       <div id="daily" class="daily" hidden>
         <div class="card-head"><h3>Daily – osoby</h3><span id="daily-state" class="pill">…</span></div>
-        <textarea id="daily-text" rows="5" spellcheck="false" aria-label="Osoby na daily" placeholder="Marta MAR&#10;Bartek BAR&#10;Kuba"></textarea>
-        <div class="inbox-btns">
-          <button id="daily-save" class="small">Zapisz listę</button>
-          <span class="muted">jedna osoba w wierszu; skrót 2–3 znaki na końcu albo weźmie się z imienia</span>
-        </div>
+        <details id="daily-edit" class="grp">
+          <summary><span class="arrow">▸</span> Edytuj listę osób</summary>
+          <textarea id="daily-text" rows="5" spellcheck="false" aria-label="Osoby na daily" placeholder="Marta MAR&#10;Bartek BAR&#10;Kuba"></textarea>
+          <div class="inbox-btns">
+            <button id="daily-save" class="small">Zapisz listę</button>
+            <span class="muted">jedna osoba w wierszu; skrót 2–3 znaki na końcu albo weźmie się z imienia</span>
+          </div>
+        </details>
         <ul id="daily-list" class="daily-list"></ul>
         <div class="inbox-btns">
           <button id="daily-next" title="Mówca odhaczony, podświetla się następna osoba">✓ Następna osoba</button>
           <button id="daily-reset" title="Wszyscy od nowa, na następne daily">Od nowa</button>
         </div>
-        <label class="chk"><input type="checkbox" id="daily-auto"> po odhaczeniu mówcy podświetl następną osobę</label>
-        <p class="muted">Z calla (przez skrzynkę, gdy jest otwarta): <code>x mar</code> odhacza, <code>-x mar</code> cofa,
-          <code>teraz mar</code> – mówi, samo <code>x</code> odhacza mówcę. Widzowie mają też przyciski na swojej stronie.</p>
+        <details class="grp" data-k="daily-more">
+          <summary><span class="arrow">▸</span> Opcje i polecenia z calla</summary>
+          <label class="chk"><input type="checkbox" id="daily-auto"> po odhaczeniu mówcy podświetl następną osobę</label>
+          <p class="muted">Z calla (przez skrzynkę, gdy jest otwarta): <code>x mar</code> odhacza, <code>-x mar</code> cofa,
+            <code>teraz mar</code> – mówi, samo <code>x</code> odhacza mówcę. Widzowie mają też przyciski na swojej stronie.</p>
+        </details>
       </div>
       <div id="draw" class="drawbox" hidden>
         <div class="card-head"><h3>Wspólny rysunek</h3><button id="draw-clear" class="small">Wyczyść</button></div>
@@ -104,78 +110,92 @@
           <button id="inbox-close">Zamknij</button>
           <button id="inbox-clear" title="Usuwa wiadomości czekające na akceptację i te w kolejce">Wyczyść niepokazane</button>
         </div>
-        <div class="srow">
-          <span>otwarta przez</span>
-          <div class="wide"><input id="inbox-hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal"> h</div>
-          <span class="hint">potem zamyka się sama i nikt obcy już nie napisze; od 0,25 do 24 h</span>
-        </div>
-        <div class="srow">
-          <span>akceptacja</span>
-          <div class="wide pick">
-            <select id="inbox-auto">
-              <option value="0">ręczna – każda wiadomość czeka na Twoje ✓</option>
-              <option value="1">automatyczna – od razu na panel (tylko filtry)</option>
-            </select>
-          </div>
-        </div>
-        <h3>Filtry <span class="muted">– odznacz wszystkie = bez cenzury</span></h3>
-        <label class="chk"><input type="checkbox" id="inbox-f-words"> słowa z listy – łapie też „k.u.r.w.a”, „kuuurwa”, „k0rw@”, bez ogonków</label>
-        <textarea id="inbox-words" rows="3" spellcheck="false" aria-label="Słowa filtra"></textarea>
-        <div class="inbox-btns">
-          <button id="inbox-words-save" class="small">Zapisz listę</button>
-          <button id="inbox-words-reset" class="small" title="Wraca do listy wbudowanej (wulgaryzmy PL i EN)">Domyślna lista</button>
-          <span class="muted">rdzenie słów, po przecinku – „kurw” łapie każdą odmianę</span>
-        </div>
-        <label class="chk"><input type="checkbox" id="inbox-f-links"> linki (http, www, nazwy domen)</label>
-        <label class="chk"><input type="checkbox" id="inbox-f-dupes"> powtórki (ta sama wiadomość jeszcze raz)</label>
-        <p class="muted">Zawsze: <span id="inbox-limits"></span>.</p>
-        <h3>Zachęta na panelu <span class="muted">– na zmianę z adresem</span></h3>
-        <div class="srow">
-          <span>tekst</span>
-          <div class="wide"><input id="inbox-hint" class="text" type="text" maxlength="120" placeholder="np. Napisz coś na panel!"></div>
-          <span class="hint">pusta = bez zachęty; długa przejeżdża raz przez panel</span>
-        </div>
-        <div class="srow">
-          <span>co ile</span>
-          <div class="wide"><input id="inbox-hint-every" type="number" min="0" max="600" step="5" inputmode="numeric"> s</div>
-          <span class="hint">tyle sekund adres, potem zachęta; 0 = nigdy</span>
-        </div>
-        <h3>Ankieta <span id="poll-state" class="muted"></span></h3>
-        <div class="srow">
-          <span>pytanie</span>
-          <div class="wide"><input id="poll-q" class="text" type="text" maxlength="80" placeholder="np. Kawa czy herbata?"></div>
-        </div>
-        <div class="srow">
-          <span>odpowiedzi</span>
-          <div class="wide poll-opts">
-            <input id="poll-o0" class="text" type="text" maxlength="30" placeholder="A">
-            <input id="poll-o1" class="text" type="text" maxlength="30" placeholder="B">
-            <input id="poll-o2" class="text" type="text" maxlength="30" placeholder="C (opcjonalnie)">
-            <input id="poll-o3" class="text" type="text" maxlength="30" placeholder="D (opcjonalnie)">
-          </div>
-          <span class="hint">widzowie wysyłają literę (A, B…) albo treść odpowiedzi, albo klikają na swojej stronie; głos liczy się od razu, bez akceptacji</span>
-        </div>
-        <div class="inbox-btns">
-          <button id="poll-start">Nowa ankieta</button>
-          <button id="poll-toggle">Zakończ</button>
-          <button id="poll-reset" title="Głosy od zera, pytanie zostaje">Wyzeruj głosy</button>
-        </div>
-        <label class="chk"><input type="checkbox" id="inbox-poll-hint"> zachęta także w czasie ankiety – na panelu po kolei: pytanie, wyniki, adres, zachęta</label>
-        <ul id="poll-res" class="poll-res"></ul>
-        <h3>Dla widzów</h3>
-        <label class="chk"><input type="checkbox" id="inbox-x-reactions"> reakcje – animacje na panelu bez akceptacji</label>
-        <label class="chk"><input type="checkbox" id="inbox-x-colors"> kolory i emotki w wiadomościach</label>
-        <p class="muted cheat">Ściąga (widzowie mają ją też na swojej stronie z polem do pisania):
-          <code>&lt;3</code> serca, <code>!brawo</code>, <code>!konfetti</code>, <code>!fajerwerki</code> – animacje;
-          <code>[czerwony] tekst</code> (zielony, niebieski, żółty, pomarańczowy, różowy, fioletowy, błękitny, złoty,
-          tęcza) – kolor wiadomości; <code>:) :( :D ;) :P :O &lt;3</code> – obrazki w tekście.
-          Po angielsku też: <code>!bravo</code>, <code>!confetti</code>, <code>[red]</code>…</p>
-        <h3>Czekają na akceptację</h3>
+        <h3>Czekają na akceptację <span id="inbox-pending-n" class="muted"></span></h3>
         <ul id="inbox-pending" class="msgs"></ul>
-        <h3>W kolejce na panel</h3>
-        <ul id="inbox-queue" class="msgs"></ul>
-        <h3>Pokazane</h3>
-        <ul id="inbox-shown" class="msgs"></ul>
+        <details class="grp" data-k="poll">
+          <summary><span class="arrow">▸</span> Ankieta <span id="sum-poll" class="sum muted"></span></summary>
+          <div class="srow">
+            <span>pytanie</span>
+            <div class="wide"><input id="poll-q" class="text" type="text" maxlength="80" placeholder="np. Kawa czy herbata?"></div>
+          </div>
+          <div class="srow">
+            <span>odpowiedzi</span>
+            <div class="wide poll-opts">
+              <input id="poll-o0" class="text" type="text" maxlength="30" placeholder="A">
+              <input id="poll-o1" class="text" type="text" maxlength="30" placeholder="B">
+              <input id="poll-o2" class="text" type="text" maxlength="30" placeholder="C (opcjonalnie)">
+              <input id="poll-o3" class="text" type="text" maxlength="30" placeholder="D (opcjonalnie)">
+            </div>
+            <span class="hint">widzowie wysyłają literę (A, B…) albo treść odpowiedzi, albo klikają na swojej stronie; głos liczy się od razu, bez akceptacji</span>
+          </div>
+          <div class="inbox-btns">
+            <button id="poll-start">Nowa ankieta</button>
+            <button id="poll-toggle">Zakończ</button>
+            <button id="poll-reset" title="Głosy od zera, pytanie zostaje">Wyzeruj głosy</button>
+          </div>
+          <label class="chk"><input type="checkbox" id="inbox-poll-hint"> zachęta także w czasie ankiety – na panelu po kolei: pytanie, wyniki, adres, zachęta</label>
+          <ul id="poll-res" class="poll-res"></ul>
+        </details>
+        <details class="grp" data-k="hint">
+          <summary><span class="arrow">▸</span> Zachęta na panelu <span id="sum-hint" class="sum muted"></span></summary>
+          <div class="srow">
+            <span>tekst</span>
+            <div class="wide"><input id="inbox-hint" class="text" type="text" maxlength="120" placeholder="np. Napisz coś na panel!"></div>
+            <span class="hint">pusta = bez zachęty; długa przejeżdża raz przez panel</span>
+          </div>
+          <div class="srow">
+            <span>co ile</span>
+            <div class="wide"><input id="inbox-hint-every" type="number" min="0" max="600" step="5" inputmode="numeric"> s</div>
+            <span class="hint">tyle sekund adres, potem zachęta; 0 = nigdy</span>
+          </div>
+        </details>
+        <details class="grp" data-k="extras">
+          <summary><span class="arrow">▸</span> Dla widzów: reakcje, kolory, emotki <span id="sum-extras" class="sum muted"></span></summary>
+          <label class="chk"><input type="checkbox" id="inbox-x-reactions"> reakcje – animacje na panelu bez akceptacji</label>
+          <label class="chk"><input type="checkbox" id="inbox-x-colors"> kolory i emotki w wiadomościach</label>
+          <p class="muted cheat">Ściąga (widzowie mają ją też na swojej stronie z polem do pisania):
+            <code>&lt;3</code> serca, <code>!brawo</code>, <code>!konfetti</code>, <code>!fajerwerki</code> – animacje;
+            <code>[czerwony] tekst</code> (zielony, niebieski, żółty, pomarańczowy, różowy, fioletowy, błękitny, złoty,
+            tęcza) – kolor wiadomości; <code>:) :( :D ;) :P :O &lt;3</code> – obrazki w tekście.
+            Po angielsku też: <code>!bravo</code>, <code>!confetti</code>, <code>[red]</code>…</p>
+        </details>
+        <details class="grp" data-k="filters">
+          <summary><span class="arrow">▸</span> Filtry <span class="muted">– odznacz wszystkie = bez cenzury</span> <span id="sum-filters" class="sum muted"></span></summary>
+          <label class="chk"><input type="checkbox" id="inbox-f-words"> słowa z listy – łapie też „k.u.r.w.a”, „kuuurwa”, „k0rw@”, bez ogonków</label>
+          <textarea id="inbox-words" rows="3" spellcheck="false" aria-label="Słowa filtra"></textarea>
+          <div class="inbox-btns">
+            <button id="inbox-words-save" class="small">Zapisz listę</button>
+            <button id="inbox-words-reset" class="small" title="Wraca do listy wbudowanej (wulgaryzmy PL i EN)">Domyślna lista</button>
+            <span class="muted">rdzenie słów, po przecinku – „kurw” łapie każdą odmianę</span>
+          </div>
+          <label class="chk"><input type="checkbox" id="inbox-f-links"> linki (http, www, nazwy domen)</label>
+          <label class="chk"><input type="checkbox" id="inbox-f-dupes"> powtórki (ta sama wiadomość jeszcze raz)</label>
+          <p class="muted">Zawsze: <span id="inbox-limits"></span>.</p>
+        </details>
+        <details class="grp" data-k="open">
+          <summary><span class="arrow">▸</span> Otwarcie i akceptacja <span id="sum-open" class="sum muted"></span></summary>
+          <div class="srow">
+            <span>otwarta przez</span>
+            <div class="wide"><input id="inbox-hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal"> h</div>
+            <span class="hint">potem zamyka się sama i nikt obcy już nie napisze; od 0,25 do 24 h</span>
+          </div>
+          <div class="srow">
+            <span>akceptacja</span>
+            <div class="wide pick">
+              <select id="inbox-auto">
+                <option value="0">ręczna – każda wiadomość czeka na Twoje ✓</option>
+                <option value="1">automatyczna – od razu na panel (tylko filtry)</option>
+              </select>
+            </div>
+          </div>
+        </details>
+        <details class="grp" data-k="msgs">
+          <summary><span class="arrow">▸</span> Kolejka i pokazane <span id="sum-msgs" class="sum muted"></span></summary>
+          <h3>W kolejce na panel</h3>
+          <ul id="inbox-queue" class="msgs"></ul>
+          <h3>Pokazane</h3>
+          <ul id="inbox-shown" class="msgs"></ul>
+        </details>
       </div>
       <div id="acts" class="acts" hidden>
         <div class="card-head">
