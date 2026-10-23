@@ -97,6 +97,30 @@
           siatkę na swojej stronie albo wysyłają <code>45 3 czerwony</code> (kolumna, wiersz, kolor),
           <code>45-60 3 niebieski</code> – kreska, <code>45 3 gumka</code> – gasi.</p>
       </div>
+      <div id="poll" class="inbox pollbox" hidden>
+        <div class="card-head"><h3>Ankieta</h3><span id="sum-poll" class="pill">…</span></div>
+        <div class="srow">
+          <span>pytanie</span>
+          <div class="wide"><input id="poll-q" class="text" type="text" maxlength="80" placeholder="np. Kawa czy herbata?"></div>
+        </div>
+        <div class="srow">
+          <span>odpowiedzi</span>
+          <div class="wide poll-opts">
+            <input id="poll-o0" class="text" type="text" maxlength="30" placeholder="A">
+            <input id="poll-o1" class="text" type="text" maxlength="30" placeholder="B">
+            <input id="poll-o2" class="text" type="text" maxlength="30" placeholder="C (opcjonalnie)">
+            <input id="poll-o3" class="text" type="text" maxlength="30" placeholder="D (opcjonalnie)">
+          </div>
+          <span class="hint">widzowie wysyłają literę (A, B…) albo treść odpowiedzi, albo klikają na swojej stronie; głos liczy się od razu, bez akceptacji</span>
+        </div>
+        <div class="inbox-btns">
+          <button id="poll-start">Nowa ankieta</button>
+          <button id="poll-toggle">Zakończ</button>
+          <button id="poll-reset" title="Głosy od zera, pytanie zostaje">Wyzeruj głosy</button>
+        </div>
+        <ul id="poll-res" class="poll-res"></ul>
+        <p class="muted">Na panelu w kółko: pytanie, wyniki i – gdy strona dla widzów jest otwarta – adres.</p>
+      </div>
       <div id="inbox" class="inbox" hidden>
         <div class="card-head">
           <h3>Strona dla widzów</h3>
@@ -125,7 +149,7 @@
             <span class="hint">gdy przez tyle sekund nikt nic nie przyśle: daily – na 5 s adres, rysunek – adres, aż ktoś zacznie rysować; 0 = nigdy</span>
           </div>
         </details>
-        <div id="inbox-msgs"> <!-- tylko „napisz”: wiadomości, ankieta, zachęta, filtry, dodatki -->
+        <div id="inbox-msgs"> <!-- tylko „napisz”: wiadomości, zachęta, filtry, dodatki -->
           <div class="card-head">
             <h3>Wiadomości <span id="inbox-pending-n" class="muted"></span></h3>
             <button id="inbox-clear" class="small" title="Usuwa wiadomości czekające na akceptację i te w kolejce">Wyczyść niepokazane</button>
@@ -150,30 +174,6 @@
               <div class="wide"><input id="inbox-hint-every" type="number" min="0" max="600" step="5" inputmode="numeric"> s</div>
               <span class="hint">tyle sekund adres, potem zachęta; 0 = nigdy</span>
             </div>
-          </details>
-          <details class="grp" data-k="poll">
-            <summary><span class="arrow">▸</span> Ankieta <span id="sum-poll" class="sum muted"></span></summary>
-            <div class="srow">
-              <span>pytanie</span>
-              <div class="wide"><input id="poll-q" class="text" type="text" maxlength="80" placeholder="np. Kawa czy herbata?"></div>
-            </div>
-            <div class="srow">
-              <span>odpowiedzi</span>
-              <div class="wide poll-opts">
-                <input id="poll-o0" class="text" type="text" maxlength="30" placeholder="A">
-                <input id="poll-o1" class="text" type="text" maxlength="30" placeholder="B">
-                <input id="poll-o2" class="text" type="text" maxlength="30" placeholder="C (opcjonalnie)">
-                <input id="poll-o3" class="text" type="text" maxlength="30" placeholder="D (opcjonalnie)">
-              </div>
-              <span class="hint">widzowie wysyłają literę (A, B…) albo treść odpowiedzi, albo klikają na swojej stronie; głos liczy się od razu, bez akceptacji</span>
-            </div>
-            <div class="inbox-btns">
-              <button id="poll-start">Nowa ankieta</button>
-              <button id="poll-toggle">Zakończ</button>
-              <button id="poll-reset" title="Głosy od zera, pytanie zostaje">Wyzeruj głosy</button>
-            </div>
-            <label class="chk"><input type="checkbox" id="inbox-poll-hint"> zachęta także w czasie ankiety – na panelu po kolei: pytanie, wyniki, adres, zachęta</label>
-            <ul id="poll-res" class="poll-res"></ul>
           </details>
           <details class="grp" data-k="filters">
             <summary><span class="arrow">▸</span> Akceptacja i filtry <span id="sum-filters" class="sum muted"></span></summary>

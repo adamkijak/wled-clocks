@@ -49,7 +49,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ludzik_first(self):
         self.assertEqual(wc.Engine.NAMES[:3], ["ludzik", "zegar", "napisz"])
-        self.assertEqual(len(wc.CLOCKS), 145)
+        self.assertEqual(len(wc.CLOCKS), 146)
 
     def test_ludzik_rides(self):
         old = dict(wc.LUDZIK["lvl"]), wc.LUDZIK["freq"]
@@ -818,13 +818,16 @@ class InboxTest(unittest.TestCase):
         self.assertEqual(lit(8.0), 0)                                                # potem adres (niebieski)
 
     def test_poll_reactions_ludzik_colors(self):
-        """Ankieta (głos literą albo treścią, znany nadawca – jeden głos), reakcje bez akceptacji, kolor i emotki
-        w zwykłej wiadomości, instrukcja i przyciski na stronie dla widzów, zachęta w czasie ankiety."""
+        """Ankieta (osobny efekt: głos literą albo treścią, znany nadawca – jeden głos, tylko gdy ankieta jest na panelu),
+        reakcje bez akceptacji, kolor i emotki w zwykłej wiadomości, instrukcja i przyciski na stronie dla widzów."""
         e = wc.Engine(args(mode="napisz"), {})
         self.ib.proxy = True
         self.ib.open()
         code = self.ib.code
         wc.web_cmd(e, {"op": "inbox", "act": "poll", "q": "Kawa czy herbata?", "opts": ["kawa", "herbata", ""]})()
+        self.assertEqual(self.send(code, "A", ip="4.0.0.9")[0], 202)                 # ankiety nie ma na panelu
+        wc.web_cmd(e, {"op": "inbox", "act": "clear"})()
+        self.frame(wc.CLOCKS["ankieta"](), 1.0)                                      # teraz jest
         self.assertEqual(self.send(code, "A", ip="4.0.0.1")[0], 200)
         self.assertEqual(self.send(code, "Herbata", ip="4.0.0.2")[0], 200)
         time.sleep(wc.MSG_FX_GAP)
@@ -833,7 +836,11 @@ class InboxTest(unittest.TestCase):
         st, page = self.send(code)
         self.assertIn("Poll: Kawa czy herbata?", page)
         self.assertIn('value="A"', page)
+        self.assertNotIn("[rainbow]", page)                                          # strona tylko z ankietą
+        wc.POLL["seen"] = 0
+        st, page = self.send(code)
         self.assertIn("[rainbow]", page)
+        self.assertNotIn("Poll:", page)
         self.assertEqual(self.send(code, "!brawo", ip="4.0.0.3")[0], 200)
         self.assertEqual(self.ib.snapshot()["pending"], [])                          # nic do akceptacji
         self.assertEqual(self.send(code, "[czerwony] hej :)", ip="4.0.0.7")[0], 202)  # zwykła wiadomość: czeka
@@ -841,14 +848,6 @@ class InboxTest(unittest.TestCase):
         f = wc.Frame()
         fx.draw(f, wc.dtm.datetime.now().astimezone(), 0.5, 0.05)
         self.assertEqual(fx.banner[0], "BRAWO!")
-        while self.ib.take():
-            pass
-        self.ib.hint = "Głosuj!"                                                      # zachęta w obiegu ankiety
-        seen = {}
-        for on in (True, False):
-            self.ib.poll_hint = on
-            seen[on] = any(self.frame(fx, t / 2) and fx.poll_k >= 0 for t in range(0, 140))  # doszło do zachęty
-        self.assertEqual(seen, {True: True, False: False})
         pts, w = wc.rich("[czerwony] hej :)")
         self.assertIn((255, 45, 35), {c for *_, c in pts})                          # czerwony tekst
         self.assertIn(wc.EMOTI_PAL["Y"], {c for *_, c in pts})                       # buźka

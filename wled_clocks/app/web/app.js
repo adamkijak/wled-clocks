@@ -483,7 +483,7 @@ function renderSettings() {
     if (r.hint) r.hint.classList.toggle("warn", s.hint.includes("skacze")); // ruch nie będzie płynny
   }
   $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : $("#now-name").textContent;
-  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown || ["napisz", "daily", "rysunek"].some((n) => fx.has(n));
+  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown || ["napisz", "ankieta", "daily", "rysunek"].some((n) => fx.has(n));
   if (!fx.has("ludzik")) $("#acts").hidden = true;
 }
 
@@ -546,7 +546,7 @@ function renderLudzikStatus() {
 }
 $("#acts-close").onclick = () => ($("#acts").hidden = true);
 
-// ------------------------------------------------------------ strona dla widzów (napisz, daily, rysunek)
+// ------------------------------------------------------------ strona dla widzów (napisz, ankieta, daily, rysunek)
 const inboxCmd = (act, extra = {}) => cmd("inbox", { act, ...extra });
 $("#inbox-open").onclick = () => inboxCmd("open");
 $("#inbox-close").onclick = () => inboxCmd("close");
@@ -588,9 +588,6 @@ for (const key of ["reactions", "colors"]) {
     if (e.target.checked !== state.inbox.extras[key]) inboxCmd("extra", { key });
   });
 }
-$("#inbox-poll-hint").addEventListener("change", (e) => {
-  if (e.target.checked !== state.inbox.poll_hint) inboxCmd("poll_hint");
-});
 // ankieta: pola wypełnia ostatnia ankieta, póki ich nie ruszysz
 const POLL_COLS = ["#ff5046", "#3cbeff", "#6ef046", "#ffc828"];
 let pollDirty = false;
@@ -610,6 +607,7 @@ $("#poll-reset").onclick = () => confirm("Wyzerować głosy?") && inboxCmd("poll
 function renderPoll(p) {
   const votes = p ? p.votes.reduce((a, b) => a + b, 0) : 0;
   setText($("#sum-poll"), !p ? "brak" : p.on ? `trwa – głosów: ${votes}` : `zakończona – głosów: ${votes}`);
+  $("#sum-poll").classList.toggle("ok", Boolean(p && p.on));
   $("#poll-toggle").disabled = $("#poll-reset").disabled = !p;
   setText($("#poll-toggle"), p && !p.on ? "Wznów" : "Zakończ");
   if (p && !pollDirty && !pollInputs().includes(document.activeElement)) {
@@ -802,9 +800,10 @@ function msgList(id, items, buttons) {
 
 let inboxKey = "";
 function renderInbox(ib) {
-  // strona dla widzów: wspólna dla „napisz”, „daily” i „rysunek”; wiadomości, ankieta, zachęta i filtry – tylko „napisz”
+  // strona dla widzów: wspólna dla efektów „Dla widzów”; wiadomości, zachęta i filtry – tylko „napisz”, ankieta – „ankieta”
   const fx = state.setting_fx || [];
-  $("#inbox").hidden = !ib || !fx.some((n) => ["napisz", "daily", "rysunek"].includes(n));
+  $("#inbox").hidden = !ib || !fx.some((n) => ["napisz", "ankieta", "daily", "rysunek"].includes(n));
+  $("#poll").hidden = $("#inbox").hidden || !fx.includes("ankieta");
   if (!ib || $("#inbox").hidden) return;
   const napisz = fx.includes("napisz"), idleFx = fx.some((n) => n === "daily" || n === "rysunek");
   $("#inbox-msgs").hidden = !napisz;
@@ -855,7 +854,6 @@ function renderInbox(ib) {
     (idleFx ? `, adres po ${ib.addr_idle ? `${ib.addr_idle} s ciszy` : "ciszy – nigdy"}` : ""));
   setText($("#sum-msgs"), `w kolejce ${ib.queue.length}, pokazane ${ib.shown.length}`);
   for (const key of ["reactions", "colors"]) $(`#inbox-x-${key}`).checked = ib.extras[key];
-  $("#inbox-poll-hint").checked = ib.poll_hint;
   renderPoll(ib.poll);
   const key = JSON.stringify([ib.pending, ib.queue, ib.shown]);
   if (key === inboxKey) return; // listy przebudowujemy tylko po zmianie – inaczej klik mógłby trafić w znikający przycisk

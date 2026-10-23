@@ -51,9 +51,10 @@ Zabezpieczenia:
   sekund.
 - Zabawa dla widzów (każdy dodatek do wyłączenia w ustawieniach „napisz”; widzowie mają instrukcję i przyciski
   na stronie, na której piszą):
-  - **ankieta** – pytanie i 2–4 odpowiedzi w panelu; widzowie wysyłają literę (A, B…) albo treść odpowiedzi,
-    na panelu na zmianę pytanie, słupki z wynikami, adres i – jeśli zaznaczone „zachęta także w czasie
-    ankiety” – zachęta; głosy liczą się od razu, bez akceptacji (znany nadawca ma jeden głos – drugi go zmienia);
+  - **ankieta** (osobny efekt „ankieta”) – pytanie i 2–4 odpowiedzi w jego ustawieniach; widzowie klikają
+    odpowiedź na swojej stronie albo wysyłają literę (A, B…) lub treść odpowiedzi; na panelu w kółko pytanie,
+    słupki z wynikami i adres; głosy liczą się od razu, bez akceptacji (znany nadawca ma jeden głos – drugi go
+    zmienia);
   - **reakcje** – `<3` serca, `!brawo`, `!konfetti`, `!fajerwerki` (też `!bravo`, `!confetti`, `!fireworks`):
     animacja na wierzchu panelu, bez akceptacji;
   - **kolor** – `[czerwony] tekst` (zielony, niebieski, żółty, pomarańczowy, różowy, fioletowy, błękitny, złoty,
@@ -67,13 +68,14 @@ Zabezpieczenia:
   - **wspólny rysunek** (efekt „rysunek”) – widzowie malują na siatce 120 × 12 na swojej stronie (z wyborem
     koloru): z przytrzymanym przyciskiem myszy albo palcem kreska idzie płynnie, piksele lecą paczkami; albo wysyłają `45 3 czerwony` (kolumna, wiersz, kolor), `45-60 3 niebieski` (kreska), `45 3 gumka`; Ty
     malujesz myszą w panelu WWW i czyścisz jednym przyciskiem.
-  - Polecenia daily i rysunku działają tylko, gdy ich efekt jest na panelu – inaczej to zwykłe wiadomości.
+  - Efekty dla widzów (napisz, ankieta, daily, rysunek) są w osobnej kategorii **Dla widzów**. Głosy, polecenia
+    daily i rysunku działają tylko, gdy ich efekt jest na panelu – inaczej to zwykłe wiadomości.
     Gdy przez 10 s nikt nic nie przyśle (ani nie zmieni w panelu WWW), daily na 5 s ustępuje kopercie z adresem
     skrzynki (tą samą czcionką co w „napisz”) i tak co 10 s ciszy, a rysunek pokazuje sam adres, aż ktoś zacznie
     rysować (pusty rysunek – zawsze sam adres). Ile sekund ciszy, ustawia się
     w „Strona dla widzów” → „Otwarcie i adres na panelu” → „adres po ciszy” (0 = nigdy).
     Strona dla widzów też pokazuje tylko to, co ma efekt na panelu: przy daily – listę osób z przyciskami, przy
-    rysunku – siatkę, w pozostałych przypadkach – pole na wiadomość, ankietę, reakcje i instrukcję.
+    rysunku – siatkę, przy ankiecie – przyciski odpowiedzi, przy „napisz” – pole na wiadomość, reakcje i instrukcję.
     Strona odświeża się sama co sekundę: rysunek pokazuje na bieżąco piksele innych, a po zmianie efektu, listy
     daily albo ankiety strona się przeładowuje (nie wtedy, gdy ktoś pisze w polu).
   - Głosy, reakcje i daily mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę. Rysunek jeszcze lżejszy: piksel (albo paczka pikseli z przeciągania) co 0,2 s, przez tunel razem 900 na minutę.

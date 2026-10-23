@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.30.0
+
+- **Ankieta** to osobny efekt („ankieta”): w jego ustawieniach pytanie, odpowiedzi, wyniki i Nowa ankieta / Zakończ /
+  Wyzeruj głosy; na panelu w kółko pytanie, słupki z wynikami i adres. Głosy przyjmuje tylko wtedy, gdy jest na
+  panelu, a strona dla widzów pokazuje wtedy same przyciski odpowiedzi. Z „napisz” ankieta zniknęła (razem
+  z opcją „zachęta także w czasie ankiety”).
+- Nowa kategoria efektów **Dla widzów**: napisz, ankieta, daily, rysunek („Na start” to teraz ludzik i zegar).
+
 ## 1.29.2
 
 - Rysunek: nowe piksele pojawiają się od razu w swoim kolorze, bez białego błysku.

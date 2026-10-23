@@ -6,7 +6,8 @@ Tylko biblioteka standardowa Pythona 3.8+ – bez żadnych dodatkowych pakietów
   python3 wled_clocks.py --list     – pełna lista ze opisami
 
 Kategorie (w tej kolejności lista, numery i cykl – patrz CATEGORIES):
-  * Na start: ludzik, zegar (zwykła godzina i data), napisz (wiadomości od widzów, np. na callu)
+  * Na start: ludzik, zegar (zwykła godzina i data)
+  * Dla widzów (np. na callu, przez stronę dla widzów): napisz (wiadomości), ankieta, daily, rysunek
   * Tarcze i wyświetlacze: analogowy, nixie, segmenty, klapki, licznik, wahadlo, klepsydra, maszyna, pismo, kreskowy,
       neon, radar, obwod, kalendarz, postep, lustro, cien
   * Inne zapisy czasu: binarny, hex, kolor, dziesietny, beaty, unix, rzymski, morse, slownie, domino, strefy, odliczanie
@@ -6581,7 +6582,7 @@ def rich(text, t=0.0, extras=True):
 
 @reg("napisz")
 class Inbound(Clock):
-    """Wiadomości, ankiety i reakcje od widzów."""
+    """Wiadomości i reakcje od widzów."""
 
     X0 = 13  # tekst zaczyna się za kopertą
 
@@ -6589,8 +6590,6 @@ class Inbound(Clock):
         self.cur, self.t0, self.dur = None, 0.0, 0.0
         self.parts = []  # cząstki reakcji: [x, y, vx, vy, życie, kolor, kształt]
         self.banner = None  # napis reakcji „BRAWO!”: (tekst, od kiedy)
-        self.votes, self.flash = None, {}  # ostatnio widziane głosy i błysk słupka po nowym głosie
-        self.poll_k = -1.0  # w obiegu ankiety: s od początku zachęty (< 0 – jeszcze nie)
 
     def react(self, kind, t):
         """Animacja reakcji: cząstki na wierzchu wszystkiego."""
@@ -6646,45 +6645,6 @@ class Inbound(Clock):
         x = self.X0 + (W - self.X0 - hw) // 2 if hw <= W - self.X0 else W - scroll_px(k, 30)
         f.draw([(px, py) for px, py in text_px(INBOX.hint, x, 0, TXT) if px >= self.X0], (255, 210, 90))
 
-    def draw_poll(self, f, t, p):
-        """Ankieta w kółko: pytanie z odpowiedziami przejeżdża raz, słupki wyników, adres, zachęta (jeśli włączona
-        w czasie ankiety). -> False, gdy teraz adres albo zachęta (rysuje je body)."""
-        n = len(p["opts"])
-        segs = [(p["q"] + "  ", (255, 210, 90))]
-        for i, o in enumerate(p["opts"]):
-            segs += [(f"{chr(65 + i)}: ", POLL_COLS[i]), (o + "   ", (255, 255, 255))]
-        qw = sum(text_w(x, TXT) + 1 for x, _ in segs)
-        tq = scroll_time(qw + W, 30)
-        th = self.hint_time() if INBOX.hint and INBOX.poll_hint else 0
-        k = t % (tq + 10 + 6 + th)
-        self.poll_k = k - (tq + 16)  # > 0: czas zachęty
-        if k < tq:  # pytanie
-            x = W - scroll_px(k, 30)
-            for txt, c in segs:
-                f.draw([(px, py) for px, py in text_px(txt, x, 0, TXT) if px >= 0], c)
-                x += text_w(txt, TXT) + 1
-            return True
-        if k >= tq + 10:  # adres (żeby było wiadomo, gdzie głosować)
-            return False
-        votes, top = p["votes"], max(1, max(p["votes"]))
-        if self.votes and len(self.votes) == n:
-            for i in range(n):
-                if votes[i] > self.votes[i]:
-                    self.flash[i] = t
-        self.votes = list(votes)
-        sw = W // n
-        for i in range(n):
-            x0, c = i * sw, POLL_COLS[i]
-            f.text(chr(65 + i), x0 + 1, 0, c, SMALL)
-            f.text(str(votes[i]), x0 + 1, 7, (255, 255, 255), NARROW_TXT)
-            bx0, bx1 = x0 + 9, x0 + sw - 3
-            h = round(votes[i] / top * 12)
-            bright = (255, 255, 255) if t - self.flash.get(i, -9) < 0.3 else c
-            for x in range(bx0, bx1 + 1):
-                for y in range(12):
-                    f.set(x, y, bright if y >= 12 - h else visible(mul(c, 0.1)))
-        return True
-
     def draw(self, f, now, t, dt):
         for kind, val in INBOX.take_events():
             if kind == "react":
@@ -6725,15 +6685,8 @@ class Inbound(Clock):
             msg = "connecting" + "." * (int(t * 2) % 4) if INBOX.is_open() else "inbox closed"
             f.text(msg, self.X0 + 2, 0, (120, 120, 140))
             return
-        p = INBOX.poll
-        if p and p["on"] and self.draw_poll(f, t, p):
-            return
         sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
-        if p and p["on"]:  # ankieta: po adresie zachęta (gdy włączona w czasie ankiety)
-            if self.poll_k >= 0:
-                self.draw_hint(f, self.poll_k)
-                return
-        elif INBOX.hint and INBOX.hint_every:  # co hint_every s zachęta
+        if INBOX.hint and INBOX.hint_every:  # co hint_every s zachęta
             hdur = self.hint_time()
             k = t % (INBOX.hint_every + hdur)
             if k < hdur:
@@ -6966,6 +6919,62 @@ class Drawing(Clock):
             return
         for (x, y), c in px.items():
             f.set(x, y, c)
+
+
+POLL = {"seen": 0.0}  # kiedy efekt „ankieta” był na panelu – tylko wtedy przyjmuje głosy (sama ankieta: INBOX.poll)
+
+
+@reg("ankieta")
+class Poll(Clock):
+    """Ankieta: pytanie i słupki z wynikami; widzowie głosują na swojej stronie."""
+
+    def __init__(self):
+        self.votes, self.flash = None, {}  # ostatnio widziane głosy i błysk słupka po nowym głosie
+
+    def draw(self, f, now, t, dt):
+        """W kółko: pytanie z odpowiedziami przejeżdża raz, słupki wyników, adres (gdy ankieta trwa)."""
+        if not getattr(THUMB, "on", False):
+            POLL["seen"] = time.time()
+        p = INBOX.poll
+        if not p:
+            scroll_segs(f, [("ANKIETA ", (255, 190, 30)), ("– ustaw pytanie w ustawieniach efektu", (200, 200, 215))],
+                        t, 30)
+            return
+        addr = INBOX.address().split("://", 1)[-1] if INBOX.is_open() and INBOX.address() and p["on"] else ""
+        n = len(p["opts"])
+        segs = [(p["q"] + "  ", (255, 210, 90))]
+        for i, o in enumerate(p["opts"]):
+            segs += [(f"{chr(65 + i)}: ", POLL_COLS[i]), (o + "   ", (255, 255, 255))]
+        qw = sum(text_w(x, TXT) + 1 for x, _ in segs)
+        tq = scroll_time(qw + W, 30)
+        k = t % (tq + 10 + (6 if addr else 0))
+        if k < tq:  # pytanie
+            x = W - scroll_px(k, 30)
+            for txt, c in segs:
+                f.draw([(px, py) for px, py in text_px(txt, x, 0, TXT) if px >= 0], c)
+                x += text_w(txt, TXT) + 1
+            return
+        if k >= tq + 10:  # adres (żeby było wiadomo, gdzie głosować)
+            sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
+            Inbound.draw_addr(f, addr, t)
+            return
+        votes, top = p["votes"], max(1, max(p["votes"]))
+        if self.votes and len(self.votes) == n:
+            for i in range(n):
+                if votes[i] > self.votes[i]:
+                    self.flash[i] = t
+        self.votes = list(votes)
+        sw = W // n
+        for i in range(n):
+            x0, c = i * sw, POLL_COLS[i]
+            f.text(chr(65 + i), x0 + 1, 0, c, SMALL)
+            f.text(str(votes[i]), x0 + 1, 7, (255, 255, 255), NARROW_TXT)
+            bx0, bx1 = x0 + 9, x0 + sw - 3
+            h = round(votes[i] / top * 12)
+            bright = (255, 255, 255) if t - self.flash.get(i, -9) < 0.3 else c
+            for x in range(bx0, bx1 + 1):
+                for y in range(12):
+                    f.set(x, y, bright if y >= 12 - h else visible(mul(c, 0.1)))
 
 
 # ================================================================ postacie i zwierzęta (bez zegara)
@@ -8744,7 +8753,8 @@ class DarkEyes(Eyes):
 
 
 CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lista, numery i cykl
-    ("Na start", "⭐", "ludzik zegar napisz daily rysunek"),
+    ("Na start", "⭐", "ludzik zegar"),
+    ("Dla widzów", "👥", "napisz ankieta daily rysunek"),
     ("Tarcze i wyświetlacze", "🕰", "analogowy nixie segmenty klapki licznik wahadlo klepsydra maszyna pismo kreskowy "
                                    "neon radar obwod kalendarz postep lustro cien"),
     ("Inne zapisy czasu", "🔢", "binarny hex kolor dziesietny beaty unix rzymski morse slownie domino strefy odliczanie"),
@@ -9244,7 +9254,6 @@ class Engine:
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "msg_filters": INBOX.filters, "msg_words": INBOX.words, "msg_hint": INBOX.hint,
                "msg_hint_every": INBOX.hint_every, "msg_addr_idle": INBOX.addr_idle, "msg_extras": INBOX.extras,
-               "msg_poll_hint": INBOX.poll_hint,
                "daily": {"people": DAILY["people"], "cur": DAILY["cur"], "auto": DAILY["auto"],
                          "speak": DAILY["speak"]},
                "rysunek": draw_hex() if DRAW["px"] else "",
@@ -10170,8 +10179,6 @@ def web_cmd(e, c):
             if not q or len(opts) < 2:
                 raise ValueError("ankieta: pytanie i co najmniej 2 odpowiedzi")
             return lambda: INBOX.set_poll(q, opts)
-        if act == "poll_hint":  # zachęta w czasie ankiety wł./wył.
-            return lambda: setattr(INBOX, "poll_hint", not INBOX.poll_hint)
         if act in ("poll_stop", "poll_start", "poll_reset"):
             return lambda: INBOX.poll_act(act[5:])
         if act == "hint":  # zachęta na panelu i co ile sekund
@@ -10452,7 +10459,7 @@ LIVE_JS_SHA = base64.b64encode(hashlib.sha256(LIVE_JS.encode()).digest()).decode
 def msg_live():
     """Co jest na stronie widzów: (efekt – daily / draw / msg, klucz stanu, przy którego zmianie strona się
     przeładowuje)."""
-    live = [(st["seen"], k) for k, st in (("daily", DAILY), ("draw", DRAW)) if on_panel(st)]
+    live = [(st["seen"], k) for k, st in (("daily", DAILY), ("draw", DRAW), ("poll", POLL)) if on_panel(st)]
     fx = max(live)[1] if live else "msg"  # przy przełączaniu efektów – ten, który rysował ostatnio
     if fx == "daily" and not DAILY["people"]:
         fx = "msg"
@@ -10460,9 +10467,11 @@ def msg_live():
         state = [DAILY["people"], daily_cur()]
     elif fx == "draw":
         state = []
-    else:
+    elif fx == "poll":
         p = INBOX.poll
-        state = [p and [p["q"], p["opts"], p["on"]], INBOX.extras]
+        state = [p and [p["q"], p["opts"], p["on"]]]
+    else:
+        state = [INBOX.extras]
     return fx, hashlib.sha1(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
@@ -10510,7 +10519,8 @@ def msg_daily():
 
 def msg_page(msg, query=""):
     """Strona dla widzów – tylko to, co ma efekt, który jest teraz na panelu: daily (przyciski przy osobach),
-    rysunek (siatka) albo skrzynka (pole na wiadomość, ankieta, reakcje, krótka instrukcja włączonych dodatków)."""
+    rysunek (siatka), ankieta (przyciski odpowiedzi) albo napisz (pole na wiadomość, reakcje, krótka instrukcja
+    włączonych dodatków)."""
     e = html.escape
     ex, poll = INBOX.extras, INBOX.poll
     btn = lambda value, label: (f'<form method="post"><button name="message" value="{e(value)}">{e(label)}</button>'
@@ -10529,12 +10539,14 @@ def msg_page(msg, query=""):
     if fx == "draw":
         return (head("Draw on the panel", "wide") + msg_grid((urllib.parse.parse_qs(query).get("c") or ["red"])[0])
                 + field("e.g. 45 3 red", focus=False) + end)
+    if fx == "poll":
+        if not (poll and poll["on"]):
+            return head("Poll") + "<p>No poll right now.</p>" + end
+        return (head(f"Poll: {poll['q']}") + '<p>Tap an answer – or send just its letter.</p><div class="row">'
+                + "".join(btn(chr(65 + i), f"{chr(65 + i)}: {o}") for i, o in enumerate(poll["opts"])) + "</div>"
+                + field("e.g. A", focus=False) + end)
     out = [head("Write something on the panel"), field("Your message"),
            f'<p>Up to {MSG_MAX} characters. Messages show up on the panel one by one.</p>']
-    if poll and poll["on"]:
-        out.append(f'<h2>Poll: {e(poll["q"])}</h2><p>Tap an answer – or send just its letter.</p><div class="row">')
-        out += [btn(chr(65 + i), f"{chr(65 + i)}: {o}") for i, o in enumerate(poll["opts"])]
-        out.append("</div>")
     if ex["reactions"]:
         out.append('<h2>Reactions</h2><div class="row">')
         out += [btn(v, label) for v, label in (("<3", "❤ <3"), ("!bravo", "👏 !bravo"), ("!confetti", "🎉 !confetti"),
@@ -10742,7 +10754,6 @@ class Inbox:
         self.words = list(MSG_BAD)
         self.hint, self.hint_every = "Napisz coś na panel!", 30  # zachęta na panelu co ile s (0 = nigdy)
         self.extras = {"reactions": True, "colors": True}  # dodatki dla widzów (colors: kolory i emotki)
-        self.poll_hint = True  # zachęta także w czasie ankiety (po adresie, w każdym obiegu)
         self.poll = None    # {"q", "opts", "votes", "on", "voters": {ip: nr}} – ankieta
         self.events = []    # reakcje dla efektu: ("react", rodzaj)
         self.fx_all, self.fx_hits = [], {}  # lżejsze limity głosów, reakcji i daily
@@ -10955,7 +10966,7 @@ class Inbox:
 
     def special(self, text):
         """Głos w ankiecie, odhaczenie na daily, piksel rysunku albo reakcja -> (rodzaj, wartość) albo None (zwykła
-        wiadomość). Daily i rysunek tylko wtedy, gdy ich efekt jest na panelu."""
+        wiadomość). Daily, rysunek i ankieta tylko wtedy, gdy ich efekt jest na panelu."""
         low = text.strip().casefold()
         m = DAILY_RE.match(text.strip())
         if m and DAILY["people"] and on_panel(DAILY):
@@ -10964,7 +10975,7 @@ class Inbox:
         if m and on_panel(DRAW):
             return "draw", m
         p = self.poll
-        if p and p["on"]:
+        if p and p["on"] and on_panel(POLL):
             for i, o in enumerate(p["opts"]):
                 if low in (chr(97 + i), chr(97 + i) + ")", o.casefold()):
                     return "vote", i
@@ -11116,7 +11127,6 @@ class Inbox:
                     "address": self.address() if op else "", "auto": self.auto, "hours": self.hours,
                     "filters": dict(self.filters), "words": ", ".join(self.words), "hint": self.hint,
                     "hint_every": self.hint_every, "addr_idle": self.addr_idle, "extras": dict(self.extras),
-                    "poll_hint": self.poll_hint,
                     "poll": {k: v for k, v in self.poll.items() if k != "voters"} if self.poll else None,
                     "limits": f"najwyżej {MSG_MAX} znaków; z jednego adresu co {MSG_GAP} s i najwyżej {MSG_PER} "
                               f"na {MSG_WINDOW // 60} min; przez tunel wszyscy razem {MSG_ALL[0]} na minutę; "
@@ -11343,7 +11353,6 @@ def main():
     for k, v in (cfg.get("msg_extras") or {}).items():
         if k in INBOX.extras:
             INBOX.extras[k] = bool(v)
-    INBOX.poll_hint = bool(cfg.get("msg_poll_hint", True))
     dl = cfg.get("daily") or {}
     if isinstance(dl.get("people"), list):
         ppl = [p for p in dl["people"] if isinstance(p, dict) and isinstance(p.get("name"), str)][:DAILY_MAX]

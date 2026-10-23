@@ -312,3 +312,4 @@ details.grp[open] { padding-bottom: 8px; }
 details.grp .sum { margin-left: auto; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   min-width: 0; max-width: 55%; }
 @media (prefers-reduced-motion: reduce) { details.grp .arrow, details.common .arrow { transition: none; } }
+.pollbox { margin: 4px 0 12px; }
