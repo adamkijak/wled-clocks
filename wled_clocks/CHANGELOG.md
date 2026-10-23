@@ -1,5 +1,11 @@
 # Zmiany
 
+## 1.24.1
+
+- Napisz: zachęta także w czasie ankiety – przełącznik w sekcji „Ankieta” (domyślnie włączony); na panelu po
+  kolei pytanie, wyniki, adres i zachęta.
+- Napisz: bez „ludzika na zawołanie” – „ludzik taniec” jest teraz zwykłą wiadomością.
+
 ## 1.24.0
 
 Efekt „napisz” – zabawa dla ludzi na callu (każdy dodatek do wyłączenia):

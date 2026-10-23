@@ -6568,18 +6568,17 @@ class Inbound(Clock):
     """Wiadomości od widzów (np. uczestników calla): sam adres (domena:port – tunel bore.pub albo własny),
     pod który wysyła się tekst – echo do /dev/tcp, curl albo przeglądarka – na zmianę z własną zachętą, a potem
     po kolei to, co przyszło (w kolorze z „[czerwony] …”, z emotkami :) :D <3 jako obrazkami). Do tego ankieta
-    (słupki z wynikami), reakcje widzów (serca, brawa, konfetti, fajerwerki na wierzchu) i ludzik na zawołanie
-    („ludzik taniec”). Skrzynkę otwiera się w panelu WWW – tylko wtedy coś przyjmuje."""
+    (pytanie, słupki z wynikami, adres i – jeśli włączona – zachęta) i reakcje widzów (serca, brawa, konfetti,
+    fajerwerki na wierzchu). Skrzynkę otwiera się w panelu WWW – tylko wtedy coś przyjmuje."""
 
     X0 = 13  # tekst zaczyna się za kopertą
-    LUD_MAX = 60  # najdłużej tyle s pokazuje ludzika na zawołanie
 
     def __init__(self):
         self.cur, self.t0, self.dur = None, 0.0, 0.0
         self.parts = []  # cząstki reakcji: [x, y, vx, vy, życie, kolor, kształt]
         self.banner = None  # napis reakcji „BRAWO!”: (tekst, od kiedy)
-        self.lud, self.lud_q, self.lud_show = None, [], None  # ludzik na zawołanie: Worker, kolejka, (zajęcie, od, zaczął)
         self.votes, self.flash = None, {}  # ostatnio widziane głosy i błysk słupka po nowym głosie
+        self.poll_k = -1.0  # w obiegu ankiety: s od początku zachęty (< 0 – jeszcze nie)
 
     def react(self, kind, t):
         """Animacja reakcji: cząstki na wierzchu wszystkiego."""
@@ -6623,15 +6622,30 @@ class Inbound(Clock):
             keep.append(q)
         self.parts = keep[-400:]
 
+    @staticmethod
+    def hint_time():
+        """Ile s trwa zachęta: krótka stoi 4 s, długa przejeżdża raz."""
+        hw = text_w(INBOX.hint, TXT)
+        return 4.0 if hw <= W - Inbound.X0 else scroll_time(hw + W - Inbound.X0, 30) + 0.5
+
+    def draw_hint(self, f, k):
+        """Zachęta (k – s od jej początku)."""
+        hw = text_w(INBOX.hint, TXT)
+        x = self.X0 + (W - self.X0 - hw) // 2 if hw <= W - self.X0 else W - scroll_px(k, 30)
+        f.draw([(px, py) for px, py in text_px(INBOX.hint, x, 0, TXT) if px >= self.X0], (255, 210, 90))
+
     def draw_poll(self, f, t, p):
-        """Ankieta: pytanie z odpowiedziami przejeżdża raz, potem słupki wyników, potem adres – w kółko."""
+        """Ankieta w kółko: pytanie z odpowiedziami przejeżdża raz, słupki wyników, adres, zachęta (jeśli włączona
+        w czasie ankiety). -> False, gdy teraz adres albo zachęta (rysuje je body)."""
         n = len(p["opts"])
         segs = [(p["q"] + "  ", (255, 210, 90))]
         for i, o in enumerate(p["opts"]):
             segs += [(f"{chr(65 + i)}: ", POLL_COLS[i]), (o + "   ", (255, 255, 255))]
         qw = sum(text_w(x, TXT) + 1 for x, _ in segs)
         tq = scroll_time(qw + W, 30)
-        k = t % (tq + 10 + 6)
+        th = self.hint_time() if INBOX.hint and INBOX.poll_hint else 0
+        k = t % (tq + 10 + 6 + th)
+        self.poll_k = k - (tq + 16)  # > 0: czas zachęty
         if k < tq:  # pytanie
             x = W - scroll_px(k, 30)
             for txt, c in segs:
@@ -6659,37 +6673,10 @@ class Inbound(Clock):
                     f.set(x, y, bright if y >= 12 - h else visible(mul(c, 0.1)))
         return True
 
-    def lud_draw(self, f, now, t, dt):
-        """Ludzik na zawołanie: zajęcie jako następne (▶), pokaz do jego końca (+2 s, aż rzeczy dolecą), najdłużej
-        LUD_MAX s. -> czy rysował."""
-        if self.lud_show is None:
-            if not self.lud_q:
-                return False
-            act = self.lud_q.pop(0)
-            if self.lud is None:
-                self.lud = Worker()
-            LUDZIK["next"] = act
-            self.lud_show = {"act": act, "t0": t, "began": None, "ended": None}
-        sh = self.lud_show
-        self.lud.draw(f, now, t, dt)
-        lu = self.lud
-        doing = (lu.trick or (None,))[0] or (lu.ride or {}).get("n") or ("transparent z pogodą" if lu.banner else None)
-        if doing == sh["act"] and sh["began"] is None:
-            sh["began"] = t
-        if sh["began"] is not None and doing != sh["act"] and sh["ended"] is None:
-            sh["ended"] = t
-        if (sh["ended"] is not None and t - sh["ended"] > 2.0) or t - sh["t0"] > self.LUD_MAX:
-            if LUDZIK["next"] == sh["act"]:
-                LUDZIK["next"] = None
-            self.lud_show = None
-        return True
-
     def draw(self, f, now, t, dt):
         for kind, val in INBOX.take_events():
             if kind == "react":
                 self.react(val, t)
-            elif kind == "ludzik":
-                self.lud_q.append(val)
         self.body(f, now, t, dt)
         if self.banner:  # „BRAWO!” na czystym panelu, konfetti na wierzchu
             txt, t0 = self.banner
@@ -6704,7 +6691,7 @@ class Inbound(Clock):
     def body(self, f, now, t, dt):
         if self.cur is not None and t - self.t0 > self.dur:
             self.cur = None
-        if self.cur is None and self.lud_show is None:
+        if self.cur is None:
             self.cur = INBOX.take()
             if self.cur is not None:
                 self.t0 = t
@@ -6720,8 +6707,6 @@ class Inbound(Clock):
                 if px + x >= self.X0:
                     f.set(px + x, py, c)
             return
-        if self.lud_draw(f, now, t, dt):
-            return
         addr = INBOX.address() if INBOX.is_open() else ""
         if not addr:  # zamknięta albo tunel jeszcze się łączy
             sprite(f, ENVELOPE, 0, 2, {"Y": (90, 60, 0), "D": (20, 12, 0)})
@@ -6732,14 +6717,15 @@ class Inbound(Clock):
         if p and p["on"] and self.draw_poll(f, t, p):
             return
         sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
-        hint, every = INBOX.hint, INBOX.hint_every
-        if hint and every and not (p and p["on"]):  # co every s zachęta (krótka stoi 4 s, długa przejeżdża raz)
-            hw = text_w(hint, TXT)
-            hdur = 4.0 if hw <= W - self.X0 else scroll_time(hw + W - self.X0, 30) + 0.5
-            k = t % (every + hdur)
+        if p and p["on"]:  # ankieta: po adresie zachęta (gdy włączona w czasie ankiety)
+            if self.poll_k >= 0:
+                self.draw_hint(f, self.poll_k)
+                return
+        elif INBOX.hint and INBOX.hint_every:  # co hint_every s zachęta
+            hdur = self.hint_time()
+            k = t % (INBOX.hint_every + hdur)
             if k < hdur:
-                x = self.X0 + (W - self.X0 - hw) // 2 if hw <= W - self.X0 else W - scroll_px(k, 30)
-                f.draw([(px, py) for px, py in text_px(hint, x, 0, TXT) if px >= self.X0], (255, 210, 90))
+                self.draw_hint(f, k)
                 return
         addr = addr.split("://", 1)[-1]  # sam adres: domena:port (własny port – jeszcze kod w ścieżce)
         tw = text_w(addr, TXT)
@@ -9058,7 +9044,7 @@ class Engine:
                "oczy_kolor": eye_hex(EYES["col"]),
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
                "msg_filters": INBOX.filters, "msg_words": INBOX.words, "msg_hint": INBOX.hint,
-               "msg_hint_every": INBOX.hint_every, "msg_extras": INBOX.extras,
+               "msg_hint_every": INBOX.hint_every, "msg_extras": INBOX.extras, "msg_poll_hint": INBOX.poll_hint,
                "msg_poll": {"q": INBOX.poll["q"], "opts": INBOX.poll["opts"]} if INBOX.poll else None,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
@@ -9945,6 +9931,8 @@ def web_cmd(e, c):
             if not q or len(opts) < 2:
                 raise ValueError("ankieta: pytanie i co najmniej 2 odpowiedzi")
             return lambda: INBOX.set_poll(q, opts)
+        if act == "poll_hint":  # zachęta w czasie ankiety wł./wył.
+            return lambda: setattr(INBOX, "poll_hint", not INBOX.poll_hint)
         if act in ("poll_stop", "poll_start", "poll_reset"):
             return lambda: INBOX.poll_act(act[5:])
         if act == "hint":  # zachęta na panelu i co ile sekund
@@ -10152,7 +10140,7 @@ MSG_BAD = ["kurw", "chuj", "huj", "pierdol", "jeba", "jebi", "jebn", "pizd", "cw
            "fuck", "shit", "cunt", "bitch", "nigg", "fag"]
 MSG_URL = re.compile(r"https?:|www\.|\b[a-z0-9-]+\.(pl|com|net|org|io|ru|xyz|info|me|eu|ly|gg|tk|co)\b", re.I)
 _LEET = str.maketrans("013457@$!", "oieastasi")
-MSG_FX_GAP, MSG_FX_ALL = 2, 60  # głosy, reakcje, ludzik: z jednego adresu co 2 s; bez adresu wszyscy razem 60/min
+MSG_FX_GAP, MSG_FX_ALL = 2, 60  # głosy i reakcje: z jednego adresu co 2 s; bez adresu wszyscy razem 60/min
 # reakcje: wiadomość -> animacja na panelu (bez akceptacji, nic nie wypisuje)
 MSG_REACT = {"<3": "serca", "!serce": "serca", "!heart": "serca", "!brawo": "brawo", "!bravo": "brawo",
              "!clap": "brawo", "!konfetti": "konfetti", "!confetti": "konfetti", "!fajerwerki": "fajerwerki",
@@ -10165,26 +10153,11 @@ MSG_COLORS = {"czerwony": (255, 45, 35), "red": (255, 45, 35), "zielony": (60, 2
               "blekitny": (0, 210, 255), "cyan": (0, 210, 255), "zloty": (255, 190, 40), "gold": (255, 190, 40),
               "tecza": None, "rainbow": None}
 MSG_COLOR_RE = re.compile(r"^\[([^\]]{1,15})\]\s*(.*)$")
-# „ludzik taniec” / „guy dance” – angielskie nazwy zajęć ludzika
-LUDZIK_EN = {"dance": "taniec", "guitar": "gitara", "fire": "pożar", "balloon": "balon", "pet": "zwierzak",
-             "football": "piłka", "ball": "piłka", "sand": "piasek", "juggle": "żonglerka", "sleep": "spanie",
-             "read": "czytanie", "eat": "jedzenie", "pushups": "pompki", "squats": "przysiady",
-             "jumping": "pajacyki", "handstand": "na głowie", "sweep": "zamiatanie", "bow": "łuk",
-             "pistol": "pistolet", "bazooka": "bazooka", "bike": "rower", "car": "auto", "ambulance": "karetka",
-             "police": "policja", "tractor": "traktor", "combine": "kombajn", "weather": "transparent z pogodą"}
-MSG_LUDZIK_RE = re.compile(r"^(ludzik|guy)\s+(.+)$", re.I)
 MSG_STYLE = """body{font:16px/1.5 system-ui,sans-serif;max-width:520px;margin:32px auto;padding:0 16px;background:#111;color:#eee}
 form{display:flex;gap:8px;margin:0}input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #444;
 background:#222;color:#eee}input{flex:1;min-width:0}button{cursor:pointer}p,li{color:#9a9ca3}.m{color:#ffd54f}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}h2{font-size:18px;margin:24px 0 4px}code{color:#9cf}
 ul{padding-left:20px}"""
-
-
-def msg_ludzik(name):
-    """Zajęcie ludzika z nazwy (polskiej albo angielskiej, wielkość liter i ogonki bez znaczenia) albo None."""
-    want = msg_fold(name.strip())
-    want = msg_fold(LUDZIK_EN.get(want, want))
-    return next((a for a in LUDZIK_ACTS if msg_fold(a) == want and a not in ("spacer", "na drugą stronę")), None)
 
 
 def msg_page(msg):
@@ -10216,12 +10189,6 @@ def msg_page(msg):
                    "<code>[rainbow] hello!</code></li>"
                    "<li><b>Emoticons</b> turn into pictures: <code>:)</code> <code>:(</code> <code>:D</code> "
                    "<code>;)</code> <code>:P</code> <code>:O</code> <code>&lt;3</code></li>")
-    if ex["ludzik"]:
-        names = ", ".join(f"<code>{k}</code>" for k in ("dance", "guitar", "fire", "balloon", "pet", "football",
-                                                        "sand", "juggle", "sleep", "bike", "ambulance", "police",
-                                                        "tractor", "combine"))
-        out.append(f"<li><b>The little guy:</b> send <code>guy dance</code> (or <code>ludzik taniec</code>) – he "
-                   f"shows up and does it: {names}…</li>")
     out.append("<li>From a terminal: <code>curl -d 'hi :)' this-address</code></li></ul></body></html>")
     return "".join(out)
 
@@ -10409,10 +10376,11 @@ class Inbox:
         self.filters = {"words": True, "links": True, "dupes": True}
         self.words = list(MSG_BAD)
         self.hint, self.hint_every = "Napisz coś na panel!", 30  # zachęta na panelu co ile s (0 = nigdy)
-        self.extras = {"reactions": True, "ludzik": True, "colors": True}  # dodatki dla widzów (kolory i emotki)
+        self.extras = {"reactions": True, "colors": True}  # dodatki dla widzów (colors: kolory i emotki)
+        self.poll_hint = True  # zachęta także w czasie ankiety (po adresie, w każdym obiegu)
         self.poll = None    # {"q", "opts", "votes", "on", "voters": {ip: nr}} – ankieta
-        self.events = []    # reakcje i polecenia ludzika dla efektu: ("react", rodzaj) / ("ludzik", zajęcie)
-        self.fx_all, self.fx_hits = [], {}  # lżejsze limity głosów, reakcji i ludzika
+        self.events = []    # reakcje dla efektu: ("react", rodzaj)
+        self.fx_all, self.fx_hits = [], {}  # lżejsze limity głosów i reakcji
         self.until, self.opened, self.code, self.srv = 0.0, 0.0, "", None
         self.pending, self.queue, self.shown = [], [], []
         self.hits, self.misses, self.blocked = {}, {}, set()
@@ -10617,7 +10585,7 @@ class Inbox:
             return 202, "thanks! your message is waiting for approval"
 
     def special(self, text):
-        """Głos w ankiecie, reakcja albo polecenie ludzika -> (rodzaj, wartość) albo None (zwykła wiadomość)."""
+        """Głos w ankiecie albo reakcja -> (rodzaj, wartość) albo None (zwykła wiadomość)."""
         low = text.strip().casefold()
         p = self.poll
         if p and p["on"]:
@@ -10626,13 +10594,10 @@ class Inbox:
                     return "vote", i
         if self.extras["reactions"] and low in MSG_REACT:
             return "react", MSG_REACT[low]
-        m = MSG_LUDZIK_RE.match(text.strip())
-        if self.extras["ludzik"] and m:
-            return "ludzik", msg_ludzik(m[2])
         return None
 
     def do_special(self, special, ip, now):
-        """Głos, reakcja albo ludzik: bez akceptacji (nic obcego nie trafia na panel), z lżejszym limitem. Pod zamkiem."""
+        """Głos albo reakcja: bez akceptacji (nic obcego nie trafia na panel), z lżejszym limitem. Pod zamkiem."""
         if ip:
             last = self.fx_hits.get(ip, 0)
             if now - last < MSG_FX_GAP:
@@ -10655,15 +10620,13 @@ class Inbox:
                 p["voters"][ip] = val
             p["votes"][val] += 1
             return 200, f"vote counted: {chr(65 + val)} ({p['opts'][val]})"
-        if kind == "ludzik" and val is None:
-            return 422, "unknown – try e.g. guy dance, guy guitar, guy fire, guy balloon, guy bike"
         if len(self.events) >= 30:
             return 503, "busy – try again in a moment"
         self.events.append((kind, val))
-        return 200, "thanks!" if kind == "react" else f"the little guy will do: {val}"
+        return 200, "thanks!"
 
     def take_events(self):
-        """Reakcje i polecenia ludzika dla efektu „napisz” (podgląd na liście ich nie zabiera)."""
+        """Reakcje dla efektu „napisz” (podgląd na liście ich nie zabiera)."""
         if getattr(THUMB, "on", False):
             return []
         with self.lock:
@@ -10724,7 +10687,7 @@ class Inbox:
             return {"enabled": self.enabled(), "open": op, "until": hm(self.until) if op else "",
                     "address": self.address() if op else "", "auto": self.auto, "hours": self.hours,
                     "filters": dict(self.filters), "words": ", ".join(self.words), "hint": self.hint,
-                    "hint_every": self.hint_every, "extras": dict(self.extras),
+                    "hint_every": self.hint_every, "extras": dict(self.extras), "poll_hint": self.poll_hint,
                     "poll": {k: v for k, v in self.poll.items() if k != "voters"} if self.poll else None,
                     "limits": f"najwyżej {MSG_MAX} znaków; z jednego adresu co {MSG_GAP} s i najwyżej {MSG_PER} "
                               f"na {MSG_WINDOW // 60} min; przez tunel wszyscy razem {MSG_ALL[0]} na minutę; "
@@ -10949,6 +10912,7 @@ def main():
     for k, v in (cfg.get("msg_extras") or {}).items():
         if k in INBOX.extras:
             INBOX.extras[k] = bool(v)
+    INBOX.poll_hint = bool(cfg.get("msg_poll_hint", True))
     mp = cfg.get("msg_poll")
     if isinstance(mp, dict) and isinstance(mp.get("opts"), list) and len(mp["opts"]) >= 2:  # bez głosów, wyłączona
         INBOX.set_poll(msg_clean(str(mp.get("q", "")))[:MSG_MAX], [msg_clean(str(o))[:30] for o in mp["opts"][:4]])

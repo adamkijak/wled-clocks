@@ -814,8 +814,8 @@ class InboxTest(unittest.TestCase):
         self.assertEqual(lit(8.0), 0)                                                # potem adres (niebieski)
 
     def test_poll_reactions_ludzik_colors(self):
-        """Ankieta (głos literą albo treścią, znany nadawca – jeden głos), reakcje i ludzik bez akceptacji, kolor
-        i emotki w zwykłej wiadomości, instrukcja i przyciski na stronie dla widzów."""
+        """Ankieta (głos literą albo treścią, znany nadawca – jeden głos), reakcje bez akceptacji, kolor i emotki
+        w zwykłej wiadomości, instrukcja i przyciski na stronie dla widzów, zachęta w czasie ankiety."""
         e = wc.Engine(args(mode="napisz"), {})
         self.ib.proxy = True
         self.ib.open()
@@ -831,17 +831,20 @@ class InboxTest(unittest.TestCase):
         self.assertIn('value="A"', page)
         self.assertIn("[rainbow]", page)
         self.assertEqual(self.send(code, "!brawo", ip="4.0.0.3")[0], 200)
-        self.assertEqual(self.send(code, "ludzik Gitara", ip="4.0.0.4")[0], 200)
-        self.assertEqual(self.send(code, "guy dance", ip="4.0.0.5")[0], 200)
-        self.assertEqual(self.send(code, "ludzik lata", ip="4.0.0.6")[0], 422)
         self.assertEqual(self.ib.snapshot()["pending"], [])                          # nic do akceptacji
         self.assertEqual(self.send(code, "[czerwony] hej :)", ip="4.0.0.7")[0], 202)  # zwykła wiadomość: czeka
         fx = wc.CLOCKS["napisz"]()
         f = wc.Frame()
         fx.draw(f, wc.dtm.datetime.now().astimezone(), 0.5, 0.05)
-        self.assertEqual(fx.lud_q, ["taniec"])                                        # pierwsza już się pokazuje
-        self.assertEqual(fx.lud_show["act"], "gitara")
         self.assertEqual(fx.banner[0], "BRAWO!")
+        while self.ib.take():
+            pass
+        self.ib.hint = "Głosuj!"                                                      # zachęta w obiegu ankiety
+        seen = {}
+        for on in (True, False):
+            self.ib.poll_hint = on
+            seen[on] = any(self.frame(fx, t / 2) and fx.poll_k >= 0 for t in range(0, 140))  # doszło do zachęty
+        self.assertEqual(seen, {True: True, False: False})
         pts, w = wc.rich("[czerwony] hej :)")
         self.assertIn((255, 45, 35), {c for *_, c in pts})                          # czerwony tekst
         self.assertIn(wc.EMOTI_PAL["Y"], {c for *_, c in pts})                       # buźka
@@ -852,7 +855,6 @@ class InboxTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             wc.web_cmd(e, {"op": "inbox", "act": "poll", "q": "?", "opts": ["jedna"]})
         json.dumps(self.ib.snapshot())
-        wc.LUDZIK["next"] = None
 
     def frame(self, fx, t):
         f = wc.Frame()

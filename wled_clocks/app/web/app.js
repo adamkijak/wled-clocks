@@ -588,11 +588,14 @@ for (const key of ["words", "links", "dupes"]) {
   });
 }
 // dodatki dla widzów wł./wył.
-for (const key of ["reactions", "ludzik", "colors"]) {
+for (const key of ["reactions", "colors"]) {
   $(`#inbox-x-${key}`).addEventListener("change", (e) => {
     if (e.target.checked !== state.inbox.extras[key]) inboxCmd("extra", { key });
   });
 }
+$("#inbox-poll-hint").addEventListener("change", (e) => {
+  if (e.target.checked !== state.inbox.poll_hint) inboxCmd("poll_hint");
+});
 // ankieta: pola wypełnia ostatnia ankieta, póki ich nie ruszysz
 const POLL_COLS = ["#ff5046", "#3cbeff", "#6ef046", "#ffc828"];
 let pollDirty = false;
@@ -709,7 +712,8 @@ function renderInbox(ib) {
   if (document.activeElement !== $("#inbox-hint")) $("#inbox-hint").value = ib.hint;
   if (document.activeElement !== $("#inbox-hint-every")) $("#inbox-hint-every").value = String(ib.hint_every);
   setText($("#inbox-limits"), ib.limits);
-  for (const key of ["reactions", "ludzik", "colors"]) $(`#inbox-x-${key}`).checked = ib.extras[key];
+  for (const key of ["reactions", "colors"]) $(`#inbox-x-${key}`).checked = ib.extras[key];
+  $("#inbox-poll-hint").checked = ib.poll_hint;
   renderPoll(ib.poll);
   const key = JSON.stringify([ib.pending, ib.queue, ib.shown]);
   if (key === inboxKey) return; // listy przebudowujemy tylko po zmianie – inaczej klik mógłby trafić w znikający przycisk

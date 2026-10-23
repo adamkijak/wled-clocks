@@ -51,16 +51,14 @@ Zabezpieczenia:
 - Zabawa dla widzów (każdy dodatek do wyłączenia w ustawieniach skrzynki; widzowie mają instrukcję i przyciski
   na stronie, na której piszą):
   - **ankieta** – pytanie i 2–4 odpowiedzi w panelu; widzowie wysyłają literę (A, B…) albo treść odpowiedzi,
-    na panelu na zmianę pytanie, słupki z wynikami i adres; głosy liczą się od razu, bez akceptacji (znany
-    nadawca ma jeden głos – drugi go zmienia);
+    na panelu na zmianę pytanie, słupki z wynikami, adres i – jeśli zaznaczone „zachęta także w czasie
+    ankiety” – zachęta; głosy liczą się od razu, bez akceptacji (znany nadawca ma jeden głos – drugi go zmienia);
   - **reakcje** – `<3` serca, `!brawo`, `!konfetti`, `!fajerwerki` (też `!bravo`, `!confetti`, `!fireworks`):
     animacja na wierzchu panelu, bez akceptacji;
-  - **ludzik na zawołanie** – `ludzik taniec`, `ludzik gitara`, `ludzik pożar`… (też `guy dance`): panel na chwilę
-    pokazuje ludzika przy tym zajęciu, potem wraca do wiadomości;
   - **kolor** – `[czerwony] tekst` (zielony, niebieski, żółty, pomarańczowy, różowy, fioletowy, błękitny, złoty,
     tęcza; po angielsku też) i **emotki** `:) :( :D ;) :P :O <3` jako obrazki – w zwykłych wiadomościach, które
     dalej przechodzą przez filtry i akceptację.
-  - Głosy, reakcje i ludzik mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę.
+  - Głosy i reakcje mają lżejszy limit: z jednego adresu co 2 s, przez tunel wszyscy razem 60 na minutę.
 - Dziennik dodatku zapisuje każdą wiadomość.
 - Przy wiadomości widać IP nadawcy i przybliżone miejsce (ipwho.is, dostaje tylko adres IP) – o ile IP jest znane:
   za tunelem bore nie jest, przy własnym porcie (i `--msg-proxy` za Cloudflare) tak.
