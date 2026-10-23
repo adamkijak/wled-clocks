@@ -6754,13 +6754,20 @@ class Inbound(Clock):
 ADDR_SHOW = 5  # daily i rysunek: adres skrzynki na 5 s po INBOX.addr_idle s bez żadnej wiadomości (i tak w kółko)
 
 
-def idle_addr(f, t):
-    """Daily i rysunek: gdy nikt nic nie przysłał od INBOX.addr_idle s, na ADDR_SHOW s zamiast efektu koperta
-    z adresem (jak w „napisz”); dalsza cisza – znów po tylu s. -> True, gdy adres narysowany."""
+def idle_due(keep=False):
+    """Czy nikt nic nie przysłał od INBOX.addr_idle s (i skrzynka ma adres). keep=False: potem tylko na ADDR_SHOW s,
+    dalsza cisza – znów po tylu s; keep=True: aż ktoś coś przyśle."""
     addr, wait = INBOX.address() if INBOX.is_open() else "", INBOX.addr_idle
     idle = time.time() - INBOX.active
-    if not addr or not wait or idle < wait or (idle - wait) % (wait + ADDR_SHOW) >= ADDR_SHOW:
+    return bool(addr and wait and idle >= wait and (keep or (idle - wait) % (wait + ADDR_SHOW) < ADDR_SHOW))
+
+
+def idle_addr(f, t):
+    """Daily: po ciszy (idle_due) na ADDR_SHOW s zamiast listy koperta z adresem (jak w „napisz”).
+    -> True, gdy adres narysowany."""
+    if not idle_due():
         return False
+    addr = INBOX.address()
     sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
     Inbound.draw_addr(f, addr.split("://", 1)[-1], t)
     return True
@@ -6948,14 +6955,16 @@ class Drawing(Clock):
             DRAW["seen"] = time.time()
         px, at, wall = dict(DRAW["px"]), DRAW["at"], time.time()
         addr = INBOX.address().split("://", 1)[-1] if INBOX.is_open() and INBOX.address() else ""
-        if not px:
-            segs = [("Rysujcie razem! ", (255, 190, 30))]
-            if addr:
-                segs.append((addr, (80, 200, 255)))
-            segs.append(("  np. 45 3 czerwony", (200, 200, 215)))
-            scroll_segs(f, segs, t, 30, gap=30)
-            return
-        if idle_addr(f, t):  # cisza – adres skrzynki zamiast rysunku
+        if not px or idle_due(keep=True):  # pusty rysunek albo cisza: sam adres strony, aż ktoś zacznie rysować
+            if not addr:  # skrzynka zamknięta albo tunel się łączy – szary stan jak w „napisz”
+                msg = "connecting" + "." * (int(t * 2) % 4) if INBOX.is_open() else "inbox closed"
+                f.text(msg, (W - text_w(msg, TXT)) // 2, 0, (120, 120, 140))
+                return
+            tw = text_w(addr, TXT)
+            if tw <= W:
+                f.text(addr, (W - tw) // 2, 0, (80, 200, 255), TXT)
+            else:
+                scroll_segs(f, [(addr, (80, 200, 255))], t, 30, gap=40)
             return
         for (x, y), c in px.items():
             f.set(x, y, (255, 255, 255) if wall - at.get((x, y), 0) < 0.35 else c)
@@ -10396,8 +10405,8 @@ form{display:flex;gap:8px;margin:0}input,button{font:inherit;padding:10px;border
 background:#222;color:#eee}input{flex:1;min-width:0}button{cursor:pointer}p,li{color:#9a9ca3}.m{color:#ffd54f}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}h2{font-size:18px;margin:24px 0 4px}code{color:#9cf}
 ul{padding-left:20px}body.wide{max-width:none;margin:12px auto}.wide h1{margin:0;font-size:22px}
-.grid{display:grid;width:100%;background:#000;margin:8px 0}.grid button{aspect-ratio:1;min-width:0;padding:0;
-border:0;border-radius:0;background:#000;box-shadow:inset 0 0 0 .5px #2a2a2a}.grid button:hover{outline:1px solid #fff}.sw{width:28px;height:28px;border-radius:6px;border:2px solid #444}
+.grid{display:grid;gap:0;width:100%;background:#000;margin:8px 0}.grid button{width:100%;aspect-ratio:1;min-width:0;padding:0;
+border:0;border-radius:0;background:#000;display:block}.sw{width:28px;height:28px;border-radius:6px;border:2px solid #444}
 .sw.on{border-color:#fff}.daily{display:grid;gap:6px}.daily div{display:flex;gap:10px;align-items:center}
 .daily button{padding:6px 10px}.done{text-decoration:line-through;color:#6c6}"""
 
@@ -10415,8 +10424,8 @@ DRAW_PALETTE = [("red", "#ff2d23"), ("orange", "#ff8200"), ("yellow", "#ffe100")
 LIVE_JS = """(()=>{if(!window.fetch)return;const B=document.body,mode=B.dataset.fx,key=B.dataset.k;
 const g=document.querySelector('.grid'),q=[];let on=false,last=null,busy=false,hh='';
 if(g){const c=g.dataset.c,h=g.dataset.h;
-const at=(e)=>{const b=document.elementFromPoint(e.clientX,e.clientY);
-if(!b||b.parentNode!==g)return null;const v=b.value.split(' ');return[+v[0],+v[1]];};
+const at=(e)=>{const r=g.getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/r.width*%d)+1,
+y=Math.floor((e.clientY-r.top)/r.height*%d)+1;return x>=1&&x<=%d&&y>=1&&y<=%d?[x,y]:null;};
 const cell=(x,y)=>g.children[(y-1)*%d+x-1];
 const put=(x,y)=>{const b=cell(x,y);if(b){b.style.background=h;q.push(x+','+y);}};
 const to=(p)=>{if(!last){put(p[0],p[1]);last=p;return;}let[x,y]=last;const[x1,y1]=p;
@@ -10438,7 +10447,7 @@ const tick=()=>{if(document.hidden)return;fetch(location.pathname+'?live='+hh,{c
 if(j.fx!==mode||j.k!==key){if(idle())location.replace(location.pathname+location.search);return;}
 if(g&&j.hex&&!on&&!q.length&&!busy){hh=j.h;const k=g.children;
 for(let i=0;i<k.length;i++){const v=j.hex.substr(i*6,6);k[i].style.background=v==='------'?'':'#'+v;}}})
-.catch(()=>{});};setInterval(tick,1000);})();""" % W
+.catch(()=>{});};setInterval(tick,1000);})();""" % (W, H, W, H, W)
 LIVE_JS_SHA = base64.b64encode(hashlib.sha256(LIVE_JS.encode()).digest()).decode()
 
 

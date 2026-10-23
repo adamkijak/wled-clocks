@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.29.1
+
+- Rysunek: pusty panel pokazuje sam adres strony (np. bore.pub:41234), bez „Rysujcie razem!” i przykładu;
+  przy zamkniętej skrzynce – szare „inbox closed” jak w „napisz”.
+- Rysunek: po ciszy („adres po ciszy”, domyślnie 10 s) adres świeci, aż ktoś zacznie rysować (wcześniej 5 s).
+- Strona widzów: siatka bez kresek między pikselami, a punkt pod palcem/myszą liczony z położenia na siatce –
+  przeciąganie rysuje ciągłą linię bez dziur.
+
 ## 1.29.0
 
 - Strona widzów „Draw on the panel”: siatka na całą szerokość okna (bez przewijania w bok), paleta i siatka

@@ -67,8 +67,9 @@ Zabezpieczenia:
     koloru): z przytrzymanym przyciskiem myszy albo palcem kreska idzie płynnie, piksele lecą paczkami; albo wysyłają `45 3 czerwony` (kolumna, wiersz, kolor), `45-60 3 niebieski` (kreska), `45 3 gumka`; Ty
     malujesz myszą w panelu WWW i czyścisz jednym przyciskiem.
   - Polecenia daily i rysunku działają tylko, gdy ich efekt jest na panelu – inaczej to zwykłe wiadomości.
-    Gdy przez 10 s nikt nic nie przyśle (ani nie zmieni w panelu WWW), daily i rysunek na 5 s ustępują kopercie
-    z adresem skrzynki – tą samą czcionką co w „napisz” – i tak co 10 s ciszy. Ile sekund ciszy, ustawia się
+    Gdy przez 10 s nikt nic nie przyśle (ani nie zmieni w panelu WWW), daily na 5 s ustępuje kopercie z adresem
+    skrzynki (tą samą czcionką co w „napisz”) i tak co 10 s ciszy, a rysunek pokazuje sam adres, aż ktoś zacznie
+    rysować (pusty rysunek – zawsze sam adres). Ile sekund ciszy, ustawia się
     w skrzynce, w „Zachęta na panelu” → „adres po ciszy” (0 = nigdy).
     Strona dla widzów też pokazuje tylko to, co ma efekt na panelu: przy daily – listę osób z przyciskami, przy
     rysunku – siatkę, w pozostałych przypadkach – pole na wiadomość, ankietę, reakcje i instrukcję.
