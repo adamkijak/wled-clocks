@@ -94,6 +94,28 @@
             </select>
           </div>
         </div>
+        <h3>Filtry <span class="muted">– odznacz wszystkie = bez cenzury</span></h3>
+        <label class="chk"><input type="checkbox" id="inbox-f-words"> słowa z listy – łapie też „k.u.r.w.a”, „kuuurwa”, „k0rw@”, bez ogonków</label>
+        <textarea id="inbox-words" rows="3" spellcheck="false" aria-label="Słowa filtra"></textarea>
+        <div class="inbox-btns">
+          <button id="inbox-words-save" class="small">Zapisz listę</button>
+          <button id="inbox-words-reset" class="small" title="Wraca do listy wbudowanej (wulgaryzmy PL i EN)">Domyślna lista</button>
+          <span class="muted">rdzenie słów, po przecinku – „kurw” łapie każdą odmianę</span>
+        </div>
+        <label class="chk"><input type="checkbox" id="inbox-f-links"> linki (http, www, nazwy domen)</label>
+        <label class="chk"><input type="checkbox" id="inbox-f-dupes"> powtórki (ta sama wiadomość jeszcze raz)</label>
+        <p class="muted">Zawsze: <span id="inbox-limits"></span>.</p>
+        <h3>Zachęta na panelu <span class="muted">– na zmianę z adresem</span></h3>
+        <div class="srow">
+          <span>tekst</span>
+          <div class="wide"><input id="inbox-hint" class="text" type="text" maxlength="120" placeholder="np. Napisz coś na panel!"></div>
+          <span class="hint">pusta = bez zachęty; długa przejeżdża raz przez panel</span>
+        </div>
+        <div class="srow">
+          <span>co ile</span>
+          <div class="wide"><input id="inbox-hint-every" type="number" min="0" max="600" step="5" inputmode="numeric"> s</div>
+          <span class="hint">tyle sekund adres, potem zachęta; 0 = nigdy</span>
+        </div>
         <h3>Czekają na akceptację</h3>
         <ul id="inbox-pending" class="msgs"></ul>
         <h3>W kolejce na panel</h3>

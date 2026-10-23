@@ -129,13 +129,16 @@ const wledGroup = (fx) => WLED_GROUPS[fx.tags.includes("♪") ? 0 : fx.tags.incl
 let collapsed = {};
 try { collapsed = JSON.parse(localStorage.getItem("wc-collapsed")) || {}; } catch (e) { /* bez pamięci */ }
 const isCollapsed = (g) => (g in collapsed ? collapsed[g] : g !== "Na start");
-function setCollapsed(g, v) {
+let anchor = null; // kliknięty nagłówek kategorii: po przebudowie listy zostaje w tym samym miejscu ekranu
+function setCollapsed(g, v, h) {
   collapsed[g] = v;
   try { localStorage.setItem("wc-collapsed", JSON.stringify(collapsed)); } catch (e) { /* bez pamięci */ }
+  if (h) anchor = { name: g, top: h.getBoundingClientRect().top };
   listKey = "";
   renderList();
 }
 let shownMode = null;
+let centeredOn = null; // efekt, na którym lista była ostatnio wyśrodkowana – środkujemy tylko przy zmianie
 
 function groups() {
   const out = (clocks.categories || []).map((c) => ({ name: c.name, icon: c.icon, items: c.names.map((name) => ({
@@ -163,6 +166,7 @@ function renderList() {
   if (key === listKey) return;
   listKey = key;
   const ol = $("#list");
+  const keep = [ol.scrollTop, window.scrollY]; // przebudowa nie może przewinąć listy ani strony
   thumbSeen.disconnect(); // stare wiersze znikają – nowe zgłoszą się same
   ol.textContent = "";
   for (const g of groups()) {
@@ -173,9 +177,10 @@ function renderList() {
     h.append(el("span", "arrow", open ? "▾" : "▸"), el("span", "", `${g.icon} ${g.name}`),
       el("span", "count", q ? `${items.length}/${g.items.length}` : String(g.items.length)));
     h.tabIndex = 0;
+    h.dataset.g = g.name;
     h.setAttribute("role", "button");
     h.setAttribute("aria-expanded", String(Boolean(open)));
-    const toggle = () => !q && setCollapsed(g.name, open);
+    const toggle = () => !q && setCollapsed(g.name, open, h);
     h.onclick = toggle;
     h.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), toggle());
     ol.append(h);
@@ -206,8 +211,21 @@ function renderList() {
       ol.append(li);
     }
   }
+  ol.scrollTop = keep[0];
+  if (Math.abs(window.scrollY - keep[1]) > 1) window.scrollTo(0, keep[1]);
+  const h = anchor && [...ol.querySelectorAll("li.grp")].find((li) => li.dataset.g === anchor.name);
   const sel = ol.querySelector("li.sel, li.incycle");
-  if (sel && !q) ol.scrollTop = sel.offsetTop - ol.offsetTop - ol.clientHeight / 2 + sel.offsetHeight / 2;
+  const target = mode === "cykl" ? cur : mode;
+  if (h) { // rozwinięta/zwinięta kategoria: jej nagłówek tam, gdzie był, i z fokusem
+    ol.scrollTop += h.getBoundingClientRect().top - anchor.top;
+    const rest = h.getBoundingClientRect().top - anchor.top; // lista bez własnego przewijania – przewija się strona
+    if (Math.abs(rest) > 1) window.scrollBy(0, rest);
+    h.focus({ preventScroll: true });
+  } else if (sel && !q && target !== centeredOn) { // nowy efekt na panelu – lista pokazuje go na środku
+    ol.scrollTop = sel.offsetTop - ol.offsetTop - ol.clientHeight / 2 + sel.offsetHeight / 2;
+  }
+  if (sel && !q) centeredOn = target;
+  anchor = null;
 }
 $("#search").addEventListener("input", renderList);
 $("#search").addEventListener("keydown", (e) => {
@@ -563,6 +581,27 @@ $("#inbox-copy").onclick = async () => {
   toast(`Skopiowano: ${text}`);
 };
 $("#inbox-clear").onclick = () => confirm("Usunąć wszystkie czekające wiadomości?") && inboxCmd("clear");
+// filtry: wł./wył. od razu; lista słów – przyciskiem; zachęta – po Enter albo wyjściu z pola
+for (const key of ["words", "links", "dupes"]) {
+  $(`#inbox-f-${key}`).addEventListener("change", (e) => {
+    if (e.target.checked !== state.inbox.filters[key]) inboxCmd("filter", { key });
+  });
+}
+let wordsDirty = false; // niezapisane zmiany listy – odświeżenie stanu ich nie nadpisze
+$("#inbox-words").addEventListener("input", () => (wordsDirty = true));
+$("#inbox-words-save").onclick = () => { wordsDirty = false; inboxCmd("words", { v: $("#inbox-words").value }); };
+$("#inbox-words-reset").onclick = () => {
+  if (confirm("Przywrócić wbudowaną listę słów?")) { wordsDirty = false; inboxCmd("words", { reset: 1 }); }
+};
+const saveHint = () => {
+  const every = Number($("#inbox-hint-every").value);
+  if (!(every >= 0 && every <= 600)) return toast("zachęta: co 0–600 s");
+  inboxCmd("hint", { v: $("#inbox-hint").value, every: Math.round(every) });
+};
+for (const id of ["#inbox-hint", "#inbox-hint-every"]) {
+  $(id).addEventListener("change", saveHint);
+  $(id).addEventListener("keydown", (e) => e.key === "Enter" && e.target.blur());
+}
 
 // teksty od obcych ludzi – tylko przez textContent (el), nigdy innerHTML
 function msgList(id, items, buttons) {
@@ -615,6 +654,12 @@ function renderInbox(ib) {
   $("#inbox-close").disabled = !ib.open;
   if (document.activeElement !== $("#inbox-hours")) $("#inbox-hours").value = String(ib.hours);
   if (document.activeElement !== $("#inbox-auto")) $("#inbox-auto").value = ib.auto ? "1" : "0";
+  for (const key of ["words", "links", "dupes"]) $(`#inbox-f-${key}`).checked = ib.filters[key];
+  $("#inbox-words").disabled = !ib.filters.words;
+  if (!wordsDirty) $("#inbox-words").value = ib.words; // niezapisanych zmian nie nadpisujemy
+  if (document.activeElement !== $("#inbox-hint")) $("#inbox-hint").value = ib.hint;
+  if (document.activeElement !== $("#inbox-hint-every")) $("#inbox-hint-every").value = String(ib.hint_every);
+  setText($("#inbox-limits"), ib.limits);
   const key = JSON.stringify([ib.pending, ib.queue, ib.shown]);
   if (key === inboxKey) return; // listy przebudowujemy tylko po zmianie – inaczej klik mógłby trafić w znikający przycisk
   inboxKey = key;

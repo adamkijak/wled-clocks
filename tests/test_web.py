@@ -780,6 +780,44 @@ class InboxTest(unittest.TestCase):
         self.assertNotEqual(self.ib.code, code)
         self.assertEqual(self.send(self.ib.code, "teraz ok", ip="2.2.2.2")[0], 200)
 
+    def test_filters_config_and_hint(self):
+        """Filtry do wyłączenia (bez cenzury), własna lista słów, zachęta na panelu na zmianę z adresem."""
+        e = wc.Engine(args(mode="napisz"), {})
+        self.ib.auto, self.ib.proxy = True, True
+        self.ib.open()
+        code = self.ib.code
+        wc.web_cmd(e, {"op": "inbox", "act": "words", "v": "Zółw, kot;  ŁOŚ"})()
+        self.assertEqual(self.ib.words, ["zolw", "kot", "los"])
+        self.assertEqual(self.send(code, "k.o.t", ip="3.0.0.1")[0], 422)            # własne słowo
+        self.assertEqual(self.send(code, "kurwa", ip="3.0.0.2")[0], 200)             # spoza listy
+        wc.web_cmd(e, {"op": "inbox", "act": "words", "reset": 1})()
+        self.assertEqual(self.ib.words, wc.MSG_BAD)
+        for key in ("words", "links", "dupes"):                                     # bez cenzury
+            wc.web_cmd(e, {"op": "inbox", "act": "filter", "key": key})()
+        self.assertEqual(self.send(code, "chuj www.x.pl", ip="3.0.0.3")[0], 200)
+        self.assertEqual(self.send(code, "KURWA", ip="3.0.0.4")[0], 200)            # powtórka też
+        with self.assertRaises(ValueError):
+            wc.web_cmd(e, {"op": "inbox", "act": "filter", "key": "nie_ma"})
+        with self.assertRaises(ValueError):
+            wc.web_cmd(e, {"op": "inbox", "act": "hint", "v": "x", "every": 9999})
+        wc.web_cmd(e, {"op": "inbox", "act": "hint", "v": "  Pisz\tśmiało! 👋 ", "every": 10})()
+        self.assertEqual((self.ib.hint, self.ib.hint_every), ("Pisz śmiało!", 10))
+        snap = self.ib.snapshot()
+        self.assertEqual(snap["filters"], {"words": False, "links": False, "dupes": False})
+        self.assertIn("znaków", snap["limits"])
+        json.dumps(snap)
+        while self.ib.take():                                                        # pusta kolejka: adres i zachęta
+            pass
+        fx = wc.CLOCKS["napisz"]()
+        lit = lambda t: sum(1 for row in self.frame(fx, t).px for c in row[fx.X0:] if c[0] > 200 and 150 < c[1] < 230)
+        self.assertGreater(lit(1.0), 0)                                              # zachęta (złota)
+        self.assertEqual(lit(8.0), 0)                                                # potem adres (niebieski)
+
+    def frame(self, fx, t):
+        f = wc.Frame()
+        fx.draw(f, wc.dtm.datetime.now().astimezone(), t, 0.05)
+        return f
+
     def test_bore_tunnel(self):
         """Tunel bore (udawany: wypisuje adres jak prawdziwy i czeka): port jest kodem, działa gołe TCP."""
         fake = os.path.join(TMP, "fake_bore")

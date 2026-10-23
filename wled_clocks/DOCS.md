@@ -42,8 +42,12 @@ Zabezpieczenia:
 - Do 80 znaków, bez emoji i znaków sterujących; binarne śmieci (np. skanery portów) są odrzucane bez odpowiedzi.
 - Przez tunel nie widać adresów nadawców, więc limit jest wspólny: najwyżej 12 wiadomości na minutę, w kolejce
   najwyżej 20; blokowanie nadawcy (⛔) jest niedostępne.
-- Filtr wulgaryzmów i linków (prosty – łatwo go obejść), dlatego domyślnie **akceptacja ręczna**: każda wiadomość
-  czeka w panelu na ✓.
+- Filtry (w ustawieniach skrzynki, każdy do wyłączenia – wszystkie wyłączone = bez cenzury): słowa z listy
+  (wbudowane wulgaryzmy PL i EN; listę można dowolnie zmienić – rdzenie słów, „kurw” łapie każdą odmianę, także
+  „k.u.r.w.a” i „k0rw@”), linki i powtórki tej samej wiadomości. Filtr jest prosty – łatwo go obejść, dlatego
+  domyślnie **akceptacja ręczna**: każda wiadomość czeka w panelu na ✓.
+- Zachęta: własny tekst (np. „Napisz coś na panel!”) pokazywany na panelu na zmianę z adresem, co ustawioną liczbę
+  sekund.
 - Dziennik dodatku zapisuje każdą wiadomość.
 - Przy wiadomości widać IP nadawcy i przybliżone miejsce (ipwho.is, dostaje tylko adres IP) – o ile IP jest znane:
   za tunelem bore nie jest, przy własnym porcie (i `--msg-proxy` za Cloudflare) tak.

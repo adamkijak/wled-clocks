@@ -231,6 +231,13 @@ main > *, .cols > * { min-width: 0; }
 .inbox .addr { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .inbox .addr code { font-size: 16px; font-weight: 600; user-select: all; overflow-wrap: anywhere; }
 .inbox-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.inbox-btns .muted { align-self: center; font-size: 12px; }
+.inbox .chk { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; cursor: pointer; }
+.inbox .chk input { margin-top: 3px; }
+.inbox textarea { width: 100%; box-sizing: border-box; margin: 2px 0 6px; font: 13px/1.4 ui-monospace, monospace;
+  color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  resize: vertical; }
+.inbox .srow .wide input.text { flex: 1; }
 .msgs { list-style: none; margin: 0; padding: 0; }
 .msgs li {
   display: grid;

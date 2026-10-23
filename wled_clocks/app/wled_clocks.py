@@ -6525,8 +6525,8 @@ ENVELOPE = ["YYYYYYYYYYY", "DDYYYYYYYDD", "YDDYYYYYDDY", "YYDDYYYDDYY", "YYYDDYD
 @reg("napisz")
 class Inbound(Clock):
     """Wiadomości od widzów (np. uczestników calla): sam adres (domena:port – tunel bore.pub albo własny),
-    pod który wysyła się tekst – echo do /dev/tcp, curl albo przeglądarka – a potem po kolei to, co przyszło.
-    Skrzynkę otwiera się w panelu WWW – tylko wtedy coś przyjmuje."""
+    pod który wysyła się tekst – echo do /dev/tcp, curl albo przeglądarka – na zmianę z własną zachętą, a potem
+    po kolei to, co przyszło. Skrzynkę otwiera się w panelu WWW – tylko wtedy coś przyjmuje."""
 
     X0 = 13  # tekst zaczyna się za kopertą
 
@@ -6557,6 +6557,15 @@ class Inbound(Clock):
             f.text(msg, self.X0 + 2, 0, (120, 120, 140))
             return
         sprite(f, ENVELOPE, 0, 2, {"Y": (255, 200, 0), "D": (40, 25, 0)})
+        hint, every = INBOX.hint, INBOX.hint_every
+        if hint and every:  # co every s zachęta (krótka stoi 4 s, długa przejeżdża raz), potem znów adres
+            hw = text_w(hint, TXT)
+            hdur = 4.0 if hw <= W - self.X0 else scroll_time(hw + W - self.X0, 30) + 0.5
+            k = t % (every + hdur)
+            if k < hdur:
+                x = self.X0 + (W - self.X0 - hw) // 2 if hw <= W - self.X0 else W - scroll_px(k, 30)
+                f.draw([(px, py) for px, py in text_px(hint, x, 0, TXT) if px >= self.X0], (255, 210, 90))
+                return
         addr = addr.split("://", 1)[-1]  # sam adres: domena:port (własny port – jeszcze kod w ścieżce)
         tw = text_w(addr, TXT)
         if tw <= W - self.X0:
@@ -8873,6 +8882,8 @@ class Engine:
                "ludzik_zmiana": (["losowo"] + LUDZIK_HOWS)[LUDZIK["how"]], "ludzik_strona": LUDZIK_SIDES[LUDZIK["side"]],
                "oczy_kolor": eye_hex(EYES["col"]),
                "sending": self.sending, "msg_auto": INBOX.auto, "msg_hours": INBOX.hours,
+               "msg_filters": INBOX.filters, "msg_words": INBOX.words, "msg_hint": INBOX.hint,
+               "msg_hint_every": INBOX.hint_every,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
@@ -9736,6 +9747,22 @@ def web_cmd(e, c):
                 raise ValueError(f"czas otwarcia skrzynki: od {MSG_HOURS[0]:g} do {MSG_HOURS[1]:g} h")
             h = round(h * 4) / 4  # co kwadrans
             return lambda: INBOX.set_hours(h)
+        if act == "filter":  # filtr wł./wył.
+            key = c.get("key")
+            if key not in INBOX.filters:
+                raise ValueError(f"nieznany filtr {key!r}")
+            return lambda: INBOX.filters.update({key: not INBOX.filters[key]})
+        if act == "words":  # lista słów filtra; pusty tekst + reset = domyślna
+            if c.get("reset"):
+                return lambda: setattr(INBOX, "words", list(MSG_BAD))
+            words = msg_words(str(c.get("v", ""))[:5000])
+            return lambda: setattr(INBOX, "words", words)
+        if act == "hint":  # zachęta na panelu i co ile sekund
+            text = msg_clean(str(c.get("v", "")))[:120]
+            every = int(c.get("every", INBOX.hint_every))
+            if not 0 <= every <= 600:
+                raise ValueError("zachęta: co 0–600 s (0 = nigdy)")
+            return lambda: (setattr(INBOX, "hint", text), setattr(INBOX, "hint_every", every))
         if act in ("approve", "reject", "block", "again", "clear"):
             mid = int(c.get("id", 0))
             return lambda: INBOX.act(act, mid)
@@ -9957,18 +9984,33 @@ def msg_clean(raw):
     return " ".join("".join(out).split())
 
 
-def msg_bad(s):
-    """Powód odrzucenia (link albo wulgaryzm) albo "" – „k.u.r.w.a” i „kuuurwa” też wpadają."""
-    if MSG_URL.search(s):
+def msg_fold(s):
+    """Małe litery bez ogonków i „leetspeaku” (k0rw@ -> korwa) – tak porównuje filtr słów."""
+    return "".join(c for c in unicodedata.normalize("NFD", s.lower().replace("ł", "l").translate(_LEET))
+                   if not unicodedata.combining(c))
+
+
+def msg_bad(s, words=MSG_BAD, links=True):
+    """Powód odrzucenia (link albo słowo z listy) albo "" – „k.u.r.w.a” i „kuuurwa” też wpadają.
+    words: rdzenie słów (puste = bez filtra słów), links: czy odrzucać linki."""
+    if links and MSG_URL.search(s):
         return "no links, please"
-    folded = "".join(c for c in unicodedata.normalize("NFD", s.lower().replace("ł", "l").translate(_LEET))
-                     if not unicodedata.combining(c))
-    for tok in folded.split():
+    for tok in msg_fold(s).split():
         w = re.sub(r"[^a-z]", "", tok)
         once = re.sub(r"(.)\1+", r"\1", w)
-        if any(b in w or b in once for b in MSG_BAD):
+        if any(b in w or b in once for b in words):
             return "message rejected by the filter"
     return ""
+
+
+def msg_words(text):
+    """Lista słów do filtra z tekstu wpisanego w panelu (przecinki, spacje, nowe linie) -> rdzenie a–z."""
+    out = []
+    for tok in re.split(r"[\s,;]+", text):
+        w = re.sub(r"[^a-z]", "", msg_fold(tok))
+        if len(w) >= 2 and w not in out:
+            out.append(w[:24])
+    return out[:300]
 
 
 class MsgServer(httpd.ThreadingHTTPServer):
@@ -10110,6 +10152,10 @@ class Inbox:
         self.taddr, self.proc, self.gen, self.err = "", None, 0, ""  # adres z tunelu, proces, numer otwarcia
         self.all = []                         # czasy wiadomości od nieznanych nadawców (limit wspólny)
         self.auto, self.hours = False, 2
+        # filtry (wyłączone wszystkie = bez cenzury): słowa z listy, linki, ta sama wiadomość drugi raz
+        self.filters = {"words": True, "links": True, "dupes": True}
+        self.words = list(MSG_BAD)
+        self.hint, self.hint_every = "Napisz coś na panel!", 30  # zachęta na panelu co ile s (0 = nigdy)
         self.until, self.opened, self.code, self.srv = 0.0, 0.0, "", None
         self.pending, self.queue, self.shown = [], [], []
         self.hits, self.misses, self.blocked = {}, {}, set()
@@ -10293,10 +10339,11 @@ class Inbox:
                 self.hits = {k: v for k, v in self.hits.items() if now - v[-1] < MSG_WINDOW}
             if ip:
                 self.hits[ip] = hits + [now]  # liczą się też odrzucone przez filtr – bez zgadywania słów do skutku
-            why = msg_bad(text)
+            why = msg_bad(text, self.words if self.filters["words"] else [], self.filters["links"])
             if why:
                 return 422, why
-            if any(m["text"].casefold() == text.casefold() for m in self.pending + self.queue + self.shown[-5:]):
+            if self.filters["dupes"] and any(m["text"].casefold() == text.casefold()
+                                             for m in self.pending + self.queue + self.shown[-5:]):
                 return 409, "this message was already sent"
             if len(self.pending) + len(self.queue) >= MSG_WAIT:
                 return 503, "queue is full – try again in a moment"
@@ -10347,6 +10394,11 @@ class Inbox:
             op = self.until > time.time()
             return {"enabled": self.enabled(), "open": op, "until": hm(self.until) if op else "",
                     "address": self.address() if op else "", "auto": self.auto, "hours": self.hours,
+                    "filters": dict(self.filters), "words": ", ".join(self.words), "hint": self.hint,
+                    "hint_every": self.hint_every,
+                    "limits": f"najwyżej {MSG_MAX} znaków; z jednego adresu co {MSG_GAP} s i najwyżej {MSG_PER} "
+                              f"na {MSG_WINDOW // 60} min; przez tunel wszyscy razem {MSG_ALL[0]} na minutę; "
+                              f"czeka najwyżej {MSG_WAIT}; bez emoji",
                     "tunnel": self.tunnel, "public": self.public, "blocked": len(self.blocked), "err": self.err,
                     "pending": [row(m) for m in self.pending], "queue": [row(m) for m in self.queue],
                     "shown": [row(m) for m in reversed(self.shown)]}
@@ -10555,6 +10607,15 @@ def main():
     INBOX.auto = bool(cfg.get("msg_auto", False))
     h = cfg.get("msg_hours")
     INBOX.hours = h if isinstance(h, (int, float)) and MSG_HOURS[0] <= h <= MSG_HOURS[1] else 2
+    for k, v in (cfg.get("msg_filters") or {}).items():
+        if k in INBOX.filters:
+            INBOX.filters[k] = bool(v)
+    if isinstance(cfg.get("msg_words"), list):
+        INBOX.words = msg_words(" ".join(map(str, cfg["msg_words"])))
+    if isinstance(cfg.get("msg_hint"), str):
+        INBOX.hint = msg_clean(cfg["msg_hint"])[:120]
+    if isinstance(cfg.get("msg_hint_every"), int) and 0 <= cfg["msg_hint_every"] <= 600:
+        INBOX.hint_every = cfg["msg_hint_every"]
     PANEL["ddp_w"] = W
     if a.host:
         try:

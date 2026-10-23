@@ -1,5 +1,15 @@
 # Zmiany
 
+## 1.23.0
+
+- Lista efektów: rozwinięcie albo zwinięcie kategorii nie przewija już listy – kliknięty nagłówek zostaje w tym
+  samym miejscu i z fokusem; inne odświeżenia listy (np. nowa wiadomość) też nie ruszają przewinięcia. Do
+  zaznaczonego efektu lista przewija się tylko, gdy na panelu zmieni się efekt.
+- Skrzynka „napisz” – filtry widoczne i do ustawienia: słowa z listy (lista do edycji, „Domyślna lista” wraca do
+  wbudowanej), linki, powtórki; wszystkie wyłączone = bez cenzury. Widać też stałe limity (długość, tempo).
+- Skrzynka „napisz” – zachęta: własny tekst na panelu na zmianę z adresem, co ustawioną liczbę sekund
+  (domyślnie „Napisz coś na panel!” co 30 s; 0 = nigdy).
+
 ## 1.22.2
 
 - Ludzik: kombajn zostawia po sobie bele słomy – co kawałek bela wypada z tyłu na ziemię i leży do końca
