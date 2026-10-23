@@ -1,5 +1,19 @@
 # Zmiany
 
+## 1.24.0
+
+Efekt „napisz” – zabawa dla ludzi na callu (każdy dodatek do wyłączenia):
+
+- **Ankieta**: pytanie i 2–4 odpowiedzi w ustawieniach skrzynki; widzowie wysyłają literę albo treść odpowiedzi
+  (albo klikają na swojej stronie), panel pokazuje na zmianę pytanie, słupki z wynikami (błysk przy nowym głosie)
+  i adres; w panelu WWW wyniki na żywo, zakończ / wznów / wyzeruj.
+- **Reakcje**: `<3` serca, `!brawo` (napis BRAWO! i konfetti), `!konfetti`, `!fajerwerki` – animacje na
+  wierzchu panelu, bez akceptacji.
+- **Ludzik na zawołanie**: `ludzik taniec`, `ludzik gitara`, `guy fire`… – panel na chwilę pokazuje ludzika przy
+  tym zajęciu.
+- **Kolory** `[czerwony] tekst` (też tęcza) i **emotki** `:) :( :D ;) :P :O <3` jako obrazki w wiadomościach.
+- Strona do pisania: instrukcja, przyciski reakcji i głosowania; w panelu WWW ściąga z poleceniami.
+
 ## 1.23.0
 
 - Lista efektów: rozwinięcie albo zwinięcie kategorii nie przewija już listy – kliknięty nagłówek zostaje w tym

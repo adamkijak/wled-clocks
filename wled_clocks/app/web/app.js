@@ -587,6 +587,55 @@ for (const key of ["words", "links", "dupes"]) {
     if (e.target.checked !== state.inbox.filters[key]) inboxCmd("filter", { key });
   });
 }
+// dodatki dla widzów wł./wył.
+for (const key of ["reactions", "ludzik", "colors"]) {
+  $(`#inbox-x-${key}`).addEventListener("change", (e) => {
+    if (e.target.checked !== state.inbox.extras[key]) inboxCmd("extra", { key });
+  });
+}
+// ankieta: pola wypełnia ostatnia ankieta, póki ich nie ruszysz
+const POLL_COLS = ["#ff5046", "#3cbeff", "#6ef046", "#ffc828"];
+let pollDirty = false;
+const pollInputs = () => ["#poll-q", "#poll-o0", "#poll-o1", "#poll-o2", "#poll-o3"].map((id) => $(id));
+pollInputs().forEach((inp) => inp.addEventListener("input", () => (pollDirty = true)));
+$("#poll-start").onclick = () => {
+  const [q, ...opts] = pollInputs().map((i) => i.value.trim());
+  if (!q || opts.filter(Boolean).length < 2) return toast("ankieta: pytanie i co najmniej 2 odpowiedzi");
+  const p = state.inbox.poll;
+  if (p && p.on && p.votes.some(Boolean) && !confirm("Zacząć nową ankietę? Obecne głosy przepadną.")) return;
+  pollDirty = false;
+  inboxCmd("poll", { q, opts: opts.filter(Boolean) });
+};
+$("#poll-toggle").onclick = () => state.inbox.poll && inboxCmd(state.inbox.poll.on ? "poll_stop" : "poll_start");
+$("#poll-reset").onclick = () => confirm("Wyzerować głosy?") && inboxCmd("poll_reset");
+
+function renderPoll(p) {
+  setText($("#poll-state"), !p ? "" : p.on ? "– trwa, wyniki na panelu" : "– zakończona");
+  $("#poll-toggle").disabled = $("#poll-reset").disabled = !p;
+  setText($("#poll-toggle"), p && !p.on ? "Wznów" : "Zakończ");
+  if (p && !pollDirty && !pollInputs().includes(document.activeElement)) {
+    pollInputs().forEach((inp, i) => (inp.value = i ? p.opts[i - 1] || "" : p.q));
+  }
+  const key = JSON.stringify(p);
+  if (key === renderPoll.key) return;
+  renderPoll.key = key;
+  const ul = $("#poll-res");
+  ul.textContent = "";
+  if (!p) return;
+  const total = p.votes.reduce((a, b) => a + b, 0);
+  p.opts.forEach((o, i) => {
+    const li = el("li");
+    const bar = el("span", "bar");
+    const fill = el("i");
+    fill.style.width = `${total ? (100 * p.votes[i]) / total : 0}%`;
+    fill.style.background = POLL_COLS[i];
+    bar.append(fill);
+    li.append(el("span", "", `${String.fromCharCode(65 + i)}: ${o}`), bar,
+      el("b", "", `${p.votes[i]}${total ? ` (${Math.round((100 * p.votes[i]) / total)}%)` : ""}`));
+    ul.append(li);
+  });
+}
+
 let wordsDirty = false; // niezapisane zmiany listy – odświeżenie stanu ich nie nadpisze
 $("#inbox-words").addEventListener("input", () => (wordsDirty = true));
 $("#inbox-words-save").onclick = () => { wordsDirty = false; inboxCmd("words", { v: $("#inbox-words").value }); };
@@ -660,6 +709,8 @@ function renderInbox(ib) {
   if (document.activeElement !== $("#inbox-hint")) $("#inbox-hint").value = ib.hint;
   if (document.activeElement !== $("#inbox-hint-every")) $("#inbox-hint-every").value = String(ib.hint_every);
   setText($("#inbox-limits"), ib.limits);
+  for (const key of ["reactions", "ludzik", "colors"]) $(`#inbox-x-${key}`).checked = ib.extras[key];
+  renderPoll(ib.poll);
   const key = JSON.stringify([ib.pending, ib.queue, ib.shown]);
   if (key === inboxKey) return; // listy przebudowujemy tylko po zmianie – inaczej klik mógłby trafić w znikający przycisk
   inboxKey = key;

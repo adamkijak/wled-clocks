@@ -116,6 +116,37 @@
           <div class="wide"><input id="inbox-hint-every" type="number" min="0" max="600" step="5" inputmode="numeric"> s</div>
           <span class="hint">tyle sekund adres, potem zachęta; 0 = nigdy</span>
         </div>
+        <h3>Ankieta <span id="poll-state" class="muted"></span></h3>
+        <div class="srow">
+          <span>pytanie</span>
+          <div class="wide"><input id="poll-q" class="text" type="text" maxlength="80" placeholder="np. Kawa czy herbata?"></div>
+        </div>
+        <div class="srow">
+          <span>odpowiedzi</span>
+          <div class="wide poll-opts">
+            <input id="poll-o0" class="text" type="text" maxlength="30" placeholder="A">
+            <input id="poll-o1" class="text" type="text" maxlength="30" placeholder="B">
+            <input id="poll-o2" class="text" type="text" maxlength="30" placeholder="C (opcjonalnie)">
+            <input id="poll-o3" class="text" type="text" maxlength="30" placeholder="D (opcjonalnie)">
+          </div>
+          <span class="hint">widzowie wysyłają literę (A, B…) albo treść odpowiedzi, albo klikają na swojej stronie; głos liczy się od razu, bez akceptacji</span>
+        </div>
+        <div class="inbox-btns">
+          <button id="poll-start">Nowa ankieta</button>
+          <button id="poll-toggle">Zakończ</button>
+          <button id="poll-reset" title="Głosy od zera, pytanie zostaje">Wyzeruj głosy</button>
+        </div>
+        <ul id="poll-res" class="poll-res"></ul>
+        <h3>Dla widzów</h3>
+        <label class="chk"><input type="checkbox" id="inbox-x-reactions"> reakcje – animacje na panelu bez akceptacji</label>
+        <label class="chk"><input type="checkbox" id="inbox-x-ludzik"> ludzik na zawołanie – na chwilę pokazuje ludzika przy zajęciu</label>
+        <label class="chk"><input type="checkbox" id="inbox-x-colors"> kolory i emotki w wiadomościach</label>
+        <p class="muted cheat">Ściąga (widzowie mają ją też na swojej stronie z polem do pisania):
+          <code>&lt;3</code> serca, <code>!brawo</code>, <code>!konfetti</code>, <code>!fajerwerki</code> – animacje;
+          <code>ludzik taniec</code> (gitara, pożar, balon, zwierzak, piłka, rower, karetka, policja, traktor…) – ludzik
+          robi to na panelu; <code>[czerwony] tekst</code> (zielony, niebieski, żółty, pomarańczowy, różowy, fioletowy,
+          błękitny, złoty, tęcza) – kolor wiadomości; <code>:) :( :D ;) :P :O &lt;3</code> – obrazki w tekście.
+          Po angielsku też: <code>!bravo</code>, <code>guy dance</code>, <code>[red]</code>…</p>
         <h3>Czekają na akceptację</h3>
         <ul id="inbox-pending" class="msgs"></ul>
         <h3>W kolejce na panel</h3>

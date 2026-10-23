@@ -238,6 +238,14 @@ main > *, .cols > * { min-width: 0; }
   color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
   resize: vertical; }
 .inbox .srow .wide input.text { flex: 1; }
+.inbox .poll-opts { flex-wrap: wrap; }
+.inbox .poll-opts input.text { flex: 1 1 8em; }
+.poll-res { list-style: none; padding: 0; margin: 4px 0 8px; display: grid; gap: 4px; }
+.poll-res li { display: grid; grid-template-columns: minmax(6em, 1fr) 3fr auto; gap: 8px; align-items: center; font-size: 13px; }
+.poll-res .bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.poll-res .bar i { display: block; height: 100%; }
+.inbox .cheat { font-size: 12px; line-height: 1.6; }
+.inbox .cheat code { white-space: nowrap; }
 .msgs { list-style: none; margin: 0; padding: 0; }
 .msgs li {
   display: grid;
