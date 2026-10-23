@@ -4977,7 +4977,7 @@ class Worker(Clock):
     kopniak, zamiatanie, czary, spawanie laserem, lina, holowanie autem, obrót korbą) – nowe cyfry wchodzą równo z pełną
     minutą; z nudów spaceruje po obu stronach zegara, czyta, śpi w łóżku, je, gra na gitarze, podbija piłkę, buduje
     zamek z piasku, goni balonik, głaszcze kota albo psa, gasi płonący śmietnik (przyjeżdża wozem strażackim),
-    żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem, autem, karetką, radiowozem, traktorem z przyczepami i kombajnem (kilka okrążeń:
+    żongluje, zamiata, robi pajacyki i pompki, strzela przez zegar do tarczy z łuku, pistoletu albo bazooki (seriami), jeździ rowerem, autem, karetką, radiowozem, traktorem z przyczepami, kombajnem i koparką, lata samolotem (kilka okrążeń:
     wyjeżdża za krawędź i wraca z drugiej strony, za cyframi); co kilka minut przeciąga transparent z pogodą.
     Zajęcia trwają tyle, ile zostało do przestawiania cyfr (najwyżej górna granica z TRICKS)."""
 
@@ -5089,7 +5089,22 @@ class Worker(Clock):
     POSES["policja"] = ["....................", "....................", "......bbbbbbbb......", ".....bXXYYYYYXb.....",
                         "....bXXXSESESXXb....", "...bXXXXSSSSSXXXb...", ".bbbbbbbbbbbbbbbbbb.", "LWWWWWWWWWWWWWWWWWWW",
                         "WWWQQQWWWWWWWWQQQWWR", "..QQHQQ......QQHQQ..", "...QQQ........QQQ..."]  # granatowo-biały
-    del TRACTOR, HAY, PUMPKINS, COMBINE, i, f_, x_, y_, z_
+    DIGGER = ["...yyyyy................", "..yy...yyy.....DDDDDDD..", "..yy.....yyy...DXXYYYX..",
+              "..yy.......yy..DXESSYX..", "..yy........yy.DXSSSSXD.", "..yy.........yyyyyyyyyyy",
+              ".DDDD.......yyyykyyyyyyy", "DDDD...........DDDDDD...", "D.D.......{a}.",
+              "..........QHqHqHqHqHqHQ.", "..........{b}."]
+    PLANE = ["......................", "..................ZZ..", ".......X.YYY.....ZZZ..", "......XESSSY....ZZZZ..",
+             "{p}..ZZZZZZZZZZZZZZZZZ..", "{h}HZZWWWWWWWWWWWWWWZZRR", "{p}..ZZZZZZZZZZZZZZZ....",
+             "......OOOOOOOO........", "......................", "......................",
+             "......................"]
+    for i, f_ in enumerate((dict(a=".qQqQqQqQqQq.", b=".QqQqQqQqQqQ.", p="D", h="D"),
+                            dict(a=".QqQqQqQqQqQ.", b=".qQqQqQqQqQq.", p=".", h="D"))):
+        POSES[f"koparka{i + 1}"], POSES[f"samolot{i + 1}"] = [], []  # gąsienice się przesuwają, śmigło kręci
+        for x_ in DIGGER:
+            POSES[f"koparka{i + 1}"].append(x_.format(**f_))
+        for x_ in PLANE:
+            POSES[f"samolot{i + 1}"].append(x_.format(**f_))
+    del TRACTOR, HAY, PUMPKINS, COMBINE, DIGGER, PLANE, i, f_, x_, y_, z_
     POSES["glowa1"], POSES["glowa2"] = POSES["stoi"][::-1], POSES["idzie1"][::-1]  # stanie na głowie, nogi machają
     # nudzi się: nazwa -> (czas od–do w s, pozy jednej rundy, czas jednej pozy, co druga odbita w lustrze);
     # czas zaokrągla się do pełnych rund, a gdy do przestawiania cyfr zostało mniej – tyle rund, ile się zmieści
@@ -5124,7 +5139,8 @@ class Worker(Clock):
     CASTLE = ["#.#...#.#", "###...###", "###.#.###", "#########", "####.####", "###...###"]  # rzędy 4–9
     RIDES = {"rower": (("rower1", "rower2"), 14, (2, 4)), "auto": (("auto",), 22, (2, 5)),
              "traktor": (("traktor1", "traktor2"), 8, (1, 2)), "kombajn": (("kombajn1", "kombajn2"), 6, (1, 2)),
-             "karetka": (("karetka",), 22, (2, 4)), "policja": (("policja",), 22, (2, 4))}
+             "karetka": (("karetka",), 22, (2, 4)), "policja": (("policja",), 22, (2, 4)),
+             "koparka": (("koparka1", "koparka2"), 6, (1, 2)), "samolot": (("samolot1", "samolot2"), 30, (2, 4))}
     # koguty: pojazd -> [(kolumna, wiersz, kolor w 1. połowie błysku, w 2.)]
     SIRENS = {"karetka": [(5, 0, (0, 90, 255), None), (6, 0, (0, 90, 255), None), (19, 0, None, (0, 90, 255)),
                           (20, 0, None, (0, 90, 255))],
@@ -5155,9 +5171,10 @@ class Worker(Clock):
            "K": (40, 170, 90), "A": (110, 220, 40), "T": (150, 90, 40), "G": (230, 180, 60), "D": (130, 130, 145),
            "V": (100, 125, 40), "F": (0, 200, 255), "Q": (110, 110, 120), "H": (220, 220, 230), "N": (30, 160, 60),
            "X": (110, 170, 230), "L": (255, 255, 170), "U": (215, 120, 30), "J": (70, 110, 220),
-           "Z": (220, 25, 20), "u": (150, 70, 10), "k": (45, 20, 5), "b": (20, 45, 150)}
+           "Z": (220, 25, 20), "u": (150, 70, 10), "k": (45, 20, 5), "b": (20, 45, 150), "y": (245, 175, 0),
+           "q": (55, 55, 62)}
     # D broń/grot, V rura bazooki, U pudło gitary/dynie (u – cień, k – otwór), J kołdra, Z wóz strażacki/pas
-    # karetki, b radiowóz
+    # karetki, b radiowóz, y koparka, q gąsienice
     # E oczy (mrugają), C zamknięte oko, M usta, R uśmiech (w aucie: tylne światło), W kartki/poduszka/drabina,
     # K okładka, A jabłko, T kij/gryf/łóżko/dyszel, G miotła/siano/felgi, F rama roweru, Q opony, H piasty/kołpaki,
     # N karoseria (auto, traktor, kombajn), X szyby, L reflektor
@@ -5879,7 +5896,8 @@ class Worker(Clock):
         self.x = clamp(r["edge"], -10, W)  # gdyby przerwało przestawianie cyfr – idzie do roboty zza krawędzi
         pose, flip = poses[int(k / 3) % len(poses)], d > 0
         sx = x + self.place(pose, flip)
-        self.man(f, pose, sx, flip, blink)
+        dy = round(math.sin(t * 1.4) * 1.2) if r["n"] == "samolot" else 0  # samolot lekko faluje
+        self.man(f, pose, sx, flip, blink, dy=dy)
         w = len(self.POSES[pose][0])
         cx = lambda c: sx + (w - 1 - c if flip else c)
         if r["n"] == "traktor":
@@ -5909,11 +5927,16 @@ class Worker(Clock):
                 if col:
                     for dx, dy in ((-1, 0), (1, 0), (0, 1), (0, -1)):
                         f.add(cx(c) + dx, y + dy, mul(col, 0.18))
+        elif r["n"] == "koparka":
+            for q in range(3):  # dym z rury nad silnikiem
+                ph = (t * 1.3 + q / 3) % 1
+                f.add(cx(22) - d * ph * 4, 3 - ph * 3, mul(visible((90, 90, 95), 4), 1 - ph))
+        elif r["n"] == "samolot":
+            for q in range(12):  # smuga za ogonem, rwie się i gaśnie
+                if hash1(q + int(t * 8)) > 0.25:
+                    f.add(cx(22 + q), 5 + dy, mul((150, 150, 160), (1 - q / 12) * 0.8))
         if r["n"] in ("auto", "karetka", "policja"):
-            front, back = (sx + w, sx - 1) if flip else (sx - 1, sx + w)
-            ly = next(i for i, row in enumerate(self.POSES[pose]) if "L" in row)  # wiersz reflektora
-            for q in range(6):  # snop światła przed maską
-                f.add(front + d * q, ly + (q > 2), mul((90, 85, 50), 1 - q / 6))
+            back = sx - 1 if flip else sx + w
             for q in range(3):  # spaliny z rury
                 ph = (t * 2 + q / 3) % 1
                 f.add(back - d * (1 + ph * 6), 9 - ph * 2, mul(visible((90, 90, 95), 4), 1 - ph))

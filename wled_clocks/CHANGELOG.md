@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.26.0
+
+- Ludzik: nowe pojazdy – żółta **koparka** na gąsienicach (ramię z łyżką, przesuwające się gąsienice, dym z rury,
+  6 px/s) i czerwony **samolot** (kręcące się śmigło, lekko faluje w locie, za ogonem rwąca się smuga, 30 px/s).
+  Oba można wyłączyć i ustawić im długość jak innym zajęciom.
+- Ludzik: auto, karetka i radiowóz nie mają już żółtego paska „świateł” przed maską – zostaje sam reflektor.
+
 ## 1.25.1
 
 - Panel WWW: ustawienia skrzynki uporządkowane – na wierzchu stan, adres, otwórz/zamknij i wiadomości czekające
