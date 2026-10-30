@@ -97,6 +97,24 @@
           siatkę na swojej stronie albo wysyłają <code>45 3 czerwony</code> (kolumna, wiersz, kolor),
           <code>45-60 3 niebieski</code> – kreska, <code>45 3 gumka</code> – gasi.</p>
       </div>
+      <div id="film" class="daily" hidden>
+        <div class="card-head"><h3>Film – linki</h3><span id="film-state" class="pill">…</span></div>
+        <textarea id="film-urls" rows="4" spellcheck="false" aria-label="Linki do filmów"
+          placeholder="https://…/klip.mp4&#10;https://…/strumien.m3u8"></textarea>
+        <div class="inbox-btns">
+          <button id="film-save" class="small">Zapisz linki</button>
+          <span class="muted">jeden w wierszu: mp4, m3u8 (HLS), rtsp…; grane po kolei, w kółko</span>
+        </div>
+      </div>
+      <div id="kamera" class="daily" hidden>
+        <div class="card-head"><h3>Kamera – link</h3><span id="kamera-state" class="pill">…</span></div>
+        <div class="vid-row">
+          <input id="kamera-url" class="text" type="text" spellcheck="false" aria-label="Link do kamery"
+            placeholder="https://…/live.m3u8 albo rtsp://…">
+          <button id="kamera-save" class="small">Zapisz</button>
+        </div>
+        <span class="muted">strumień na żywo (HLS, RTSP, MJPEG); po zerwaniu łączy się od nowa</span>
+      </div>
       <div id="poll" class="inbox pollbox" hidden>
         <div class="card-head"><h3>Ankieta</h3><span id="sum-poll" class="pill">…</span></div>
         <div class="srow">

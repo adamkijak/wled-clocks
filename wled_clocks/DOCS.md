@@ -127,8 +127,19 @@ przeglądarka to pamięta. Na początku rozwinięte jest tylko „Na start”; k
 a wyszukiwarka przeszukuje wszystkie.
 
 Kategoria **Tła** to efekty na cały panel z godziną z czarną obwódką (czytelna na każdym tle): plazma, copper
-(paski z Amigi), metal (płynny chrom, złoto albo miedź – wybór w ustawieniach efektu) i tunel (co minutę na zmianę
-z rotozoomem). Sceny bez zegara (np. basen, polarna, witraż, świece, fizyka, zwierzęta) mają w ustawieniach efektu
+(paski z Amigi), metal (płynny chrom, złoto albo miedź – wybór w ustawieniach efektu), tunel (co minutę na zmianę
+z rotozoomem), mgławica (płynące obłoki gazu i gwiazdy), atrament (krople barwnika rozmywane przez prąd wody),
+dyfuzja (reakcja–dyfuzja: cętki, labirynt, koralowiec – co 5 minut następny) i przepływ (cząstki ze smugami).
+
+Prawdziwy obraz (dekoduje go ffmpeg, jest w obrazie dodatku; obraz jest przygaszony, żeby godzina była czytelna):
+
+- **film** – w ustawieniach efektu wklejasz linki (jeden w wierszu: mp4, m3u8/HLS, rtsp…), grane po kolei w kółko;
+  darmowe klipy (fale, ogień, chmury, miasto nocą) są np. na Pexels i Pixabay – link do pliku mp4.
+- **kamera** – jeden link do strumienia na żywo (HLS, RTSP, MJPEG); po zerwaniu łączy się od nowa.
+- **zdjecie** – zdjęcie dnia z Bing, raz na kilka godzin, pas panelu wolno przesuwa się po zdjęciu.
+
+Obraz jest skalowany do szerokości panelu i lekko spłaszczony, a pas 12 wierszy wolno jeździ w górę i w dół.
+ffmpeg działa tylko, gdy film albo kamera są na panelu (5 s po zmianie efektu się wyłącza). Sceny bez zegara (np. basen, polarna, witraż, świece, fizyka, zwierzęta) mają w ustawieniach efektu
 „godzina” – „na wierzchu” dokłada tę samą godzinę z obwódką; każda scena pamięta to osobno.
 
 ## Efekty wbudowane w WLED

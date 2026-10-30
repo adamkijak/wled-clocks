@@ -21,7 +21,8 @@ Kategorie (w tej kolejności lista, numery i cykl – patrz CATEGORIES):
   * Gry: pong, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, labirynt, tetris
   * Abstrakcje i symulacje: roj, matrix, skaner, tecza, glitch, zycie, mrowka, kalejdoskop, wir, dna,
       oscyloskop, equalizer, ekg, kule, kregi, piasek, lawa, dym
-  * Tła (pełny obraz, na nim godzina z czarną obwódką): plazma, copper, metal, tunel
+  * Tła (pełny obraz, na nim godzina z czarną obwódką): plazma, copper, metal, tunel, mglawica, atrament, dyfuzja,
+      przeplyw, film i kamera (linki, przez ffmpeg), zdjecie (zdjęcie dnia z Bing)
   * Narzędzia: kolory (test do kalibracji), cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
   Dane z internetu – bez kluczy API, pobierane w tle tylko dla widocznego efektu.
 
@@ -3631,8 +3632,8 @@ class Copper(Clock):
         clock_big(f, now)
 
 
-METALS = [("chrom", (12, 16, 24), (150, 165, 185)), ("złoto", (35, 18, 0), (225, 160, 40)),
-          ("miedź", (30, 10, 4), (215, 100, 55))]  # (nazwa, cień, kolor w świetle)
+METALS = [("chrom", (45, 55, 75), (150, 165, 185)), ("złoto", (95, 55, 5), (225, 160, 40)),
+          ("miedź", (90, 35, 15), (215, 100, 55))]  # (nazwa, cień – bez czerni, metal wypełnia cały panel, w świetle)
 METAL = {"kind": 0}
 
 
@@ -3653,12 +3654,12 @@ class LiquidMetal(Clock):
         for y in range(H):
             row, up, mid, down = f.px[y], hgt[y], hgt[y + 1], hgt[y + 2]
             for x in range(W):
-                nx, ny = (mid[x] - mid[x + 2]) * 1.6, (up[x + 1] - down[x + 1]) * 1.6
+                nx, ny = (mid[x] - mid[x + 2]) * 1.1, (up[x + 1] - down[x + 1]) * 1.1
                 k = 1 / math.sqrt(nx * nx + ny * ny + 1)
                 diff = max(0.0, (nx * lx + ny * ly + lz) * k)
-                spec = diff ** 14
-                c = lerp(dark, lit, diff * 0.75)
-                row[x] = (min(255, c[0] + 200 * spec), min(255, c[1] + 200 * spec), min(255, c[2] + 200 * spec))
+                spec = diff ** 10
+                c = lerp(dark, lit, 0.15 + 0.6 * diff + 0.1 * math.sin(mid[x + 1] * 2 + t))  # refleksy płyną z falą
+                row[x] = (min(255, c[0] + 150 * spec), min(255, c[1] + 150 * spec), min(255, c[2] + 150 * spec))
         clock_big(f, now)
 
 
@@ -3692,6 +3693,352 @@ class Tunnel(Clock):
                     edge = min(fu, 1 - fu, fv, 1 - fv) < 0.08
                     on = (math.floor(u) + math.floor(v)) % 2
                     row[x] = hsv(u * 0.05 + t * 0.04, 0.8, 0.7 if edge else 0.12 + 0.2 * on)
+        clock_big(f, now)
+
+
+_VN = (lambda r: [r.random() for _ in range(256 * 256)])(random.Random(12))  # siatka szumu (stała – te same wzory)
+
+
+def vnoise(x, y):
+    """Gładki szum 0..1 (wartości z siatki, interpolacja smoothstep)."""
+    ix, iy = math.floor(x), math.floor(y)
+    fx, fy = x - ix, y - iy
+    ux, uy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    x0, x1, y0, y1 = ix & 255, (ix + 1) & 255, (iy & 255) << 8, ((iy + 1) & 255) << 8
+    a, b, c, d = _VN[x0 + y0], _VN[x1 + y0], _VN[x0 + y1], _VN[x1 + y1]
+    return a + (b - a) * ux + (c - a + (d - c - b + a) * ux) * uy
+
+
+@reg("mglawica")
+class Nebula(Clock):
+    """Mgławica: płynące obłoki gazu i migoczące gwiazdy."""
+
+    PAL = [(0, (25, 8, 45)), (0.35, (80, 20, 110)), (0.55, (170, 40, 120)), (0.75, (30, 150, 160)), (1, (200, 230, 255))]
+
+    def __init__(self):
+        rnd = random.Random(3)
+        self.stars = [(rnd.randrange(W), rnd.randrange(H), rnd.random() * 6) for _ in range(W // 6)]
+
+    def draw(self, f, now, t, dt):
+        n = vnoise
+        for y in range(H):
+            row, py = f.px[y], y * 0.16
+            for x in range(W):
+                px = x * 0.045
+                qx = n(px + t * 0.05, py) + 0.5 * n(px * 2 + 5, py * 2 - t * 0.04)  # zawijanie dziedziny
+                qy = n(px - 3, py + t * 0.03)
+                v = n(px + qx * 1.8, py + qy * 1.8 - t * 0.02) * 0.65 + n(px * 2.3 + qy, py * 2.3) * 0.35
+                row[x] = mul(grad(self.PAL, clamp((v - 0.2) * 1.6)), 0.7)
+        for x, y, ph in self.stars:  # gwiazdy tylko tam, gdzie gaz jest ciemny
+            c = f.px[y][x]
+            if c[0] + c[1] + c[2] < 220:
+                k = 0.5 + 0.5 * math.sin(t * 2.3 + ph)
+                f.px[y][x] = lerp(c, (255, 250, 230), 0.4 + 0.5 * k)
+        clock_big(f, now)
+
+
+@reg("atrament")
+class Ink(Clock):
+    """Atrament w wodzie: kolory rozmywają się w wiry."""
+
+    def __init__(self):
+        self.h = None  # barwa każdego piksela (płynie z wodą; kolor zawsze nasycony – nie szarzeje przy mieszaniu)
+        self.d = None  # gęstość świeżego tuszu (jaśniej) – rozmywa się i blednie
+        self.next_drop, self.hue = 0.0, random.random()
+
+    def drop(self, x0, y0, hue, r):
+        for y in range(H):
+            for x in range(W):
+                k = 1 - ((x - x0) ** 2 + ((y - y0) * 1.5) ** 2) / (r * r)
+                if k > 0:
+                    self.h[y][x] += (hue - self.h[y][x]) * k
+                    self.d[y][x] = max(self.d[y][x], k)
+
+    def draw(self, f, now, t, dt):
+        if self.h is None:  # start: cały panel w barwnych smugach – bez czerni
+            self.h = [[self.hue + 0.3 * math.sin(x * 0.05 + y * 0.3) for x in range(W)] for y in range(H)]
+            self.d = [[0.3] * W for _ in range(H)]
+        if t >= self.next_drop or t < self.next_drop - 10:  # nowa kropla co 1,5–3,5 s, barwa wędruje po kole
+            self.hue += random.uniform(-0.15, 0.25)
+            self.drop(random.uniform(0, W), random.uniform(2, H - 3), self.hue, random.uniform(4, 7))
+            self.next_drop = t + random.uniform(1.5, 3.5)
+        oh, od, k = self.h, self.d, min(dt, 0.1) * 6
+        fade = 0.985 ** (min(dt, 0.1) * 20)
+        nh, nd = [], []
+        for y in range(H):
+            rh, rd = [], []
+            for x in range(W):  # prędkość z funkcji prądu (bez źródeł i ujść): vx = dψ/dy, vy = -dψ/dx
+                a, b = x * 0.07 + t * 0.4, y * 0.55 - t * 0.3
+                vx = 2.2 * math.sin(a) * math.cos(b) + 1.2 * math.cos(x * 0.03 - y * 0.4 + t * 0.2)
+                vy = -0.35 * math.cos(a) * math.sin(b)
+                sx, sy = x - vx * k, clamp(y - vy * k, 0, H - 1)  # skąd przypłynął tusz
+                ix, iy = math.floor(sx), min(int(sy), H - 2)
+                fx, fy = sx - ix, sy - iy
+                x0, x1 = ix % W, (ix + 1) % W
+                h0, h1, d0, d1 = oh[iy], oh[iy + 1], od[iy], od[iy + 1]
+                top, bot = h0[x0] + (h0[x1] - h0[x0]) * fx, h1[x0] + (h1[x1] - h1[x0]) * fx
+                rh.append(top + (bot - top) * fy)
+                top, bot = d0[x0] + (d0[x1] - d0[x0]) * fx, d1[x0] + (d1[x1] - d1[x0]) * fx
+                rd.append((top + (bot - top) * fy) * fade)
+            nh.append(rh)
+            nd.append(rd)
+        self.h, self.d = nh, nd
+        for y in range(H):
+            row, rh, rd = f.px[y], nh[y], nd[y]
+            for x in range(W):
+                row[x] = hsv(rh[x], 0.85 - 0.25 * rd[x], 0.42 + 0.25 * rd[x])
+        clock_big(f, now)
+
+
+@reg("dyfuzja")
+class ReactionDiffusion(Clock):
+    """Reakcja–dyfuzja: rosnące cętki, labirynty, koralowce."""
+
+    KINDS = [("cętki", 0.035, 0.065, [(0, (10, 45, 70)), (0.2, (20, 120, 130)), (0.35, (240, 200, 90))]),
+             ("labirynt", 0.029, 0.057, [(0, (40, 10, 60)), (0.2, (150, 40, 120)), (0.35, (255, 170, 120))]),
+             ("koralowiec", 0.0545, 0.062, [(0, (5, 40, 30)), (0.2, (40, 160, 90)), (0.35, (230, 250, 150))])]
+    STEPS, RESET = 10, 300
+
+    def __init__(self):
+        self.u = None
+        self.k = -1
+
+    def seed(self, t):
+        self.k = (self.k + 1) % len(self.KINDS)
+        n = W * H
+        self.u, self.v, self.t0 = [1.0] * n, [0.0] * n, t
+        for _ in range(W // 10):
+            cx, cy = random.randrange(W), random.randrange(H)
+            for y in range(cy - 1, cy + 2):
+                for x in range(cx - 2, cx + 3):
+                    i = (y % H) * W + x % W
+                    self.u[i], self.v[i] = 0.5, 0.25 + random.random() * 0.1
+        nb = []  # sąsiedzi każdej komórki (panel zawinięty jak torus)
+        for y in range(H):
+            for x in range(W):
+                nb.append(((y - 1) % H * W + x, (y + 1) % H * W + x, y * W + (x - 1) % W, y * W + (x + 1) % W))
+        self.nb = nb
+
+    def draw(self, f, now, t, dt):
+        if self.u is None or t - self.t0 > self.RESET or t < self.t0 or max(self.v) < 0.01:
+            self.seed(t)
+        _, F, K, pal = self.KINDS[self.k]
+        u, v, nb = self.u, self.v, self.nb
+        rng = range(W * H)
+        for _ in range(self.STEPS):
+            nu, nv = u[:], v[:]
+            for i in rng:
+                a, b, c, d = nb[i]
+                ui, vi = u[i], v[i]
+                uvv = ui * vi * vi
+                nu[i] = ui + 0.1 * (u[a] + u[b] + u[c] + u[d] - 4 * ui) - uvv + F * (1 - ui)
+                nv[i] = vi + 0.05 * (v[a] + v[b] + v[c] + v[d] - 4 * vi) + uvv - (F + K) * vi
+            u, v = nu, nv
+        self.u, self.v = u, v
+        for y in range(H):
+            row, o = f.px[y], y * W
+            for x in range(W):
+                row[x] = mul(grad(pal, v[o + x]), 0.75)
+        clock_big(f, now)
+
+
+@reg("przeplyw")
+class FlowField(Clock):
+    """Pole przepływu: cząstki ciągną za sobą świetliste smugi."""
+
+    N = 140
+
+    def __init__(self):
+        self.p = [[random.uniform(0, W), random.uniform(0, H), random.uniform(0, 6)] for _ in range(self.N)]
+        self.trail = [[(0.0, 0.0, 0.0)] * W for _ in range(H)]
+
+    def draw(self, f, now, t, dt):
+        fade = 0.95 ** (min(dt, 0.1) * 20)
+        tr = [[mul(c, fade) for c in row] for row in self.trail]
+        for q in self.p:
+            x, y = q[0], q[1]
+            a = vnoise(x * 0.035, y * 0.12 + t * 0.08) * 4 * math.pi
+            sp = 9 * min(dt, 0.1)
+            q[0], q[1] = x + math.cos(a) * sp, y + math.sin(a) * sp * 0.4
+            q[2] -= min(dt, 0.1)
+            if q[2] < 0 or not (0 <= q[1] < H):  # odrodzenie w losowym miejscu
+                q[0], q[1], q[2] = random.uniform(0, W), random.uniform(0, H), random.uniform(3, 6)
+            ix, iy = int(q[0]) % W, int(q[1])
+            if 0 <= iy < H:
+                c, add = tr[iy][ix], hsv(a / (4 * math.pi) + t * 0.02, 0.8, 0.3)
+                tr[iy][ix] = (min(255, c[0] + add[0]), min(255, c[1] + add[1]), min(255, c[2] + add[2]))
+            q[0] %= W
+        self.trail = tr
+        for y in range(H):  # tło: ciemny, wolno płynący granat – smugi świecą na nim, czerni prawie nie ma
+            row, trow = f.px[y], tr[y]
+            for x in range(W):
+                b = 0.5 + 0.5 * math.sin(x * 0.03 + y * 0.2 + t * 0.3)
+                c = trow[x]
+                row[x] = (min(255, 18 + 22 * b + c[0]), min(255, 10 + 12 * b + c[1]), min(255, 45 + 35 * b + c[2]))
+        clock_big(f, now)
+
+
+# ================================================================ prawdziwy obraz (film, kamera, zdjęcie dnia) – przez ffmpeg
+VIDEO = {"urls": [], "cam": ""}  # film: lista linków (grane po kolei), kamera: jeden link na żywo
+VIDEO_SCHEMES = ("http://", "https://", "rtsp://", "rtmp://")
+VIDEO_ROWS = 3 * H  # obraz skalowany do W x 3H (lekko spłaszczony); na panelu pas H wierszy wolno jeździ góra–dół
+VIDEO_DIM = 0.6     # prawdziwy obraz jest jasny – przygaszony, żeby godzina była czytelna, a prąd w normie
+
+
+def video_urls(text):
+    """Linki z tekstu (jeden w wierszu albo po spacji) – tylko http(s), rtsp, rtmp; najwyżej 20."""
+    out = []
+    for tok in str(text).split():
+        if tok.lower().startswith(VIDEO_SCHEMES) and len(tok) <= 500 and tok not in out:
+            out.append(tok)
+    return out[:20]
+
+
+class VideoReader:
+    """ffmpeg w tle dekoduje film / kamerę do klatek W x VIDEO_ROWS (RGB); efekt bierze ostatnią. Działa tylko, póki
+    efekt rysuje (want co klatkę) – po 5 s bez niego ffmpeg jest zabijany."""
+
+    def __init__(self):
+        self.frame, self.err, self.gen, self.used, self.key, self.idx = None, "", 0, 0.0, None, 0
+        self.running = False  # wątek z ffmpeg działa
+        self.lock = threading.Lock()
+
+    def want(self, urls, live):
+        """urls: linki po kolei (po końcu filmu następny); live: kamera – po zerwaniu łączy się od nowa."""
+        self.used = time.monotonic()
+        key = (tuple(urls), live)
+        with self.lock:
+            if key != self.key or not self.running:
+                if key != self.key:
+                    self.idx, self.frame, self.err = 0, None, ""
+                self.key, self.running = key, True
+                self.gen += 1
+                threading.Thread(target=self.run, args=(self.gen, list(urls), live), daemon=True).start()
+
+    def run(self, gen, urls, live):
+        ffmpeg = shutil.which("ffmpeg")
+        try:
+            if not ffmpeg:
+                self.err = "brak ffmpeg"
+                return
+            n = W * VIDEO_ROWS * 3
+            while gen == self.gen and time.monotonic() - self.used < 5:
+                url = urls[self.idx % len(urls)]
+                cmd = [ffmpeg, "-nostdin", "-loglevel", "error", "-re", "-i", url, "-an",
+                       "-vf", f"fps=20,scale={W}:{VIDEO_ROWS}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+                try:
+                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                except OSError as e:
+                    self.err = str(e)[:60]
+                    return
+                got = 0
+                try:
+                    while gen == self.gen and time.monotonic() - self.used < 5:
+                        buf = proc.stdout.read(n)
+                        if len(buf) < n:
+                            break
+                        self.frame, got = buf, got + 1
+                finally:
+                    proc.kill()
+                    err = proc.communicate()[1].decode("utf-8", "replace").strip().splitlines()
+                if not got:  # nic nie przyszło: zły link, brak sieci – komunikat i chwila przerwy
+                    self.err = (err[-1] if err else "brak obrazu")[:70]
+                    time.sleep(3)
+                else:
+                    self.err = ""
+                if not live:
+                    self.idx += 1  # koniec filmu – następny z listy (jeden link: od nowa)
+        finally:
+            if gen == self.gen:
+                self.running = False
+
+
+VIDEOS = {"film": VideoReader(), "kamera": VideoReader()}
+
+
+def video_blit(f, buf, rows, t, speed=0.05):
+    """Pas H wierszy z obrazu W x rows (RGB), wolno jeżdżący w górę i w dół (Ken Burns), przygaszony."""
+    y0 = round((rows - H) * (0.5 + 0.5 * math.sin(t * speed * 2 * math.pi)))
+    k = VIDEO_DIM
+    for y in range(H):
+        o, row = (y0 + y) * W * 3, f.px[y]
+        for x in range(W):
+            i = o + x * 3
+            row[x] = (buf[i] * k, buf[i + 1] * k, buf[i + 2] * k)
+
+
+def video_draw(f, now, t, name, urls, live, hint):
+    """Wspólne dla filmu i kamery: obraz albo komunikat, na wierzchu godzina z obwódką."""
+    rd = VIDEOS[name]
+    if urls and not getattr(THUMB, "on", False):
+        rd.want(urls, live)
+    if rd.frame:
+        video_blit(f, rd.frame, VIDEO_ROWS, t)
+        clock_big(f, now)
+        return
+    if not urls:
+        scroll_segs(f, [(name.upper() + " ", (255, 190, 30)), (hint, (200, 200, 215))], t, 30)
+    elif rd.err:
+        scroll_segs(f, [(name + ": ", (200, 60, 40)), (rd.err, (200, 200, 215))], t, 30)
+    else:
+        loading(f, t, "", name)
+
+
+@reg("film")
+class Film(Clock):
+    """Film w tle: wklejone linki grane po kolei."""
+
+    def draw(self, f, now, t, dt):
+        video_draw(f, now, t, "film", VIDEO["urls"], False, "– wklej linki do filmów w ustawieniach efektu")
+
+
+@reg("kamera")
+class Camera(Clock):
+    """Kamera na żywo w tle (link do strumienia)."""
+
+    def draw(self, f, now, t, dt):
+        video_draw(f, now, t, "kamera", [VIDEO["cam"]] if VIDEO["cam"] else [], True,
+                   "– wklej link do kamery w ustawieniach efektu")
+
+
+def _photo():
+    """Zdjęcie dnia z Bing: (opis, piksele RGB 2W x 2·VIDEO_ROWS, lekko spłaszczone jak film) – ffmpeg dekoduje JPG."""
+    img = http("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=pl-PL")["images"][0]
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("brak ffmpeg")
+    out = subprocess.run([ffmpeg, "-nostdin", "-loglevel", "error", "-i", "https://www.bing.com" + img["url"],
+                          "-vf", f"scale={W * 2}:{VIDEO_ROWS * 2}", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                          "-"],
+                         capture_output=True, timeout=30, check=True).stdout
+    if len(out) < W * 2 * 3 * H * 2:
+        raise RuntimeError("zły obraz")
+    return img.get("copyright", ""), out
+
+
+SOURCES["photo"] = (_photo, 6 * 3600)
+
+
+@reg("zdjecie")
+class Photo(Clock):
+    """Zdjęcie dnia z Bing, powoli przesuwane."""
+
+    def draw(self, f, now, t, dt):
+        d = NET.get("photo")
+        if not d:
+            loading(f, t, "photo", "zdjęcie dnia")
+            return
+        buf, w2 = d[1], W * 2
+        rows = len(buf) // (w2 * 3)
+        y0 = int((rows - 2 * H) * (0.5 + 0.5 * math.sin(t * 0.02 * 2 * math.pi)))  # pas 10:1 wolno przez zdjęcie
+        k = VIDEO_DIM / 4  # zdjęcie W*2 szerokie, zmniejszane 2x (średnia z 2x2 – gładko)
+        for y in range(H):
+            o0, o1, row = (y0 + 2 * y) * w2 * 3, (y0 + 2 * y + 1) * w2 * 3, f.px[y]
+            for x in range(W):
+                i, j = o0 + 6 * x, o1 + 6 * x
+                row[x] = ((buf[i] + buf[i + 3] + buf[j] + buf[j + 3]) * k,
+                          (buf[i + 1] + buf[i + 4] + buf[j + 1] + buf[j + 4]) * k,
+                          (buf[i + 2] + buf[i + 5] + buf[j + 2] + buf[j + 5]) * k)
         clock_big(f, now)
 
 
@@ -8862,7 +9209,7 @@ CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lis
     ("Gry", "🎮", "pong waz arkanoid najezdzcy pacman dino flappy wyscig labirynt tetris"),
     ("Abstrakcje i symulacje", "🌀", "roj matrix skaner tecza glitch zycie mrowka kalejdoskop wir dna oscyloskop "
                                     "equalizer ekg kule kregi piasek lawa dym"),
-    ("Tła", "🎨", "plazma copper metal tunel"),
+    ("Tła", "🎨", "plazma copper metal tunel mglawica atrament dyfuzja przeplyw film kamera zdjecie"),
     ("Oczy", "👀", "kot czlowiek bajka sowa robot sauron hal mrok"),
     ("Postacie i zwierzęta", "🐾", "kotek pies platformowka ptaki nietoperze zolw slimak"),
     ("Światło", "💡", "polarna tesla szyld witraz basen iskry swieca lampa"),
@@ -9393,6 +9740,7 @@ class Engine:
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
                "metal": METALS[METAL["kind"]][0], "godzina_sceny": sorted(SCENE_CLOCK),
+               "film_urls": VIDEO["urls"], "kamera_url": VIDEO["cam"],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
                "wled_fx_cfg": self.wled_saved}
         try:
@@ -9755,6 +10103,8 @@ class Engine:
             "daily": {"people": [dict(p) for p in DAILY["people"]], "cur": daily_cur(), "auto": DAILY["auto"],
                       "speak": DAILY["speak"]},
             "draw": draw_hex() if "rysunek" in self.setting_fx() else None,
+            "video": {"urls": VIDEO["urls"], "cam": VIDEO["cam"], "ffmpeg": bool(shutil.which("ffmpeg")),
+                      "err": {k: r.err for k, r in VIDEOS.items()}},
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
                       "psu": POWER["psu"], "auto": POWER["auto"]},
             "bri": PANEL["bri"], "levels": panel_levels(),
@@ -10257,6 +10607,19 @@ def web_cmd(e, c):
         if act in ("next", "reset", "auto", "speak"):
             return lambda: daily_act(act)
         raise ValueError(f"złe polecenie daily {act!r}")
+    if op == "video":  # film: lista linków, kamera: jeden link
+        act, text = c.get("act"), str(c.get("v", ""))[:12000]
+        if act == "urls":
+            urls = video_urls(text)
+            if text.strip() and not urls:
+                raise ValueError("film: linki muszą zaczynać się od http(s)://, rtsp:// albo rtmp://")
+            return lambda: VIDEO.update(urls=urls)
+        if act == "cam":
+            urls = video_urls(text)
+            if text.strip() and not urls:
+                raise ValueError("kamera: link musi zaczynać się od http(s)://, rtsp:// albo rtmp://")
+            return lambda: VIDEO.update(cam=urls[0] if urls else "")
+        raise ValueError(f"złe polecenie video {act!r}")
     if op == "draw":
         INBOX.active = time.time()
         act = c.get("act")
@@ -11463,6 +11826,8 @@ def main():
     CLOCK["font"] = next((i for i, (n, _) in enumerate(CLOCK_FONTS) if n == cfg.get("zegar_czcionka")), 0)
     METAL["kind"] = next((i for i, (n, *_) in enumerate(METALS) if n == cfg.get("metal")), 0)
     SCENE_CLOCK.update(n for n in cfg.get("godzina_sceny") or [] if n in SCENES)
+    VIDEO["urls"] = video_urls(" ".join(map(str, cfg.get("film_urls") or [])))
+    VIDEO["cam"] = (video_urls(str(cfg.get("kamera_url") or "")) or [""])[0]
     rgb = cfg.get("led_rgb")
     if isinstance(rgb, list) and len(rgb) == 3 and all(v in COLOR_STEPS for v in rgb):
         COLOR.update(r=rgb[0], g=rgb[1], b=rgb[2])

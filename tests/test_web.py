@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -49,7 +50,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ludzik_first(self):
         self.assertEqual(wc.Engine.NAMES[:3], ["ludzik", "zegar", "napisz"])
-        self.assertEqual(len(wc.CLOCKS), 149)
+        self.assertEqual(len(wc.CLOCKS), 156)
 
     def test_ludzik_rides(self):
         old = dict(wc.LUDZIK["lvl"]), wc.LUDZIK["freq"]
@@ -264,6 +265,51 @@ class EngineTest(unittest.TestCase):
             wc.SCENE_CLOCK.clear()
             wc.SCENE_CLOCK.update(saved[0])
             wc.METAL.update(saved[1])
+
+    def test_video_links(self):
+        """Film i kamera: tylko linki http(s)/rtsp/rtmp, zapis w configu; bez linku – komunikat zamiast czerni."""
+        saved = dict(VIDEO=dict(wc.VIDEO))
+        try:
+            self.assertEqual(wc.video_urls("https://a/x.mp4\nfile:///etc/passwd  rtsp://cam/1 https://a/x.mp4"),
+                             ["https://a/x.mp4", "rtsp://cam/1"])
+            e = wc.Engine(args(mode="film"), {})
+            with self.assertRaises(ValueError):
+                wc.web_cmd(e, {"op": "video", "act": "cam", "v": "/dev/video0"})
+            wc.web_cmd(e, {"op": "video", "act": "urls", "v": "https://a/1.mp4\nhttps://a/2.mp4"})()
+            wc.web_cmd(e, {"op": "video", "act": "cam", "v": " rtsp://cam/live "})()
+            self.assertEqual((wc.VIDEO["urls"], wc.VIDEO["cam"]), (["https://a/1.mp4", "https://a/2.mp4"], "rtsp://cam/live"))
+            e.save()
+            with open(wc.CONFIG, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            self.assertEqual((cfg["film_urls"], cfg["kamera_url"]), (wc.VIDEO["urls"], "rtsp://cam/live"))
+            wc.VIDEO.update(urls=[], cam="")
+            for name in ("film", "kamera"):
+                f = wc.Frame()
+                wc.CLOCKS[name]().draw(f, wc.dtm.datetime.now().astimezone(), 1.0, 0.05)
+                self.assertTrue(any(any(c) for row in f.px for c in row), name)
+        finally:
+            wc.VIDEO.update(saved["VIDEO"])
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "brak ffmpeg")
+    def test_video_reader(self):
+        """Czytnik: ffmpeg dekoduje klip do klatek W x 3H, film gra je pod godziną; bez efektu ffmpeg się kończy."""
+        with tempfile.TemporaryDirectory() as d:
+            clip = os.path.join(d, "test.mp4")
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=20",
+                            "-t", "2", "-pix_fmt", "yuv420p", clip], check=True)
+            rd = wc.VideoReader()
+            end = time.monotonic() + 10
+            while not rd.frame and time.monotonic() < end:
+                rd.want(["file://" + clip], False)
+                time.sleep(0.05)
+            self.assertEqual(len(rd.frame or b""), wc.W * wc.VIDEO_ROWS * 3, rd.err)
+            f = wc.Frame()
+            wc.video_blit(f, rd.frame, wc.VIDEO_ROWS, 0.0)
+            self.assertGreater(len({c for row in f.px for c in row}), 20)          # prawdziwy obraz, nie jeden kolor
+            end = time.monotonic() + 10
+            while rd.running and time.monotonic() < end:                       # nikt nie chce – ffmpeg kończy
+                time.sleep(0.2)
+            self.assertFalse(rd.running)
 
     def test_text_speed_hint(self):
         e = wc.Engine(args(fps=15, tempo=1.0, text_speed=0.33), {})

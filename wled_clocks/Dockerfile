@@ -2,7 +2,8 @@ ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.20
 FROM ${BUILD_FROM}
 
 # skrypt używa tylko biblioteki standardowej; obraz bazowy HA ma bashio, curl, jq i tzdata
-RUN apk add --no-cache python3
+# ffmpeg – tła „film”, „kamera” i „zdjecie”: dekoduje wideo / strumień / JPG prosto do pikseli panelu
+RUN apk add --no-cache python3 ffmpeg
 
 # bore – tunel na bore.pub dla efektu „napisz” (wiadomości z internetu za NAT-em, bez domeny);
 # statyczny plik z wydań GitHub, suma SHA-256 sprawdzana przy budowaniu

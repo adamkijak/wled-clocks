@@ -483,7 +483,7 @@ function renderSettings() {
     if (r.hint) r.hint.classList.toggle("warn", s.hint.includes("skacze")); // ruch nie będzie płynny
   }
   $("#fx-name").textContent = state.mode === "cykl" ? `cykl (teraz ${state.current})` : $("#now-name").textContent;
-  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown || ["napisz", "ankieta", "daily", "rysunek"].some((n) => fx.has(n));
+  $("#fx-none").hidden = renderWled(state.wled_settings) || fxShown || ["napisz", "ankieta", "daily", "rysunek", "film", "kamera"].some((n) => fx.has(n));
   if (!fx.has("ludzik")) $("#acts").hidden = true;
 }
 
@@ -680,6 +680,29 @@ function renderDaily(d) {
     else li.append(tick, who);
     ul.append(li);
   });
+}
+
+// ------------------------------------------------------------ film i kamera (linki, ffmpeg)
+let filmDirty = false, camDirty = false; // niezapisane pola – odświeżenie stanu ich nie nadpisuje
+$("#film-urls").addEventListener("input", () => (filmDirty = true));
+$("#kamera-url").addEventListener("input", () => (camDirty = true));
+$("#film-save").onclick = () => { filmDirty = false; cmd("video", { act: "urls", v: $("#film-urls").value }); };
+$("#kamera-save").onclick = () => { camDirty = false; cmd("video", { act: "cam", v: $("#kamera-url").value }); };
+$("#kamera-url").addEventListener("keydown", (e) => e.key === "Enter" && $("#kamera-save").click());
+
+function renderVideo(v) {
+  const fx = state.setting_fx || [];
+  for (const [name, has] of [["film", v && v.urls.length], ["kamera", v && v.cam]]) {
+    $(`#${name}`).hidden = !v || !fx.includes(name);
+    if ($(`#${name}`).hidden) continue;
+    const st = $(`#${name}-state`);
+    const err = v.err[name];
+    setText(st, !v.ffmpeg ? "brak ffmpeg" : !has ? "brak linku" : err ? `błąd: ${err}` : "gra");
+    st.classList.toggle("ok", Boolean(v.ffmpeg && has && !err));
+  }
+  if (!v) return;
+  if (!filmDirty && document.activeElement !== $("#film-urls")) $("#film-urls").value = v.urls.join("\n");
+  if (!camDirty && document.activeElement !== $("#kamera-url")) $("#kamera-url").value = v.cam;
 }
 
 // ------------------------------------------------------------ wspólny rysunek
@@ -935,6 +958,7 @@ function render(s) {
   renderInbox(s.inbox);
   renderDaily(s.daily);
   renderDraw(s.draw);
+  renderVideo(s.video);
 }
 
 // ------------------------------------------------------------ przyciski i klawisze (jak w TUI)

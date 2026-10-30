@@ -1,5 +1,19 @@
 # Zmiany
 
+## 1.33.0
+
+- Tła z prawdziwym obrazem (w obrazie dodatku jest teraz **ffmpeg**): **film** (linki do filmów wklejane
+  w ustawieniach efektu, grane po kolei w kółko), **kamera** (link do strumienia na żywo – HLS, RTSP, MJPEG; po
+  zerwaniu łączy się od nowa) i **zdjecie** (zdjęcie dnia z Bing). Obraz przygaszony, pas panelu wolno jeździ po
+  kadrze, na wierzchu godzina z czarną obwódką. ffmpeg działa tylko, gdy efekt jest na panelu.
+
+## 1.32.0
+
+- Tła: **mgławica** (obłoki gazu z szumu z zawijaniem, migoczące gwiazdy), **atrament** (krople barwnika niesione
+  i rozmywane przez wiry; kolory nie szarzeją), **dyfuzja** (reakcja–dyfuzja Graya–Scotta: cętki, labirynt,
+  koralowiec – co 5 minut kolejny wzór) i **przeplyw** (cząstki płyną po polu wektorowym i zostawiają smugi).
+- Metal wypełnia cały panel – cienie w kolorze metalu zamiast czerni, refleksy płyną z falą.
+
 ## 1.31.0
 
 - Nowa kategoria efektów **Tła** – obraz na cały panel, na nim godzina z czarną obwódką: **plazma** (przeniesiona
