@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.31.0
+
+- Nowa kategoria efektów **Tła** – obraz na cały panel, na nim godzina z czarną obwódką: **plazma** (przeniesiona
+  z „Abstrakcji”) i nowe **copper** (falujące tęczowe paski z Amigi), **metal** (płynny chrom, złoto albo miedź
+  z odblaskiem – wybór w ustawieniach efektu) i **tunel** (lot w tunelu, co minutę na zmianę z rotozoomem).
+- Sceny bez zegara (saturn, okno, szyba, latarnia, wulkan, zwierzęta, Światło, Fizyka, disco) mają ustawienie
+  efektu **godzina**: „na wierzchu” dokłada godzinę z czarną obwódką – osobno dla każdej sceny, zapamiętywane.
+
 ## 1.30.0
 
 - **Ankieta** to osobny efekt („ankieta”): w jego ustawieniach pytanie, odpowiedzi, wyniki i Nowa ankieta / Zakończ /

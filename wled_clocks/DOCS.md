@@ -126,6 +126,11 @@ Lista efektów jest podzielona na zwijane kategorie (zegary, pogoda, gry…); kl
 przeglądarka to pamięta. Na początku rozwinięte jest tylko „Na start”; kategoria z efektem na panelu rozwija się sama,
 a wyszukiwarka przeszukuje wszystkie.
 
+Kategoria **Tła** to efekty na cały panel z godziną z czarną obwódką (czytelna na każdym tle): plazma, copper
+(paski z Amigi), metal (płynny chrom, złoto albo miedź – wybór w ustawieniach efektu) i tunel (co minutę na zmianę
+z rotozoomem). Sceny bez zegara (np. basen, polarna, witraż, świece, fizyka, zwierzęta) mają w ustawieniach efektu
+„godzina” – „na wierzchu” dokłada tę samą godzinę z obwódką; każda scena pamięta to osobno.
+
 ## Efekty wbudowane w WLED
 
 Pod efektami skryptu lista pokazuje też efekty wbudowane w WLED, w trzech kategoriach:

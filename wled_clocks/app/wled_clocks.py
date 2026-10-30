@@ -19,8 +19,9 @@ Kategorie (w tej kolejności lista, numery i cykl – patrz CATEGORIES):
   * Sceny i przyroda: akwarium, swietliki, snieg, burza, ocean, miasto, las, gory, pory, fajerwerki, synthwave,
       pociag, ogien, fala
   * Gry: pong, waz, arkanoid, najezdzcy, pacman, dino, flappy, wyscig, labirynt, tetris
-  * Abstrakcje i symulacje: roj, matrix, skaner, tecza, glitch, zycie, mrowka, plazma, kalejdoskop, wir, dna,
+  * Abstrakcje i symulacje: roj, matrix, skaner, tecza, glitch, zycie, mrowka, kalejdoskop, wir, dna,
       oscyloskop, equalizer, ekg, kule, kregi, piasek, lawa, dym
+  * Tła (pełny obraz, na nim godzina z czarną obwódką): plazma, copper, metal, tunel
   * Narzędzia: kolory (test do kalibracji), cykl – wszystkie po kolei (albo losowo) z płynnym przenikaniem
   Dane z internetu – bez kluczy API, pobierane w tle tylko dla widocznego efektu.
 
@@ -3596,6 +3597,101 @@ class Plasma(Clock):
                 v = (math.sin(x * 0.08 + t) + math.sin(y * 0.35 + t * 1.3) + math.sin((x * 0.05 + y * 0.2) + t * 0.7)
                      + math.sin(math.hypot(x - cx, (y - cy) * 4) * 0.08))
                 row[x] = hsv(v * 0.12 + t * 0.05, 0.9, 0.65)
+        clock_big(f, now)
+
+
+@reg("copper")
+class Copper(Clock):
+    """Copper bars z Amigi: falujące tęczowe paski."""
+
+    BARS = 6
+
+    def draw(self, f, now, t, dt):
+        bars = []  # (głębokość, środek y, barwa) – dalsze rysowane najpierw, bliższe je zasłaniają
+        for i in range(self.BARS):
+            a = t * 1.3 + i * 2 * math.pi / self.BARS
+            bars.append((math.cos(a), 5.5 + math.sin(a) * 4.8 + math.sin(t * 0.7 + i) * 0.8, i / self.BARS + t * 0.03))
+        bars.sort()
+        rows = [None] * H  # wiersz -> (barwa, jasność)
+        for z, cy, hue in bars:
+            near = 0.55 + 0.2 * (z + 1)
+            for y in range(H):
+                d = abs(y - cy) / 2.1
+                if d < 1:
+                    rows[y] = (hue, near * (1 - d * d), 0.85 - 0.5 * max(0.0, 1 - d * 3))  # środek paska bielszy
+        for y in range(H):
+            row = f.px[y]
+            if rows[y] is None:
+                for x in range(W):
+                    row[x] = (3, 1, 10)
+                continue
+            hue, v, sat = rows[y]
+            for x in range(W):
+                row[x] = hsv(hue + 0.06 * math.sin(x * 0.045 + t * 1.7), sat, v * (0.85 + 0.15 * math.sin(x * 0.2 - t * 4)))
+        clock_big(f, now)
+
+
+METALS = [("chrom", (12, 16, 24), (150, 165, 185)), ("złoto", (35, 18, 0), (225, 160, 40)),
+          ("miedź", (30, 10, 4), (215, 100, 55))]  # (nazwa, cień, kolor w świetle)
+METAL = {"kind": 0}
+
+
+@reg("metal")
+class LiquidMetal(Clock):
+    """Płynny metal: przelewający się chrom, złoto albo miedź."""
+
+    LIGHT = (-0.45, -0.55, 0.7)
+
+    def draw(self, f, now, t, dt):
+        _, dark, lit = METALS[METAL["kind"]]
+        hgt = [[math.sin(x * 0.11 + t * 0.9) + math.sin(y * 0.5 - t * 1.1) + math.sin((x * 0.07 - y * 0.3) + t * 0.6)
+                + math.sin(math.hypot(x - W / 2 - math.sin(t * 0.4) * W / 3, (y - 6) * 3) * 0.12 - t)
+                for x in range(-1, W + 1)] for y in range(-1, H + 1)]
+        lx, ly, lz = self.LIGHT
+        ln = math.sqrt(lx * lx + ly * ly + lz * lz)
+        lx, ly, lz = lx / ln, ly / ln, lz / ln
+        for y in range(H):
+            row, up, mid, down = f.px[y], hgt[y], hgt[y + 1], hgt[y + 2]
+            for x in range(W):
+                nx, ny = (mid[x] - mid[x + 2]) * 1.6, (up[x + 1] - down[x + 1]) * 1.6
+                k = 1 / math.sqrt(nx * nx + ny * ny + 1)
+                diff = max(0.0, (nx * lx + ny * ly + lz) * k)
+                spec = diff ** 14
+                c = lerp(dark, lit, diff * 0.75)
+                row[x] = (min(255, c[0] + 200 * spec), min(255, c[1] + 200 * spec), min(255, c[2] + 200 * spec))
+        clock_big(f, now)
+
+
+@reg("tunel")
+class Tunnel(Clock):
+    """Tunel z demosceny, co minutę na zmianę z rotozoomem."""
+
+    def draw(self, f, now, t, dt):
+        if now.minute % 2 == 0:  # lot w tunelu: świecące pierścienie i pasy na ściankach, w głębi mgła
+            cx, cy = W / 2 + math.sin(t * 0.45) * W / 4, 5.5 + math.sin(t * 0.8) * 2.5
+            tau = 2 * math.pi
+            for y in range(H):
+                row, dy = f.px[y], (y - cy) * 3
+                for x in range(W):
+                    dx = x - cx
+                    d = math.sqrt(dx * dx + dy * dy) + 0.5
+                    u = 2.2 * math.log(d) - t * 1.2  # pierścienie równo w skali log – rozchodzą się na boki
+                    ring = 0.5 + 0.5 * math.cos(u * tau)
+                    stripe = 0.5 + 0.5 * math.cos(math.atan2(dy, dx) * 6 + t * 0.6)
+                    fog = clamp((d - 2) / 14)
+                    row[x] = hsv(u * 0.06 + t * 0.03, 0.85, (0.08 + 0.6 * ring * (0.55 + 0.45 * stripe)) * fog)
+        else:  # rotozoom: obracana i przybliżana neonowa szachownica
+            a, z = t * 0.35, 0.09 + 0.05 * math.sin(t * 0.5)
+            ca, sa = math.cos(a) * z, math.sin(a) * z
+            for y in range(H):
+                row, dy = f.px[y], y - 5.5
+                for x in range(W):
+                    dx = x - W / 2
+                    u, v = dx * ca - dy * sa + t * 0.8, dx * sa + dy * ca
+                    fu, fv = u - math.floor(u), v - math.floor(v)
+                    edge = min(fu, 1 - fu, fv, 1 - fv) < 0.08
+                    on = (math.floor(u) + math.floor(v)) % 2
+                    row[x] = hsv(u * 0.05 + t * 0.04, 0.8, 0.7 if edge else 0.12 + 0.2 * on)
         clock_big(f, now)
 
 
@@ -8764,8 +8860,9 @@ CATEGORIES = [  # (nazwa, ikona do panelu WWW, efekty) – w tej kolejności lis
     ("Sceny i przyroda", "🌄", "akwarium swietliki snieg burza ocean miasto las gory pory fajerwerki synthwave pociag "
                               "ogien fala okno szyba latarnia wulkan"),
     ("Gry", "🎮", "pong waz arkanoid najezdzcy pacman dino flappy wyscig labirynt tetris"),
-    ("Abstrakcje i symulacje", "🌀", "roj matrix skaner tecza glitch zycie mrowka plazma kalejdoskop wir dna oscyloskop "
+    ("Abstrakcje i symulacje", "🌀", "roj matrix skaner tecza glitch zycie mrowka kalejdoskop wir dna oscyloskop "
                                     "equalizer ekg kule kregi piasek lawa dym"),
+    ("Tła", "🎨", "plazma copper metal tunel"),
     ("Oczy", "👀", "kot czlowiek bajka sowa robot sauron hal mrok"),
     ("Postacie i zwierzęta", "🐾", "kotek pies platformowka ptaki nietoperze zolw slimak"),
     ("Światło", "💡", "polarna tesla szyld witraz basen iskry swieca lampa"),
@@ -8779,6 +8876,23 @@ _ALL = {"licznik": Odometer, "roj": Swarm, "ogien": Fire, "matrix": Matrix, "nie
 CLOCKS = {n: _ALL[n] for _, _, names in CATEGORIES for n in names.split()}
 CATEGORY = {n: c for c, _, names in CATEGORIES for n in names.split()}  # efekt -> nazwa kategorii
 assert len(CLOCKS) == len(_ALL) == sum(len(x[2].split()) for x in CATEGORIES), "efekt bez kategorii albo w dwóch"
+
+# sceny bez zegara: na życzenie (ustawienie efektu „godzina”) godzina z czarną obwódką na wierzchu
+SCENES = ("saturn okno szyba latarnia wulkan ptaki nietoperze zolw slimak polarna tesla witraz basen iskry swieca lampa "
+          "wahadla newton kostki kulodrom pileczki slinky disco").split()
+SCENE_CLOCK = set()  # sceny, na których godzina jest włączona
+
+
+def _scene_clock(name, draw):
+    def wrapped(self, f, now, t, dt):
+        draw(self, f, now, t, dt)
+        if name in SCENE_CLOCK:
+            clock_big(f, now)
+    return wrapped
+
+
+for _n in SCENES:
+    CLOCKS[_n].draw = _scene_clock(_n, CLOCKS[_n].draw)
 
 
 class Cycle(Clock):
@@ -8854,7 +8968,7 @@ class Engine:
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
                   "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik",
                   "ludzik strona": "ludzik", "kolor oczu": "kot czlowiek bajka sowa robot sauron hal mrok", "barwa": "zegar", "kolor zegara": "zegar", "czcionka": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
-                  "diody: zielony": "kolory", "diody: niebieski": "kolory"}
+                  "diody: zielony": "kolory", "diody: niebieski": "kolory", "metal": "metal", "godzina": " ".join(SCENES)}
 
     def __init__(self, a, cfg):
         self.host = a.host or ""
@@ -9022,6 +9136,18 @@ class Engine:
         def s_temp(d):
             CLOCK["temp"] = self.step_in(CLOCK_TEMPS, CLOCK["temp"], d)
 
+        def s_metal(d):
+            METAL["kind"] = (METAL["kind"] + d) % len(METALS)
+
+        def scene():  # scena, której dotyczy „godzina” (w cyklu – ta, którą cykl właśnie pokazuje)
+            return self.cycle.current if self.mode == "cykl" else self.mode
+
+        def put_sclock(v):
+            (SCENE_CLOCK.add if v else SCENE_CLOCK.discard)(scene())
+
+        def s_sclock(d):
+            put_sclock(scene() not in SCENE_CLOCK)
+
         def v_temp():
             k = CLOCK["temp"]
             word = "bez zmian" if not k else "chłodniej" if k > 0 else "cieplej"
@@ -9081,6 +9207,9 @@ class Engine:
                             lambda v: CLOCK_FONTS[v][0]),
             "temperatura": opt(CLOCK_TEMPS, lambda: CLOCK["temp"], lambda v: CLOCK.update(temp=v),
                                lambda v: f"{v:+d} K" if v else "0 K"),
+            "metal": opt(list(range(len(METALS))), lambda: METAL["kind"], lambda v: METAL.update(kind=v),
+                         lambda v: METALS[v][0]),
+            "godzina": flag(lambda: scene() in SCENE_CLOCK, put_sclock, "na wierzchu", "bez godziny"),
             "wysyłanie": flag(lambda: self.sending, lambda v: v != self.sending and self.toggle_send()),
             "szerokość": opt([60, 120], lambda: W, put_width, lambda v: f"{v} kolumn"),
             "poziomy": opt(levels, lambda: PANEL["levels"] if panel_manual() else None, put_levels,
@@ -9123,6 +9252,9 @@ class Engine:
              "dowolny kolor zamiast barwy; w panelu WWW z próbnika, tu gotowe"),
             ("czcionka", lambda: CLOCK_FONTS[CLOCK["font"]][0], s_font, "krój cyfr godziny"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
+            ("metal", lambda: METALS[METAL["kind"]][0], s_metal, "z czego jest płynny metal"),
+            ("godzina", lambda: "na wierzchu" if scene() in SCENE_CLOCK else "bez godziny", s_sclock,
+             "godzina z czarną obwódką na tej scenie"),
             ("diody: czerwony", lambda: f"x{COLOR['r']:g}", s_led("r"), "jasność kanału w podglądzie – dopasuj do panelu"),
             ("diody: zielony", lambda: f"x{COLOR['g']:g}", s_led("g"),
              "gdy pomarańczowy/żółty na panelu jest czerwieńszy niż w podglądzie – w lewo"),
@@ -9260,6 +9392,7 @@ class Engine:
                "msg_poll": {"q": INBOX.poll["q"], "opts": INBOX.poll["opts"]} if INBOX.poll else None,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
+               "metal": METALS[METAL["kind"]][0], "godzina_sceny": sorted(SCENE_CLOCK),
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
                "wled_fx_cfg": self.wled_saved}
         try:
@@ -11328,6 +11461,8 @@ def main():
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
     CLOCK["col"] = eye_rgb(cfg.get("zegar_kolor") or "")
     CLOCK["font"] = next((i for i, (n, _) in enumerate(CLOCK_FONTS) if n == cfg.get("zegar_czcionka")), 0)
+    METAL["kind"] = next((i for i, (n, *_) in enumerate(METALS) if n == cfg.get("metal")), 0)
+    SCENE_CLOCK.update(n for n in cfg.get("godzina_sceny") or [] if n in SCENES)
     rgb = cfg.get("led_rgb")
     if isinstance(rgb, list) and len(rgb) == 3 and all(v in COLOR_STEPS for v in rgb):
         COLOR.update(r=rgb[0], g=rgb[1], b=rgb[2])

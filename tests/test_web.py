@@ -49,7 +49,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ludzik_first(self):
         self.assertEqual(wc.Engine.NAMES[:3], ["ludzik", "zegar", "napisz"])
-        self.assertEqual(len(wc.CLOCKS), 146)
+        self.assertEqual(len(wc.CLOCKS), 149)
 
     def test_ludzik_rides(self):
         old = dict(wc.LUDZIK["lvl"]), wc.LUDZIK["freq"]
@@ -238,6 +238,32 @@ class EngineTest(unittest.TestCase):
             cfg = json.load(fh)
         self.assertFalse(wc.Engine(args(host="127.0.0.1"), cfg).sending)
         self.assertTrue(wc.Engine(args(host="127.0.0.1"), {}).sending)  # stary plik bez "sending": wysyła
+
+    def test_scene_clock_and_metal(self):
+        """Godzina z obwódką na scenie bez zegara (ustawienie „godzina”, osobno dla każdej sceny) i wybór metalu."""
+        saved = set(wc.SCENE_CLOCK), dict(wc.METAL)
+        try:
+            wc.SCENE_CLOCK.clear()
+            e = wc.Engine(args(mode="basen"), {})
+            self.assertIn("godzina", [st[0] for st in e.shown_settings()])
+            black = lambda: sum(c == (0, 0, 0) for row in e.render(wc.dtm.datetime.now().astimezone(), 1.0, 0.05).px
+                                for c in row)
+            before = black()
+            e.pick("godzina", 0)                                            # „na wierzchu”
+            self.assertEqual(wc.SCENE_CLOCK, {"basen"})
+            self.assertGreater(black(), before + 30)                        # czarna obwódka cyfr
+            e.select("metal")
+            self.assertIn("metal", [st[0] for st in e.shown_settings()])
+            self.assertNotIn("godzina", [st[0] for st in e.shown_settings()])
+            e.pick("metal", 1)
+            e.save()
+            with open(wc.CONFIG, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            self.assertEqual((cfg["metal"], cfg["godzina_sceny"]), ("złoto", ["basen"]))
+        finally:
+            wc.SCENE_CLOCK.clear()
+            wc.SCENE_CLOCK.update(saved[0])
+            wc.METAL.update(saved[1])
 
     def test_text_speed_hint(self):
         e = wc.Engine(args(fps=15, tempo=1.0, text_speed=0.33), {})
