@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.34.0
+
+- Plazma: w ustawieniach efektu **paleta** (23: tęcza, ogień, ocean, zorza, synthwave, las, lód, lawa, cukierki,
+  zachód słońca, jesień, pustynia, róże, ametyst, kosmos, neon, toksyczna, mięta, głębia, terminal, bursztyn,
+  biało-czerwona albo „co minutę inna” z płynnym przejściem) i **prędkość** (x0.25–x3). Plazma liczy się też dwa
+  razy szybciej.
+
 ## 1.33.0
 
 - Tła z prawdziwym obrazem (w obrazie dodatku jest teraz **ffmpeg**): **film** (linki do filmów wklejane

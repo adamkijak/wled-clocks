@@ -126,7 +126,9 @@ Lista efektów jest podzielona na zwijane kategorie (zegary, pogoda, gry…); kl
 przeglądarka to pamięta. Na początku rozwinięte jest tylko „Na start”; kategoria z efektem na panelu rozwija się sama,
 a wyszukiwarka przeszukuje wszystkie.
 
-Kategoria **Tła** to efekty na cały panel z godziną z czarną obwódką (czytelna na każdym tle): plazma, copper
+Kategoria **Tła** to efekty na cały panel z godziną z czarną obwódką (czytelna na każdym tle): plazma (w ustawieniach
+efektu paleta – 23 do wyboru, od tęczy, ognia i oceanu po terminal i biało-czerwoną, albo „co minutę inna” – i
+prędkość od x0.25 do x3), copper
 (paski z Amigi), metal (płynny chrom, złoto albo miedź – wybór w ustawieniach efektu), tunel (co minutę na zmianę
 z rotozoomem), mgławica (płynące obłoki gazu i gwiazdy), atrament (krople barwnika rozmywane przez prąd wody),
 dyfuzja (reakcja–dyfuzja: cętki, labirynt, koralowiec – co 5 minut następny) i przepływ (cząstki ze smugami).

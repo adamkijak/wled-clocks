@@ -3586,18 +3586,75 @@ class MoonPhase(Clock):
                         t, 22, 0, 14)
 
 # ================================================================ SCENY, SYMULACJE I GRY
+# palety plazmy: kolory na kole (ostatni łączy się z pierwszym), bez czerni – plazma wypełnia cały panel
+PLASMA_PALS = [
+    ("tęcza", None),
+    ("ogień", [(70, 0, 0), (200, 30, 0), (220, 100, 0), (230, 160, 30), (200, 60, 0)]),
+    ("ocean", [(0, 20, 70), (0, 80, 160), (0, 165, 175), (80, 180, 200), (0, 110, 150)]),
+    ("zorza", [(0, 45, 35), (0, 185, 95), (0, 150, 165), (110, 45, 180), (20, 90, 120)]),
+    ("synthwave", [(45, 0, 90), (200, 20, 150), (255, 90, 70), (120, 30, 170), (0, 170, 210)]),
+    ("las", [(5, 45, 15), (40, 140, 20), (165, 200, 40), (90, 120, 20), (20, 100, 60)]),
+    ("lód", [(10, 30, 90), (60, 130, 220), (150, 190, 230), (90, 150, 210), (40, 70, 160)]),
+    ("lawa", [(40, 0, 15), (170, 0, 30), (255, 70, 0), (120, 0, 60), (230, 30, 10)]),
+    ("cukierki", [(180, 50, 125), (95, 120, 210), (75, 185, 150), (210, 175, 65), (205, 95, 75)]),
+    ("zachód słońca", [(50, 10, 80), (170, 30, 90), (235, 90, 40), (240, 160, 50), (120, 40, 110)]),
+    ("jesień", [(70, 20, 5), (180, 60, 0), (210, 140, 20), (140, 30, 10), (110, 90, 10)]),
+    ("pustynia", [(110, 50, 20), (200, 120, 50), (225, 175, 90), (170, 80, 40), (90, 60, 90)]),
+    ("róże", [(70, 0, 30), (190, 20, 80), (235, 100, 140), (150, 0, 60), (200, 60, 100)]),
+    ("ametyst", [(30, 0, 70), (100, 20, 170), (170, 90, 220), (60, 10, 130), (130, 40, 160)]),
+    ("kosmos", [(5, 5, 50), (40, 20, 140), (140, 20, 160), (20, 80, 170), (90, 0, 110)]),
+    ("neon", [(200, 0, 160), (0, 190, 210), (120, 220, 0), (110, 0, 220), (0, 120, 220)]),
+    ("toksyczna", [(20, 60, 0), (130, 210, 0), (60, 0, 90), (180, 230, 20), (0, 110, 50)]),
+    ("mięta", [(0, 60, 50), (40, 170, 130), (150, 220, 190), (20, 120, 110), (80, 190, 160)]),
+    ("głębia", [(0, 10, 40), (0, 40, 90), (0, 110, 130), (0, 25, 70), (20, 70, 120)]),
+    ("terminal", [(0, 35, 0), (0, 140, 30), (60, 220, 90), (0, 90, 15)]),
+    ("bursztyn", [(50, 15, 0), (170, 80, 0), (240, 150, 20), (110, 45, 0)]),
+    ("biało-czerwona", [(200, 0, 20), (110, 0, 10), (210, 200, 200), (230, 30, 40)]),
+    ("co minutę inna", None),
+]
+PLASMA_SPEEDS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
+PLASMA = {"kind": 0, "speed": 1.0}
+
+
+def _plasma_lut(stops):
+    if stops is None:
+        return [hsv(i / 256, 0.9, 0.65) for i in range(256)]
+    n = len(stops)
+    return [tuple(round(c) for c in lerp(stops[i * n // 256], stops[(i * n // 256 + 1) % n], i * n / 256 % 1))
+            for i in range(256)]
+
+
+PLASMA_LUTS = [_plasma_lut(st) for _, st in PLASMA_PALS[:-1]]  # „co minutę inna” miesza gotowe
+
+
 @reg("plazma")
 class Plasma(Clock):
     """Plazma z demosceny w płynących kolorach."""
 
+    FADE = 4.0  # „co minutę inna”: tyle sekund przenika się stara i nowa paleta
+
+    def __init__(self):
+        self.pt = None  # własny czas plazmy – płynie z wybraną prędkością, zmiana prędkości nie szarpie
+
     def draw(self, f, now, t, dt):
+        self.pt = t * PLASMA["speed"] if self.pt is None else self.pt + dt * PLASMA["speed"]
+        t = self.pt
+        kind = PLASMA["kind"]
+        if PLASMA_PALS[kind][0] == "co minutę inna":
+            n = len(PLASMA_LUTS)
+            m = now.hour * 60 + now.minute
+            a, b = PLASMA_LUTS[(m - 1) % n], PLASMA_LUTS[m % n]
+            k = min(1.0, now.second / self.FADE)
+            lut = b if k >= 1 else [lerp(ca, cb, k) for ca, cb in zip(a, b)]
+        else:
+            lut = PLASMA_LUTS[kind]
         cx, cy = W / 2 + math.sin(t * 0.7) * W / 3, 6 + math.cos(t * 0.9) * 4
         for y in range(H):
             row = f.px[y]
             for x in range(W):
                 v = (math.sin(x * 0.08 + t) + math.sin(y * 0.35 + t * 1.3) + math.sin((x * 0.05 + y * 0.2) + t * 0.7)
                      + math.sin(math.hypot(x - cx, (y - cy) * 4) * 0.08))
-                row[x] = hsv(v * 0.12 + t * 0.05, 0.9, 0.65)
+                row[x] = lut[int((v * 0.12 + t * 0.05) * 256) & 255]
         clock_big(f, now)
 
 
@@ -9315,7 +9372,9 @@ class Engine:
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
                   "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik",
                   "ludzik strona": "ludzik", "kolor oczu": "kot czlowiek bajka sowa robot sauron hal mrok", "barwa": "zegar", "kolor zegara": "zegar", "czcionka": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
-                  "diody: zielony": "kolory", "diody: niebieski": "kolory", "metal": "metal", "godzina": " ".join(SCENES)}
+                  "diody: zielony": "kolory", "diody: niebieski": "kolory", "metal": "metal", "paleta": "plazma",
+                  "prędkość": "plazma",
+                  "godzina": " ".join(SCENES)}
 
     def __init__(self, a, cfg):
         self.host = a.host or ""
@@ -9486,6 +9545,12 @@ class Engine:
         def s_metal(d):
             METAL["kind"] = (METAL["kind"] + d) % len(METALS)
 
+        def s_plasma(d):
+            PLASMA["kind"] = (PLASMA["kind"] + d) % len(PLASMA_PALS)
+
+        def s_pspeed(d):
+            PLASMA["speed"] = self.step_in(PLASMA_SPEEDS, PLASMA["speed"], d)
+
         def scene():  # scena, której dotyczy „godzina” (w cyklu – ta, którą cykl właśnie pokazuje)
             return self.cycle.current if self.mode == "cykl" else self.mode
 
@@ -9556,6 +9621,10 @@ class Engine:
                                lambda v: f"{v:+d} K" if v else "0 K"),
             "metal": opt(list(range(len(METALS))), lambda: METAL["kind"], lambda v: METAL.update(kind=v),
                          lambda v: METALS[v][0]),
+            "paleta": opt(list(range(len(PLASMA_PALS))), lambda: PLASMA["kind"], lambda v: PLASMA.update(kind=v),
+                          lambda v: PLASMA_PALS[v][0]),
+            "prędkość": opt(PLASMA_SPEEDS, lambda: PLASMA["speed"], lambda v: PLASMA.update(speed=v),
+                            lambda v: f"x{v:g}"),
             "godzina": flag(lambda: scene() in SCENE_CLOCK, put_sclock, "na wierzchu", "bez godziny"),
             "wysyłanie": flag(lambda: self.sending, lambda v: v != self.sending and self.toggle_send()),
             "szerokość": opt([60, 120], lambda: W, put_width, lambda v: f"{v} kolumn"),
@@ -9600,6 +9669,8 @@ class Engine:
             ("czcionka", lambda: CLOCK_FONTS[CLOCK["font"]][0], s_font, "krój cyfr godziny"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
             ("metal", lambda: METALS[METAL["kind"]][0], s_metal, "z czego jest płynny metal"),
+            ("paleta", lambda: PLASMA_PALS[PLASMA["kind"]][0], s_plasma, "kolory plazmy"),
+            ("prędkość", lambda: f"x{PLASMA['speed']:g}", s_pspeed, "jak szybko płynie plazma"),
             ("godzina", lambda: "na wierzchu" if scene() in SCENE_CLOCK else "bez godziny", s_sclock,
              "godzina z czarną obwódką na tej scenie"),
             ("diody: czerwony", lambda: f"x{COLOR['r']:g}", s_led("r"), "jasność kanału w podglądzie – dopasuj do panelu"),
@@ -9739,7 +9810,9 @@ class Engine:
                "msg_poll": {"q": INBOX.poll["q"], "opts": INBOX.poll["opts"]} if INBOX.poll else None,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
-               "metal": METALS[METAL["kind"]][0], "godzina_sceny": sorted(SCENE_CLOCK),
+               "metal": METALS[METAL["kind"]][0],
+               "plazma_paleta": PLASMA_PALS[PLASMA["kind"]][0],
+               "plazma_predkosc": PLASMA["speed"], "godzina_sceny": sorted(SCENE_CLOCK),
                "film_urls": VIDEO["urls"], "kamera_url": VIDEO["cam"],
                "led_rgb": [COLOR["r"], COLOR["g"], COLOR["b"]], "color_fix": COLOR["fix"],
                "wled_fx_cfg": self.wled_saved}
@@ -11825,6 +11898,8 @@ def main():
     CLOCK["col"] = eye_rgb(cfg.get("zegar_kolor") or "")
     CLOCK["font"] = next((i for i, (n, _) in enumerate(CLOCK_FONTS) if n == cfg.get("zegar_czcionka")), 0)
     METAL["kind"] = next((i for i, (n, *_) in enumerate(METALS) if n == cfg.get("metal")), 0)
+    PLASMA["kind"] = next((i for i, (n, _) in enumerate(PLASMA_PALS) if n == cfg.get("plazma_paleta")), 0)
+    PLASMA["speed"] = cfg.get("plazma_predkosc") if cfg.get("plazma_predkosc") in PLASMA_SPEEDS else 1.0
     SCENE_CLOCK.update(n for n in cfg.get("godzina_sceny") or [] if n in SCENES)
     VIDEO["urls"] = video_urls(" ".join(map(str, cfg.get("film_urls") or [])))
     VIDEO["cam"] = (video_urls(str(cfg.get("kamera_url") or "")) or [""])[0]

@@ -242,7 +242,7 @@ class EngineTest(unittest.TestCase):
 
     def test_scene_clock_and_metal(self):
         """Godzina z obwódką na scenie bez zegara (ustawienie „godzina”, osobno dla każdej sceny) i wybór metalu."""
-        saved = set(wc.SCENE_CLOCK), dict(wc.METAL)
+        saved = set(wc.SCENE_CLOCK), dict(wc.METAL), dict(wc.PLASMA)
         try:
             wc.SCENE_CLOCK.clear()
             e = wc.Engine(args(mode="basen"), {})
@@ -261,10 +261,34 @@ class EngineTest(unittest.TestCase):
             with open(wc.CONFIG, encoding="utf-8") as fh:
                 cfg = json.load(fh)
             self.assertEqual((cfg["metal"], cfg["godzina_sceny"]), ("złoto", ["basen"]))
+            e.select("plazma")
+            self.assertIn("paleta", [st[0] for st in e.shown_settings()])
+            frames = set()
+            for i in range(len(wc.PLASMA_PALS) - 1):                          # „co minutę inna” powtarza gotowe
+                e.pick("paleta", i)
+                frames.add(str(e.render(wc.dtm.datetime.now().astimezone(), 3.0, 0.05).px))
+            self.assertEqual(len(frames), len(wc.PLASMA_PALS) - 1)            # każda paleta inna
+            e.pick("paleta", 1)
+            e.save()
+            with open(wc.CONFIG, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            self.assertEqual(cfg["plazma_paleta"], "ogień")
+            self.assertIn("prędkość", [st[0] for st in e.shown_settings()])
+            e.pick("prędkość", wc.PLASMA_SPEEDS.index(2.0))
+            e.save()
+            with open(wc.CONFIG, encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["plazma_predkosc"], 2.0)
+            slow, fast = wc.Plasma(), wc.Plasma()                            # x2: po tym samym czasie dalej
+            for fx, v in ((slow, 0.5), (fast, 2.0)):
+                wc.PLASMA["speed"] = v
+                fx.draw(wc.Frame(), wc.dtm.datetime.now().astimezone(), 0.0, 0.05)
+                fx.draw(wc.Frame(), wc.dtm.datetime.now().astimezone(), 1.0, 1.0)
+            self.assertEqual((slow.pt, fast.pt), (0.5, 2.0))
         finally:
             wc.SCENE_CLOCK.clear()
             wc.SCENE_CLOCK.update(saved[0])
             wc.METAL.update(saved[1])
+            wc.PLASMA.update(saved[2])
 
     def test_video_links(self):
         """Film i kamera: tylko linki http(s)/rtsp/rtmp, zapis w configu; bez linku – komunikat zamiast czerni."""
