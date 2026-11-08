@@ -6999,38 +6999,97 @@ def clock_text(el, t, small):
     return t.upper() if small else t.capitalize() if el == "dzien" else t
 
 
+CLOCK_SEG = {"7-segmentowa": (6, 2), "LCD": (5, 1)}  # czcionki z _seg7: (szerokość, grubość) przy 9 wierszach
+_SEG_FONTS = {}
+
+
+def seg_font(name, h):
+    """Czcionka 7-segmentowa narysowana od razu w wysokości h – ostrzejsza niż powiększona z 9 wierszy."""
+    key = (name, h)
+    if key not in _SEG_FONTS:
+        w, t = CLOCK_SEG[name]
+        _SEG_FONTS[key] = _seg7(max(3, round(w * h / 9)), t, h, gaps=h >= 9)
+    return _SEG_FONTS[key]
+
+
+def thin_font(font):
+    """Czcionka z kreskami na 1 diodę – po powiększeniu o ułamek kreski wychodzą raz na 1, raz na 2 diody."""
+    return _thin(glyph(font, "0"))
+
+
 def clock_candidates(el, now):
-    """(napisy od najpełniejszego, czcionki od największej, czy małe litery z small_pl) dla elementu zegara.
-    Godzina woli największą czcionkę (najpierw odpada sekunda), dzień i data – pełny napis (najpierw mniejsza
-    czcionka). Małe czcionki dnia i daty w stylu godziny (CLOCK_SMALL)."""
+    """(napisy od najpełniejszego, czcionki bazowe (czcionka, czy małe litery z small_pl), wysokość wybranej
+    czcionki godziny i jej odmian – godzina od tej wysokości w górę zostaje w wybranym kroju) dla elementu zegara. Małe czcionki dnia i daty w stylu godziny (CLOCK_SMALL)."""
     name, font = CLOCK_FONTS[CLOCK["font"]]
     small, fdates = CLOCK_SMALL.get(name, ((SMALL, NARROW_TXT),) * 2)
     if el == "czas":
         texts = [now.strftime("%H:%M:%S"), now.strftime("%H:%M")] if CLOCK["secs"] else [now.strftime("%H:%M")]
-        return texts, [(font, False), (TXT, False)] + [(ff, False) for ff in fdates], False
+        # 7-segmentowe w każdej wysokości od 7 (niżej segmenty się zlewają)
+        segs = [(seg_font(name, h), False) for h in range(7, H + 1) if h != 9] if name in CLOCK_SEG else []
+        return texts, [(font, False)] + segs + [(TXT, False)] + [(ff, False) for ff in fdates], \
+            (len(font["0"]), {id(font)} | {id(ff) for ff, _ in segs})
     if el == "dzien":
         d, k = PL_DAYS[now.weekday()], PL_DAYS_SHORT[now.weekday()]
-        return [d, k], [(TXT, False)] + [(ff, True) for ff in small], True
+        return [d, k], [(TXT, False)] + [(ff, True) for ff in small], None
     texts = [f"{now.day:02d}.{now.month:02d}.{now.year}", f"{now.day:02d}.{now.month:02d}"]
-    return texts, [(TXT, False)] + [(ff, False) for ff in fdates], True
+    return texts, [(TXT, False)] + [(ff, False) for ff in fdates], None
+
+
+def clock_fit(el, b, now):
+    """Napis i rozmiar dla prostokąta b -> (napis, czcionka, small, wysokość) albo None, gdy nic się nie mieści.
+    Rozmiar płynny: czcionka bazowa powiększona do każdej wysokości od swojej do wysokości prostokąta (cienkie –
+    tylko w swojej); na danej wysokości wygrywa najmniej powiększona (najostrzejsza), która mieści się na szerokość. Godzina woli być
+    duża (najpierw odpada sekunda, potem maleje czcionka), dzień i data – pełne (najpierw maleje czcionka)."""
+    texts, bases, big = clock_candidates(el, now)
+    sized = []  # (wysokość, powiększenie, czcionka, small) od największej wysokości
+    for r in range(b["h"], 4, -1):
+        sized += sorted(((r, r / h, font, small) for font, small in bases
+                         for h in [clock_metrics(el, font, small)[1]] if h == r or h < r and not thin_font(font)),
+                        key=lambda v: v[1])
+    if big:  # godzina: najpierw wybrany krój nie mniejszy niż zwykle, z sekundami i bez; dopiero potem mniejsze
+        big, family = big
+        tiers = [(t, sz) for part in ([v for v in sized if v[0] >= big and id(v[2]) in family],
+                                      [v for v in sized if v[0] < big]) for t in texts for sz in part]
+    else:
+        tiers = [(t, sz) for t in texts for sz in sized]
+    for t, (r, k, font, small) in tiers:
+        t = clock_text(el, t, small)
+        if round(text_w(t, font) * k) <= b["w"]:
+            return t, font, small, r
+    return None
+
+
+_SCALED = {}
+
+
+def clock_pts(el, t, font, small, r):
+    """Punkty napisu (od 0, 0) w wysokości r: rysunek czcionki powiększony najbliższym sąsiadem."""
+    top, h = clock_metrics(el, font, small)
+    pts = small_pl(t, 0, -top, font=font) if small else text_px(t, 0, -top, font)
+    if r == h:
+        return pts
+    key = (el, t, id(font), small, r)
+    if key not in _SCALED:
+        on, tw = set(pts), text_w(t, font)
+        nw = round(tw * r / h)
+        if len(_SCALED) > 300:
+            _SCALED.clear()
+        _SCALED[key] = [(x, y) for y in range(r) for x in range(nw) if (x * tw // nw, y * h // r) in on]
+    return _SCALED[key]
 
 
 def clock_box(f, now, b, c):
-    """Element zegara w prostokącie b: największa czcionka, która się mieści; wyrównanie z b["align"],
+    """Element zegara w prostokącie b: napis tak duży, jak się zmieści (clock_fit); wyrównanie z b["align"],
     w pionie na środek. Nic się nie mieści – element znika (lepsze niż ucięte litery)."""
-    texts, fonts, text_first = clock_candidates(b["el"], now)
-    order = [(t, ff) for t in texts for ff in fonts] if text_first else [(t, ff) for ff in fonts for t in texts]
-    for t, (font, small) in order:
-        t = clock_text(b["el"], t, small)
-        top, h = clock_metrics(b["el"], font, small)
-        tw = text_w(t, font)
-        if h <= b["h"] and tw <= b["w"]:
-            break
-    else:
+    fit = clock_fit(b["el"], b, now)
+    if fit is None:
         return
+    t, font, small, r = fit
+    pts = clock_pts(b["el"], t, font, small, r)
+    tw = round(text_w(t, font) * r / clock_metrics(b["el"], font, small)[1])
     x = b["x"] + {"l": 0, "c": (b["w"] - tw) // 2, "r": b["w"] - tw}[b["align"]]
-    y = b["y"] + (b["h"] - h) // 2 - top
-    f.draw(small_pl(t, x, y, font=font) if small else text_px(t, x, y, font), c)
+    y = b["y"] + (b["h"] - r) // 2
+    f.draw([(x + px, y + py) for px, py in pts], c)
 
 
 def _box(el, x, y, w, h, align="l", on=True):
@@ -7062,9 +7121,9 @@ def _layout_mirror(now):
 def _layout_sides(now):
     """Dzień | godzina | data – godzina na środku, po bokach na całą wysokość."""
     t = _layout_classic(now)[0]
-    x = (W - t["w"]) // 2
-    return [_box("czas", x, 0, t["w"], H), _box("dzien", 0, 0, x - 1, H, "c"), _box("data", x + t["w"] + 1, 0,
-                                                                                 W - x - t["w"] - 1, H, "c")]
+    x, gap = (W - t["w"]) // 2, 3
+    return [_box("czas", x, 0, t["w"], H), _box("dzien", 0, 0, x - gap, H, "c"),
+            _box("data", x + t["w"] + gap, 0, W - x - t["w"] - gap, H, "c")]
 
 
 def _layout_alone(now):

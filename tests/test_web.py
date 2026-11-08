@@ -1207,6 +1207,21 @@ class PlainClockTest(unittest.TestCase):
             f = wc.Frame()
             wc.clock_box(f, now, wc._box("data", 0, 0, 5, 5), (255, 255, 255))
             self.assertFalse(lit(f))
+            rows = lambda f: len({y for _, y in lit(f)})
+            for fi in range(len(wc.CLOCK_FONTS)):                             # rozmiar rośnie z prostokątem
+                wc.CLOCK["font"] = fi
+                got = []
+                for h in (6, 8, 10, 12):
+                    f = wc.Frame()
+                    wc.clock_box(f, now, wc._box("czas", 0, 0, wc.W, h), (255, 255, 255))
+                    got.append(rows(f))
+                    self.assertLessEqual(rows(f), h)
+                self.assertEqual(got, sorted(got), wc.CLOCK_FONTS[fi][0])
+                self.assertGreater(got[-1], got[0], wc.CLOCK_FONTS[fi][0])
+            wc.CLOCK["font"] = 0
+            f = wc.Frame()
+            wc.clock_box(f, now, wc._box("czas", 0, 0, wc.W, 12), (255, 255, 255))
+            self.assertEqual(rows(f), 12)                                       # cały panel, nie 10 wierszy
             wc.web_cmd(e, {"op": "clocklayout", "act": "reset"})()
             self.assertEqual(wc.CLOCK["layout"], 0)
         finally:

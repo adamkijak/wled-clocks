@@ -131,8 +131,10 @@ odwrócony, dzień | godzina | data, sama godzina, godzina + dzień, godzina + d
 (z sekundami albo bez). Gdy zegar jest na panelu, pod podglądem jest **Układ zegara**: prostokąty z godziną, dniem
 i datą na żywym obrazie panelu. Przeciągnięcie prostokąta go przesuwa, a róg ◢ zmienia jego rozmiar (na telefonie
 działa palcem). W „Pokaż/ukryj, wyrównanie i dokładne pozycje” każdy element można ukryć, wyrównać do lewej, do
-środka albo do prawej i wpisać mu pozycję. Napis bierze największą czcionkę, która się zmieści. W mniejszym
-prostokącie godzina traci sekundy albo zmniejsza czcionkę, dzień skraca się do „pon.”, a data do „DD.MM”. Gdy nic
+środka albo do prawej i wpisać mu pozycję. Rozmiar napisu sam się dopasowuje do prostokąta (każda
+wysokość od 5 do 12 wierszy, na szerokość też musi się zmieścić). Godzina w wysokim prostokącie zostaje w wybranym
+kroju; cienkie czcionki nie są powiększane, a 7-segmentowe są rysowane od razu w danej wysokości. W mniejszym
+prostokącie godzina traci sekundy albo maleje, dzień skraca się do „pon.”, a data do „DD.MM”. Gdy nic
 się nie mieści, element znika. Pierwsza zmiana gotowego układu robi z niego własny, a „Przywróć klasyczny” wraca do
 dawnego wyglądu. Przy 60 kolumnach gotowe układy (poza „samą godziną”) pokazują dzień i datę na zmianę z godziną.
 

@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.36.0
+
+- Zegar: rozmiar napisu w układzie skaluje się z prostokątem – każda wysokość od 5 do 12 wierszy (np. godzina na
+  cały panel ma 12 wierszy, nie 10). Najmniej powiększona czcionka, która się mieści; godzina zostaje w wybranym
+  kroju, cienkie czcionki nie są powiększane (nierówne kreski), 7-segmentowe rysowane w danej wysokości.
+- Układ „dzień | godzina | data” z szerszymi odstępami.
+
 ## 1.35.0
 
 - Zegar: ustawienie **układ** (klasyczny, odwrócony, dzień | godzina | data, sama godzina, godzina + dzień,
