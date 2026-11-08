@@ -1,5 +1,13 @@
 # Zmiany
 
+## 1.35.0
+
+- Zegar: ustawienie **układ** (klasyczny, odwrócony, dzień | godzina | data, sama godzina, godzina + dzień,
+  godzina + data, własny) i **sekundy** (z sekundami albo bez).
+- **Układ zegara** w panelu WWW: prostokąty godziny, dnia i daty przeciągane myszką albo palcem po żywym podglądzie
+  panelu, z uchwytem do zmiany rozmiaru, a do tego pokaż/ukryj, wyrównanie i dokładne pozycje. Napis sam dobiera
+  największą czcionkę, która się mieści (mniejszy prostokąt: bez sekund, „pon.”, „DD.MM”).
+
 ## 1.34.0
 
 - Plazma: w ustawieniach efektu **paleta** (23: tęcza, ogień, ocean, zorza, synthwave, las, lód, lawa, cukierki,

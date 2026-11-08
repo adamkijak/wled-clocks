@@ -6947,8 +6947,10 @@ CLOCK_HUES = [("pora dnia", None), ("biały", (255, 255, 255)), ("ciepły biały
               ("żółty", (255, 200, 0)), ("pomarańczowy", (255, 120, 0)), ("czerwony", (255, 30, 20)),
               ("różowy", (255, 60, 160)), ("fioletowy", (170, 60, 255)), ("niebieski", (40, 110, 255)),
               ("błękitny", (0, 200, 255)), ("zielony", (40, 255, 80))]
-CLOCK = {"hue": 0, "temp": 0, "col": None, "font": 0}  # „barwa” (indeks w CLOCK_HUES), „temperatura” (K), dowolny
-# kolor (r, g, b) zamiast barwy (None = barwa) i „czcionka” (indeks w CLOCK_FONTS); zapisywane w konfiguracji
+CLOCK = {"hue": 0, "temp": 0, "col": None, "font": 0, "layout": 0, "secs": True, "boxes": None}
+# „barwa” (indeks w CLOCK_HUES), „temperatura” (K), dowolny kolor (r, g, b) zamiast barwy (None = barwa), „czcionka”
+# (indeks w CLOCK_FONTS), „układ” (indeks w CLOCK_LAYOUTS), „sekundy” i własny układ z edytora w panelu WWW
+# (lista prostokątów jak z clock_boxes, None = jeszcze nie ułożony); zapisywane w konfiguracji
 
 
 def daylight_k(elev):
@@ -6974,6 +6976,154 @@ def clock_color(now):
     return mul(c, 255 / max(c))
 
 
+CLOCK_ELS = ("czas", "dzien", "data")
+PL_DAYS_SHORT = ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."]
+_CLOCK_METRICS = {}
+
+
+def clock_metrics(el, font, small):
+    """Pionowy zakres (góra, wysokość) czcionki dla elementu – wspólny dla wszystkich możliwych napisów, żeby
+    napis nie skakał w górę i w dół, gdy zmienia się dzień (Ś ma kreskę nad, Ą ogonek pod)."""
+    key = (el, id(font), small)
+    m = _CLOCK_METRICS.get(key)
+    if m is None:
+        texts = ([clock_text(el, d, small) for d in PL_DAYS + PL_DAYS_SHORT] if el == "dzien"
+                 else ["0123456789:" if el == "czas" else "0123456789."])
+        ys = [y for t in texts for _, y in (small_pl(t, 0, 0, font=font) if small else text_px(t, 0, 0, font))]
+        m = _CLOCK_METRICS[key] = (min(ys), max(ys) - min(ys) + 1)
+    return m
+
+
+def clock_text(el, t, small):
+    """Napis tak, jak go rysujemy: małe czcionki (small_pl) mają tylko wielkie litery, TXT – „Środa”."""
+    return t.upper() if small else t.capitalize() if el == "dzien" else t
+
+
+def clock_candidates(el, now):
+    """(napisy od najpełniejszego, czcionki od największej, czy małe litery z small_pl) dla elementu zegara.
+    Godzina woli największą czcionkę (najpierw odpada sekunda), dzień i data – pełny napis (najpierw mniejsza
+    czcionka). Małe czcionki dnia i daty w stylu godziny (CLOCK_SMALL)."""
+    name, font = CLOCK_FONTS[CLOCK["font"]]
+    small, fdates = CLOCK_SMALL.get(name, ((SMALL, NARROW_TXT),) * 2)
+    if el == "czas":
+        texts = [now.strftime("%H:%M:%S"), now.strftime("%H:%M")] if CLOCK["secs"] else [now.strftime("%H:%M")]
+        return texts, [(font, False), (TXT, False)] + [(ff, False) for ff in fdates], False
+    if el == "dzien":
+        d, k = PL_DAYS[now.weekday()], PL_DAYS_SHORT[now.weekday()]
+        return [d, k], [(TXT, False)] + [(ff, True) for ff in small], True
+    texts = [f"{now.day:02d}.{now.month:02d}.{now.year}", f"{now.day:02d}.{now.month:02d}"]
+    return texts, [(TXT, False)] + [(ff, False) for ff in fdates], True
+
+
+def clock_box(f, now, b, c):
+    """Element zegara w prostokącie b: największa czcionka, która się mieści; wyrównanie z b["align"],
+    w pionie na środek. Nic się nie mieści – element znika (lepsze niż ucięte litery)."""
+    texts, fonts, text_first = clock_candidates(b["el"], now)
+    order = [(t, ff) for t in texts for ff in fonts] if text_first else [(t, ff) for ff in fonts for t in texts]
+    for t, (font, small) in order:
+        t = clock_text(b["el"], t, small)
+        top, h = clock_metrics(b["el"], font, small)
+        tw = text_w(t, font)
+        if h <= b["h"] and tw <= b["w"]:
+            break
+    else:
+        return
+    x = b["x"] + {"l": 0, "c": (b["w"] - tw) // 2, "r": b["w"] - tw}[b["align"]]
+    y = b["y"] + (b["h"] - h) // 2 - top
+    f.draw(small_pl(t, x, y, font=font) if small else text_px(t, x, y, font), c)
+
+
+def _box(el, x, y, w, h, align="l", on=True):
+    return {"el": el, "x": int(x), "y": int(y), "w": int(w), "h": int(h), "align": align, "on": on}
+
+
+def _layout_classic(now):
+    """Dzisiejszy układ: godzina, obok dzień tygodnia nad datą, równe odstępy od brzegów (jak dawny „zegar”)."""
+    font = CLOCK_FONTS[CLOCK["font"]][1]
+    small, fdates = CLOCK_SMALL.get(CLOCK_FONTS[CLOCK["font"]][0], ((SMALL, NARROW_TXT),) * 2)
+    tw = text_w(now.strftime("%H:%M:%S" if CLOCK["secs"] else "%H:%M"), font)
+    if NARROW:
+        return [_box("czas", (W - tw) // 2, 0, tw, H), _box("dzien", 0, 0, W, 7, "c", False),
+                _box("data", 0, 7, W, 5, "c", False)]
+    room = W - tw - 6  # najmniej 2 px odstępu przy brzegach i od godziny
+    wd = PL_DAYS[now.weekday()].upper()
+    _, wdw = PlainClock.fit([wd], room, small)
+    _, dw = PlainClock.fit([f"{now.day:02d}.{now.month:02d}.{now.year}"], room, fdates)
+    gap = (W - tw - max(wdw, dw)) // 3  # równe odstępy: brzeg, godzina, data, brzeg
+    dx = gap + tw + gap
+    side = W - dx - gap  # z odstępem od prawego brzegu – lustrzany układ ma go przy lewym
+    return [_box("czas", gap, 0, tw, H), _box("dzien", dx, 0, side, 7), _box("data", dx, 7, side, 5)]
+
+
+def _layout_mirror(now):
+    return [dict(b, x=W - b["x"] - b["w"]) for b in _layout_classic(now)]
+
+
+def _layout_sides(now):
+    """Dzień | godzina | data – godzina na środku, po bokach na całą wysokość."""
+    t = _layout_classic(now)[0]
+    x = (W - t["w"]) // 2
+    return [_box("czas", x, 0, t["w"], H), _box("dzien", 0, 0, x - 1, H, "c"), _box("data", x + t["w"] + 1, 0,
+                                                                                 W - x - t["w"] - 1, H, "c")]
+
+
+def _layout_alone(now):
+    return [_box("czas", 0, 0, W, H, "c")] + [dict(b, on=False) for b in _layout_classic(now)[1:]]
+
+
+def _layout_with(el):
+    def lay(now):
+        t = _layout_classic(now)[0]
+        gap = max(1, t["x"])
+        rest = [_box(el, t["x"] + t["w"] + gap, 0, W - t["x"] - t["w"] - 2 * gap, H, "c")]
+        rest += [dict(b, on=False) for b in _layout_classic(now)[1:] if b["el"] != el]
+        return [t] + rest
+    return lay
+
+
+CLOCK_LAYOUTS = [("klasyczny", _layout_classic), ("odwrócony", _layout_mirror), ("dzień | godzina | data", _layout_sides),
+                 ("sama godzina", _layout_alone), ("godzina + dzień", _layout_with("dzien")),
+                 ("godzina + data", _layout_with("data")), ("własny", None)]
+CLOCK_CUSTOM = len(CLOCK_LAYOUTS) - 1
+CLOCK_ALONE = 3  # „sama godzina” – przy 60 kolumnach jedyny gotowy układ bez przełączania stron
+
+
+def clock_pages():
+    """60 kolumn: obok godziny nic się nie zmieści, więc gotowe układy (poza „samą godziną”) pokazują dzień
+    i datę na zmianę z godziną – jak dawny zegar."""
+    return NARROW and CLOCK["layout"] not in (CLOCK_ALONE, CLOCK_CUSTOM)
+
+
+def clock_boxes(raw):
+    """Prostokąty z panelu WWW albo z konfiguracji -> poprawna lista (każdy element raz, w granicach panelu)
+    albo None, gdy coś się nie zgadza."""
+    if not isinstance(raw, list) or len(raw) != len(CLOCK_ELS):
+        return None
+    out = {}
+    for b in raw:
+        if not isinstance(b, dict) or b.get("el") not in CLOCK_ELS or b["el"] in out:
+            return None
+        try:
+            x, y, w, h = (int(b[k]) for k in "xywh")
+        except (KeyError, TypeError, ValueError):
+            return None
+        w, h = max(3, min(W, w)), max(5, min(H, h))
+        x, y = max(0, min(W - w, x)), max(0, min(H - h, y))
+        out[b["el"]] = _box(b["el"], x, y, w, h, b.get("align") if b.get("align") in ("l", "c", "r") else "l",
+                            b.get("on") is not False)
+    return [out[e] for e in CLOCK_ELS]
+
+
+def clock_layout(now):
+    """Prostokąty bieżącego układu (własny – z edytora; jeszcze nieułożony – jak klasyczny)."""
+    lay = CLOCK_LAYOUTS[CLOCK["layout"]][1]
+    if clock_pages():
+        return _layout_classic(now)
+    if lay is None:
+        return [dict(b) for b in CLOCK["boxes"]] if CLOCK["boxes"] else _layout_classic(now)
+    return lay(now)
+
+
 @reg("zegar")
 class PlainClock(Clock):
     """Zwykły, czytelny zegar: godzina z sekundami, dzień tygodnia i data."""
@@ -6989,31 +7139,13 @@ class PlainClock(Clock):
 
     def draw(self, f, now, t, dt):
         c = clock_color(now)
-        name, font = CLOCK_FONTS[CLOCK["font"]]
-        small, fdates = CLOCK_SMALL.get(name, ((SMALL, NARROW_TXT),) * 2)  # dzień i data w stylu godziny
-        hms = now.strftime("%H:%M:%S")
-        tw, th = text_w(hms, font), len(font["0"])
-        y = 1 + (10 - th) // 2
-        wd = PL_DAYS[now.weekday()].upper()
-        date = f"{now.day:02d}.{now.month:02d}.{now.year}"
-        if NARROW:  # 60 kolumn: sama godzina, co 10 s na chwilę dzień tygodnia i data (dwa wiersze)
-            if page(t, 4, 2.5) == 3:
-                ff, _ = self.fit([wd], W - 2, small)
-                f.draw(small_pl(wd, (W - text_w(wd, ff)) // 2, 1, font=ff), c)
-                fdate, _ = self.fit([date], W - 2, fdates)
-                f.text(date, (W - text_w(date, fdate)) // 2, 7, c, fdate)
-                return
-            x = (W - tw) // 2
-        else:
-            room = W - tw - 6  # najmniej 2 px odstępu przy brzegach i od godziny
-            fd, wdw = self.fit([wd], room, small)
-            fdate, dw = self.fit([date], room, fdates)
-            gap = (W - tw - max(wdw, dw)) // 3  # równe odstępy: brzeg, godzina, data, brzeg
-            x = gap
-            dx = x + tw + gap
-            f.draw(small_pl(wd, dx, 1, font=fd), c)       # wiersz 0 na kreskę (Ś), wiersz 6 na ogonek (Ą)
-            f.text(date, dx, 7, c, fdate)
-        f.text(hms, x, y, c, font)  # wszystko jednym kolorem
+        if clock_pages() and page(t, 4, 2.5) == 3:  # 60 kolumn: co 10 s na chwilę dzień tygodnia i data
+            for b in (_box("dzien", 1, 0, W - 2, 7, "c"), _box("data", 1, 7, W - 2, 5, "c")):
+                clock_box(f, now, b, c)
+            return
+        for b in clock_layout(now):  # wszystko jednym kolorem
+            if b["on"]:
+                clock_box(f, now, b, c)
 
 
 # ---------------------------------------------------------------- test kolorów (kalibracja podglądu)
@@ -9371,7 +9503,7 @@ class Engine:
     # ustawienia jednego efektu (widać je tylko, gdy ten efekt jest na panelu); reszta jest wspólna dla wszystkich
     SETTING_FX = {"ciężkie efekty": "cykl", "cykl co": "cykl", "kolejność": "cykl", "ludzik zajęcia": "ludzik",
                   "ludzik co ile": "ludzik", "ludzik postać": "ludzik", "ludzik przestawia": "ludzik",
-                  "ludzik strona": "ludzik", "kolor oczu": "kot czlowiek bajka sowa robot sauron hal mrok", "barwa": "zegar", "kolor zegara": "zegar", "czcionka": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
+                  "ludzik strona": "ludzik", "kolor oczu": "kot czlowiek bajka sowa robot sauron hal mrok", "barwa": "zegar", "kolor zegara": "zegar", "czcionka": "zegar", "układ": "zegar", "sekundy": "zegar", "temperatura": "zegar", "diody: czerwony": "kolory",
                   "diody: zielony": "kolory", "diody: niebieski": "kolory", "metal": "metal", "paleta": "plazma",
                   "prędkość": "plazma",
                   "godzina": " ".join(SCENES)}
@@ -9539,6 +9671,9 @@ class Engine:
         def s_font(d):
             CLOCK["font"] = (CLOCK["font"] + d) % len(CLOCK_FONTS)
 
+        def s_layout(d):
+            CLOCK["layout"] = (CLOCK["layout"] + d) % len(CLOCK_LAYOUTS)
+
         def s_temp(d):
             CLOCK["temp"] = self.step_in(CLOCK_TEMPS, CLOCK["temp"], d)
 
@@ -9617,6 +9752,9 @@ class Engine:
                          lambda v: "własny kolor" if v == "własny" else CLOCK_HUES[v][0]),
             "czcionka": opt(list(range(len(CLOCK_FONTS))), lambda: CLOCK["font"], lambda v: CLOCK.update(font=v),
                             lambda v: CLOCK_FONTS[v][0]),
+            "układ": opt(list(range(len(CLOCK_LAYOUTS))), lambda: CLOCK["layout"], lambda v: CLOCK.update(layout=v),
+                         lambda v: CLOCK_LAYOUTS[v][0]),
+            "sekundy": flag(lambda: CLOCK["secs"], lambda v: CLOCK.update(secs=v), "z sekundami", "bez sekund"),
             "temperatura": opt(CLOCK_TEMPS, lambda: CLOCK["temp"], lambda v: CLOCK.update(temp=v),
                                lambda v: f"{v:+d} K" if v else "0 K"),
             "metal": opt(list(range(len(METALS))), lambda: METAL["kind"], lambda v: METAL.update(kind=v),
@@ -9667,6 +9805,10 @@ class Engine:
             ("kolor zegara", lambda: eye_hex(CLOCK["col"]) or "z barwy", s_clkcol,
              "dowolny kolor zamiast barwy; w panelu WWW z próbnika, tu gotowe"),
             ("czcionka", lambda: CLOCK_FONTS[CLOCK["font"]][0], s_font, "krój cyfr godziny"),
+            ("układ", lambda: CLOCK_LAYOUTS[CLOCK["layout"]][0], s_layout,
+             "gdzie godzina, dzień i data; własny układasz w panelu WWW"),
+            ("sekundy", lambda: "z sekundami" if CLOCK["secs"] else "bez sekund",
+             lambda d: CLOCK.update(secs=not CLOCK["secs"]), "sekundy przy godzinie"),
             ("temperatura", v_temp, s_temp, "w lewo cieplej, w prawo chłodniej; przy „pora dnia” względem słońca"),
             ("metal", lambda: METALS[METAL["kind"]][0], s_metal, "z czego jest płynny metal"),
             ("paleta", lambda: PLASMA_PALS[PLASMA["kind"]][0], s_plasma, "kolory plazmy"),
@@ -9810,6 +9952,8 @@ class Engine:
                "msg_poll": {"q": INBOX.poll["q"], "opts": INBOX.poll["opts"]} if INBOX.poll else None,
                "zegar_barwa": CLOCK_HUES[CLOCK["hue"]][0], "zegar_temp": CLOCK["temp"],
                "zegar_kolor": eye_hex(CLOCK["col"]), "zegar_czcionka": CLOCK_FONTS[CLOCK["font"]][0],
+               "zegar_uklad": CLOCK_LAYOUTS[CLOCK["layout"]][0], "zegar_sekundy": CLOCK["secs"],
+               "zegar_wlasny": CLOCK["boxes"],
                "metal": METALS[METAL["kind"]][0],
                "plazma_paleta": PLASMA_PALS[PLASMA["kind"]][0],
                "plazma_predkosc": PLASMA["speed"], "godzina_sceny": sorted(SCENE_CLOCK),
@@ -10176,6 +10320,8 @@ class Engine:
             "daily": {"people": [dict(p) for p in DAILY["people"]], "cur": daily_cur(), "auto": DAILY["auto"],
                       "speak": DAILY["speak"]},
             "draw": draw_hex() if "rysunek" in self.setting_fx() else None,
+            "clock_layout": {"boxes": clock_layout(now), "custom": CLOCK["layout"] == CLOCK_CUSTOM,
+                             "pages": clock_pages()} if "zegar" in self.setting_fx() else None,
             "video": {"urls": VIDEO["urls"], "cam": VIDEO["cam"], "ffmpeg": bool(shutil.which("ffmpeg")),
                       "err": {k: r.err for k, r in VIDEOS.items()}},
             "power": {"est": round(self.limiter.est), "raw": round(self.limiter.raw), "k": round(self.limiter.k, 3),
@@ -10693,6 +10839,13 @@ def web_cmd(e, c):
                 raise ValueError("kamera: link musi zaczynać się od http(s)://, rtsp:// albo rtmp://")
             return lambda: VIDEO.update(cam=urls[0] if urls else "")
         raise ValueError(f"złe polecenie video {act!r}")
+    if op == "clocklayout":  # zegar: własny układ z edytora w panelu WWW
+        if c.get("act") == "reset":
+            return lambda: CLOCK.update(layout=0)
+        boxes = clock_boxes(c.get("boxes"))
+        if boxes is None:
+            raise ValueError("zły układ zegara")
+        return lambda: CLOCK.update(boxes=boxes, layout=CLOCK_CUSTOM)
     if op == "draw":
         INBOX.active = time.time()
         act = c.get("act")
@@ -11897,6 +12050,9 @@ def main():
     CLOCK["temp"] = cfg.get("zegar_temp") if cfg.get("zegar_temp") in CLOCK_TEMPS else 0
     CLOCK["col"] = eye_rgb(cfg.get("zegar_kolor") or "")
     CLOCK["font"] = next((i for i, (n, _) in enumerate(CLOCK_FONTS) if n == cfg.get("zegar_czcionka")), 0)
+    CLOCK["layout"] = next((i for i, (n, _) in enumerate(CLOCK_LAYOUTS) if n == cfg.get("zegar_uklad")), 0)
+    CLOCK["secs"] = cfg.get("zegar_sekundy") is not False
+    CLOCK["boxes"] = clock_boxes(cfg.get("zegar_wlasny"))
     METAL["kind"] = next((i for i, (n, *_) in enumerate(METALS) if n == cfg.get("metal")), 0)
     PLASMA["kind"] = next((i for i, (n, _) in enumerate(PLASMA_PALS) if n == cfg.get("plazma_paleta")), 0)
     PLASMA["speed"] = cfg.get("plazma_predkosc") if cfg.get("plazma_predkosc") in PLASMA_SPEEDS else 1.0

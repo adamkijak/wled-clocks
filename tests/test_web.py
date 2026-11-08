@@ -1158,3 +1158,57 @@ class PlainClockTest(unittest.TestCase):
                     self.assertTrue(all(c == (0, 0, 0) or c[1] > 0 for row in f.px for c in row))
         finally:
             wc.CLOCK.update(col=None, font=0)
+
+    def test_layouts(self):
+        """Układy zegara: gotowe mieszczą się w panelu i nie są puste, własny z panelu WWW (walidacja, zapis,
+        odczyt), za mały prostokąt – mniejsza czcionka albo skrót, a gdy nic się nie mieści – element znika."""
+        saved = dict(wc.CLOCK)
+        now = wc.dtm.datetime(2026, 11, 9, 23, 58, 48).astimezone()            # poniedziałek – najdłuższa nazwa
+        lit = lambda f: {(x, y) for y, row in enumerate(f.px) for x, c in enumerate(row) if c != (0, 0, 0)}
+        try:
+            wc.CLOCK.update(hue=1, col=None)
+            frames = set()
+            for li in range(wc.CLOCK_CUSTOM):
+                for secs in (True, False):
+                    wc.CLOCK.update(layout=li, secs=secs)
+                    for b in wc.clock_layout(now):
+                        self.assertTrue(0 <= b["x"] and b["x"] + b["w"] <= wc.W and 0 <= b["y"] and b["y"] + b["h"] <= wc.H, (li, b))
+                    f = wc.Frame()
+                    wc.CLOCKS["zegar"]().draw(f, now, 1.0, 0.05)
+                    self.assertTrue(lit(f), li)
+                    frames.add(frozenset(lit(f)))
+            self.assertEqual(len(frames), 2 * wc.CLOCK_CUSTOM)                # każdy układ wygląda inaczej
+            e = wc.Engine(args(mode="zegar"), {})
+            self.assertIn("układ", [st[0] for st in e.shown_settings()])
+            self.assertIsNotNone(e.snapshot(now)["clock_layout"])
+            with self.assertRaises(ValueError):
+                wc.web_cmd(e, {"op": "clocklayout", "boxes": [{"el": "czas", "x": 0, "y": 0, "w": 50, "h": 12}]})
+            boxes = [{"el": "data", "x": 0, "y": 0, "w": 40, "h": 12, "align": "c"},
+                     {"el": "czas", "x": 200, "y": 3, "w": 70, "h": 20, "align": "r"},   # poza panelem – przycięty
+                     {"el": "dzien", "x": 0, "y": 0, "w": 3, "h": 5, "on": False}]
+            wc.web_cmd(e, {"op": "clocklayout", "boxes": boxes})()
+            self.assertEqual(wc.CLOCK["layout"], wc.CLOCK_CUSTOM)
+            got = {b["el"]: b for b in wc.clock_layout(now)}
+            self.assertEqual((got["czas"]["x"], got["czas"]["y"], got["czas"]["w"], got["czas"]["h"]), (wc.W - 70, 0, 70, 12))
+            self.assertFalse(got["dzien"]["on"])
+            e.save()
+            with open(wc.CONFIG, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            self.assertEqual((cfg["zegar_uklad"], len(cfg["zegar_wlasny"])), ("własny", 3))
+            self.assertEqual(wc.clock_boxes(cfg["zegar_wlasny"]), wc.clock_layout(now))    # odczyt przy starcie
+            self.assertIsNone(wc.clock_boxes([{"el": "czas"}] * 3))                # zepsuty plik – bez własnego
+            # mniejszy prostokąt: godzina bez sekund albo mniejszą czcionką, dzień skrótem; za mały – nic
+            f = wc.Frame()
+            wc.clock_box(f, now, wc._box("czas", 0, 0, 40, 12), (255, 255, 255))
+            self.assertTrue(lit(f) and max(x for x, _ in lit(f)) < 40)
+            f = wc.Frame()
+            wc.clock_box(f, now, wc._box("dzien", 0, 0, 30, 12), (255, 255, 255))
+            self.assertTrue(lit(f) and max(x for x, _ in lit(f)) < 30)
+            f = wc.Frame()
+            wc.clock_box(f, now, wc._box("data", 0, 0, 5, 5), (255, 255, 255))
+            self.assertFalse(lit(f))
+            wc.web_cmd(e, {"op": "clocklayout", "act": "reset"})()
+            self.assertEqual(wc.CLOCK["layout"], 0)
+        finally:
+            wc.CLOCK.clear()
+            wc.CLOCK.update(saved)

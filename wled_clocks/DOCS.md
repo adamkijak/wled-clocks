@@ -126,6 +126,16 @@ Lista efektów jest podzielona na zwijane kategorie (zegary, pogoda, gry…); kl
 przeglądarka to pamięta. Na początku rozwinięte jest tylko „Na start”; kategoria z efektem na panelu rozwija się sama,
 a wyszukiwarka przeszukuje wszystkie.
 
+Efekt **zegar** ma w ustawieniach efektu **układ**: klasyczny (godzina, obok dzień tygodnia nad datą),
+odwrócony, dzień | godzina | data, sama godzina, godzina + dzień, godzina + data albo własny, oraz **sekundy**
+(z sekundami albo bez). Gdy zegar jest na panelu, pod podglądem jest **Układ zegara**: prostokąty z godziną, dniem
+i datą na żywym obrazie panelu. Przeciągnięcie prostokąta go przesuwa, a róg ◢ zmienia jego rozmiar (na telefonie
+działa palcem). W „Pokaż/ukryj, wyrównanie i dokładne pozycje” każdy element można ukryć, wyrównać do lewej, do
+środka albo do prawej i wpisać mu pozycję. Napis bierze największą czcionkę, która się zmieści. W mniejszym
+prostokącie godzina traci sekundy albo zmniejsza czcionkę, dzień skraca się do „pon.”, a data do „DD.MM”. Gdy nic
+się nie mieści, element znika. Pierwsza zmiana gotowego układu robi z niego własny, a „Przywróć klasyczny” wraca do
+dawnego wyglądu. Przy 60 kolumnach gotowe układy (poza „samą godziną”) pokazują dzień i datę na zmianę z godziną.
+
 Kategoria **Tła** to efekty na cały panel z godziną z czarną obwódką (czytelna na każdym tle): plazma (w ustawieniach
 efektu paleta – 23 do wyboru, od tęczy, ognia i oceanu po terminal i biało-czerwoną, albo „co minutę inna” – i
 prędkość od x0.25 do x3), copper
