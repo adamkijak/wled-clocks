@@ -83,10 +83,6 @@ function drawFrame(bytes) {
   lastFrame = bytes;
   const W = state ? state.w : bytes.length / 36;
   drawLeds(canvas, bytes, W, state ? state.h : 12, W, canvas.clientWidth || 600);
-  if (!$("#clock-layout").hidden) { // w edytorze układu pełna jasność – ogranicznik prądu nie przygasza podkładu
-    const k = 255 / Math.max(1, ...bytes);
-    drawLeds($("#cl-cv"), bytes.map((v) => Math.min(255, v * k)), W, 12, W, $("#cl-stage").clientWidth || 600);
-  }
 }
 window.addEventListener("resize", () => lastFrame && drawFrame(lastFrame));
 
@@ -709,151 +705,6 @@ function renderVideo(v) {
   if (!camDirty && document.activeElement !== $("#kamera-url")) $("#kamera-url").value = v.cam;
 }
 
-// ------------------------------------------------------------ układ zegara (prostokąty przeciągane po panelu)
-const CL_NAMES = { czas: "godzina", dzien: "dzień", data: "data" };
-const CL_ALIGN = [["l", "do lewej"], ["c", "środek"], ["r", "do prawej"]];
-let clBoxes = []; // to, co widać w edytorze (może być przed wysłaniem albo przed potwierdzeniem ze skryptu)
-let clDrag = null; // {b, mode: "move" | "size", sx, sy, start}
-let clSent = 0; // chwila wysłania – przez 3 s stan ze skryptu nie nadpisuje świeżo ułożonych prostokątów
-const clEls = new Map(); // element -> {box, inputs, on, align}
-
-function clSend() {
-  clSent = Date.now();
-  cmd("clocklayout", { boxes: clBoxes });
-}
-
-function clClamp(b) {
-  const W = state.w, H = 12;
-  b.w = Math.max(3, Math.min(W, b.w));
-  b.h = Math.max(5, Math.min(H, b.h));
-  b.x = Math.max(0, Math.min(W - b.w, b.x));
-  b.y = Math.max(0, Math.min(H - b.h, b.y));
-}
-
-function clBuild() {
-  const stage = $("#cl-stage"), rowsBox = $("#cl-rows");
-  for (const el_ of Object.keys(CL_NAMES)) {
-    const box = el("div", "cl-box", CL_NAMES[el_]);
-    box.append(el("div", "cl-h"));
-    box.addEventListener("pointerdown", (e) => {
-      const b = clBoxes.find((x) => x.el === el_);
-      if (!b) return;
-      clDrag = { b, mode: e.target.classList.contains("cl-h") ? "size" : "move", sx: e.clientX, sy: e.clientY,
-        start: { ...b } };
-      box.classList.add("drag");
-      box.setPointerCapture(e.pointerId);
-      e.preventDefault();
-    });
-    box.addEventListener("pointermove", (e) => {
-      if (!clDrag || clDrag.b.el !== el_) return;
-      const r = stage.getBoundingClientRect();
-      const dx = Math.round(((e.clientX - clDrag.sx) / r.width) * state.w);
-      const dy = Math.round(((e.clientY - clDrag.sy) / r.height) * 12);
-      const b = clDrag.b, s0 = clDrag.start;
-      if (clDrag.mode === "move") {
-        b.x = s0.x + dx;
-        b.y = s0.y + dy;
-      } else {
-        b.w = Math.min(state.w - s0.x, s0.w + dx);
-        b.h = Math.min(12 - s0.y, s0.h + dy);
-      }
-      clClamp(b);
-      clShow();
-    });
-    const end = () => {
-      if (!clDrag || clDrag.b.el !== el_) return;
-      const moved = JSON.stringify(clDrag.b) !== JSON.stringify(clDrag.start);
-      clDrag = null;
-      box.classList.remove("drag");
-      if (moved) clSend();
-    };
-    box.addEventListener("pointerup", end);
-    box.addEventListener("pointercancel", end);
-    stage.append(box);
-
-    const row = el("div", "cl-row");
-    row.append(el("b", "", CL_NAMES[el_]));
-    const on = el("input");
-    on.type = "checkbox";
-    const onL = el("label");
-    onL.append(on, "pokaż");
-    const align = el("select");
-    align.setAttribute("aria-label", `${CL_NAMES[el_]}: wyrównanie`);
-    CL_ALIGN.forEach(([v, l]) => {
-      const o = el("option", "", l);
-      o.value = v;
-      align.append(o);
-    });
-    const inputs = {};
-    row.append(onL, align);
-    for (const [k, l] of [["x", "x"], ["y", "y"], ["w", "szer."], ["h", "wys."]]) {
-      const lab = el("label", "", l);
-      const inp = el("input");
-      inp.type = "number";
-      inp.inputMode = "numeric";
-      inp.setAttribute("aria-label", `${CL_NAMES[el_]}: ${l}`);
-      inp.onchange = () => {
-        const b = clBoxes.find((x) => x.el === el_);
-        const v = Math.round(Number(inp.value));
-        if (!b || inp.value === "" || !Number.isFinite(v)) return;
-        b[k] = v;
-        clClamp(b);
-        clShow();
-        clSend();
-      };
-      inp.onkeydown = (e) => e.key === "Enter" && inp.blur();
-      lab.append(inp);
-      row.append(lab);
-      inputs[k] = inp;
-    }
-    const change = (k, v) => {
-      const b = clBoxes.find((x) => x.el === el_);
-      if (!b) return;
-      b[k] = v;
-      clShow();
-      clSend();
-    };
-    on.onchange = () => change("on", on.checked);
-    align.onchange = () => change("align", align.value);
-    rowsBox.append(row);
-    clEls.set(el_, { box, inputs, on, align });
-  }
-}
-
-function clShow() {
-  const W = state.w;
-  for (const b of clBoxes) {
-    const r = clEls.get(b.el);
-    if (!r) continue;
-    Object.assign(r.box.style, { left: `${(b.x / W) * 100}%`, top: `${(b.y / 12) * 100}%`,
-      width: `${(b.w / W) * 100}%`, height: `${(b.h / 12) * 100}%` });
-    r.box.classList.toggle("off", !b.on);
-    r.box.title = `${CL_NAMES[b.el]}: x ${b.x}, y ${b.y}, ${b.w}×${b.h}`;
-    r.on.checked = b.on;
-    if (document.activeElement !== r.align) r.align.value = b.align;
-    for (const k of ["x", "y", "w", "h"]) {
-      if (document.activeElement !== r.inputs[k]) r.inputs[k].value = String(b[k]);
-    }
-  }
-}
-
-$("#cl-reset").onclick = () => { clSent = 0; cmd("clocklayout", { act: "reset" }); };
-
-function renderClockLayout(cl) {
-  $("#clock-layout").hidden = !cl;
-  if (!cl) return;
-  if (!clEls.size) clBuild();
-  $("#cl-stage").style.aspectRatio = `${state.w} / 12`;
-  setText($("#cl-state"), cl.custom ? "własny" : cl.pages ? "gotowy – przy 60 kolumnach dzień i data na zmianę"
-    : "gotowy – zmiana robi z niego własny");
-  $("#cl-state").classList.toggle("ok", cl.custom);
-  if (clDrag || Date.now() - clSent < 3000) return; // nie spod palca i nie zanim skrypt przyjmie zmianę
-  if (JSON.stringify(cl.boxes) === renderClockLayout.key) return;
-  renderClockLayout.key = JSON.stringify(cl.boxes);
-  clBoxes = cl.boxes.map((b) => ({ ...b }));
-  clShow();
-}
-
 // ------------------------------------------------------------ wspólny rysunek
 const DRAW_PAL = ["#ff2d23", "#ff8200", "#ffe100", "#3cf046", "#00d2ff", "#326eff", "#aa46ff", "#ff50b4", "#ffffff", ""];
 let brush = DRAW_PAL[0];
@@ -1108,7 +959,6 @@ function render(s) {
   renderDaily(s.daily);
   renderDraw(s.draw);
   renderVideo(s.video);
-  renderClockLayout(s.clock_layout);
 }
 
 // ------------------------------------------------------------ przyciski i klawisze (jak w TUI)

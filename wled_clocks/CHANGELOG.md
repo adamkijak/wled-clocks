@@ -1,5 +1,12 @@
 # Zmiany
 
+## 1.37.0
+
+- Zegar: zamiast własnego układu przeciąganego w panelu WWW i skalowanych napisów – gotowe układy ze stałym
+  rozmiarem napisów (jak w klasycznym): klasyczny, odwrócony, dzień | godzina | data, nowy data | godzina | dzień,
+  sama godzina, godzina + dzień, godzina + data. Gdy brakuje miejsca, napis się skraca, a nie zmniejsza.
+  Edytor „Układ zegara” usunięty.
+
 ## 1.36.0
 
 - Zegar: rozmiar napisu w układzie skaluje się z prostokątem – każda wysokość od 5 do 12 wierszy (np. godzina na

@@ -315,21 +315,3 @@ details.grp .sum { margin-left: auto; font-weight: 400; white-space: nowrap; ove
 .pollbox { margin: 4px 0 12px; }
 .vid-row { display: flex; gap: 8px; align-items: center; }
 .vid-row input { flex: 1; min-width: 0; }
-
-/* układ zegara: prostokąty przeciągane po podglądzie panelu */
-#clock-layout { grid-template-columns: minmax(0, 1fr); } /* szeroki podkład przewija się sam, nie strona */
-.cl-wrap { overflow-x: auto; border-radius: 6px; }
-.cl-stage { position: relative; min-width: 560px; background: #0b0b0e; user-select: none; }
-.cl-stage canvas { display: block; width: 100%; height: auto; }
-.cl-box { position: absolute; box-sizing: border-box; border: 2px solid var(--accent); border-radius: 3px;
-  background: rgb(3 169 244 / .18); color: #fff; font-size: 11px; line-height: 1; padding: 2px 3px; cursor: move;
-  touch-action: none; overflow: hidden; white-space: nowrap; text-shadow: 0 0 3px #000; }
-.cl-box.off { border-style: dashed; opacity: .45; }
-.cl-box.drag { background: rgb(3 169 244 / .32); z-index: 2; }
-.cl-box .cl-h { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
-.cl-rows { display: grid; gap: 6px; }
-.cl-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
-.cl-row b { min-width: 4.5em; }
-.cl-row input[type=number] { width: 4.2em; }
-.cl-row label { display: flex; gap: 4px; align-items: center; }

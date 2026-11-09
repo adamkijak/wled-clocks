@@ -127,16 +127,11 @@ przeglądarka to pamięta. Na początku rozwinięte jest tylko „Na start”; k
 a wyszukiwarka przeszukuje wszystkie.
 
 Efekt **zegar** ma w ustawieniach efektu **układ**: klasyczny (godzina, obok dzień tygodnia nad datą),
-odwrócony, dzień | godzina | data, sama godzina, godzina + dzień, godzina + data albo własny, oraz **sekundy**
-(z sekundami albo bez). Gdy zegar jest na panelu, pod podglądem jest **Układ zegara**: prostokąty z godziną, dniem
-i datą na żywym obrazie panelu. Przeciągnięcie prostokąta go przesuwa, a róg ◢ zmienia jego rozmiar (na telefonie
-działa palcem). W „Pokaż/ukryj, wyrównanie i dokładne pozycje” każdy element można ukryć, wyrównać do lewej, do
-środka albo do prawej i wpisać mu pozycję. Rozmiar napisu sam się dopasowuje do prostokąta (każda
-wysokość od 5 do 12 wierszy, na szerokość też musi się zmieścić). Godzina w wysokim prostokącie zostaje w wybranym
-kroju; cienkie czcionki nie są powiększane, a 7-segmentowe są rysowane od razu w danej wysokości. W mniejszym
-prostokącie godzina traci sekundy albo maleje, dzień skraca się do „pon.”, a data do „DD.MM”. Gdy nic
-się nie mieści, element znika. Pierwsza zmiana gotowego układu robi z niego własny, a „Przywróć klasyczny” wraca do
-dawnego wyglądu. Przy 60 kolumnach gotowe układy (poza „samą godziną”) pokazują dzień i datę na zmianę z godziną.
+odwrócony, dzień | godzina | data, data | godzina | dzień, sama godzina, godzina + dzień albo godzina + data, oraz
+**sekundy** (z sekundami albo bez). We wszystkich układach napisy mają ten sam rozmiar co w klasycznym: godzina
+w wybranej czcionce, dzień i data małą czcionką w jej stylu. Gdy brakuje miejsca, napis się skraca (dzień do
+„PON.”, godzina bez sekund), a nie zmniejsza. Przy 60 kolumnach układy (poza „samą godziną”) pokazują dzień i datę
+na zmianę z godziną.
 
 Kategoria **Tła** to efekty na cały panel z godziną z czarną obwódką (czytelna na każdym tle): plazma (w ustawieniach
 efektu paleta – 23 do wyboru, od tęczy, ognia i oceanu po terminal i biało-czerwoną, albo „co minutę inna” – i
