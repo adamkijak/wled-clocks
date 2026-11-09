@@ -1183,13 +1183,28 @@ class PlainClockTest(unittest.TestCase):
                                 f = wc.Frame()
                                 wc.clock_box(f, now, b, (255, 255, 255))
                                 self.assertTrue(lit(f), (fi, li, b["el"]))           # nic nie znika
-                                heights.add((b["el"], rows(f)))
+                                if not b.get("txt"):
+                                    heights.add((b["el"], rows(f)))
                         f = wc.Frame()
                         wc.CLOCKS["zegar"]().draw(f, now, 1.0, 0.05)
                         frames.add(frozenset(lit(f)))
                 self.assertEqual(len(frames), 2 * n, wc.CLOCK_FONTS[fi][0])     # każdy układ wygląda inaczej
                 self.assertEqual(len(heights), 3, (wc.CLOCK_FONTS[fi][0], heights))  # jedna wysokość na element
-            wc.CLOCK["font"] = 0
+            # „w jednej linii”: godzina, dzień i data tą samą czcionką, na jednej linii bazowej, bez nachodzenia
+            wc.CLOCK.update(font=0, secs=True, layout=[n for n, _ in wc.CLOCK_LAYOUTS].index("w jednej linii"))
+            for day in range(9, 16):
+                now_ = now.replace(day=day)
+                spans = {}
+                for b in wc.clock_layout(now_):
+                    f = wc.Frame()
+                    wc.clock_box(f, now_, b, (255, 255, 255))
+                    xs = [x for x, _ in lit(f)]
+                    spans[b["el"]] = (min(xs), max(xs), {y for _, y in lit(f)})
+                self.assertEqual(spans["czas"][2], spans["data"][2])
+                self.assertLessEqual(spans["czas"][2], spans["dzien"][2])            # dzień: + polskie znaki
+                order = sorted(spans.values(), key=lambda v: v[0])
+                self.assertTrue(all(a[1] + 3 <= b[0] for a, b in zip(order, order[1:])), spans)
+                self.assertEqual(len(order[-1][2]), 7)
             e = wc.Engine(args(mode="zegar"), {})
             self.assertIn("układ", [st[0] for st in e.shown_settings()])
             wc.CLOCK["layout"] = 2

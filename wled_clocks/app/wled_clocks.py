@@ -6994,31 +6994,34 @@ def clock_metrics(el, font, small):
 
 
 def clock_text(el, t, small):
-    """Napis tak, jak go rysujemy: małe czcionki (small_pl) mają tylko wielkie litery."""
-    return t.upper() if small else t
+    """Napis tak, jak go rysujemy: małe czcionki (small_pl) mają tylko wielkie litery, TXT – „Środa”."""
+    return t.upper() if small else t.capitalize() if el == "dzien" else t
 
 
-def clock_candidates(el, now):
+def clock_candidates(el, now, txt=False):
     """(napisy od najpełniejszego, czcionki (czcionka, czy małe litery z small_pl)) dla elementu zegara. Rozmiar
     zawsze ten sam: godzina w wybranej czcionce, dzień i data w małych czcionkach w jej stylu (CLOCK_SMALL) –
     gdy się nie mieszczą, krótszy napis (bez sekund, skrót dnia, data bez roku), nigdy mniejsza czy większa litera."""
     name, font = CLOCK_FONTS[CLOCK["font"]]
     small, fdates = CLOCK_SMALL.get(name, ((SMALL, NARROW_TXT),) * 2)
+    if txt:  # „w jednej linii”: wszystko czcionką z literami, więc godzina tej samej wielkości co dzień i data
+        font, small, fdates = TXT, (), (TXT,)
     if el == "czas":
         texts = [now.strftime("%H:%M:%S"), now.strftime("%H:%M")] if CLOCK["secs"] else [now.strftime("%H:%M")]
         return texts, [(font, False)]
     if el == "dzien":
-        return [PL_DAYS[now.weekday()], PL_DAYS_SHORT[now.weekday()]], [(ff, True) for ff in small]
+        return [PL_DAYS[now.weekday()], PL_DAYS_SHORT[now.weekday()]], [(ff, True) for ff in small] or [(TXT, False)]
     return [f"{now.day:02d}.{now.month:02d}.{now.year}", f"{now.day:02d}.{now.month:02d}"], [(ff, False) for ff in fdates]
 
 
 def clock_box(f, now, b, c):
     """Element zegara w prostokącie b: pierwszy napis i czcionka, które się mieszczą; wyrównanie z b["align"],
     w pionie na środek. Nic się nie mieści – element znika (lepsze niż ucięte litery)."""
-    texts, fonts = clock_candidates(b["el"], now)
+    texts, fonts = clock_candidates(b["el"], now, b.get("txt"))
     for t, (font, small) in ((t, ff) for t in texts for ff in fonts):
         t = clock_text(b["el"], t, small)
-        top, h = clock_metrics(b["el"], font, small)
+        # jedna czcionka w linii – wspólna wysokość z polskimi znakami, żeby napisy stały na jednej linii bazowej
+        top, h = clock_metrics("dzien" if b.get("txt") else b["el"], font, small)
         tw = text_w(t, font)
         if h <= b["h"] and tw <= b["w"]:
             break
@@ -7079,10 +7082,35 @@ def _layout_with(el):
     return lay
 
 
+def _layout_line(now):
+    """Dzień, data i godzina w jednej linii, wszystko tą samą czcionką (TXT, 7 wierszy). Najpełniejsza wersja, która
+    się mieści – skrót dnia, data bez roku, na końcu bez sekund; szerokości liczone dla najdłuższego dnia i cyfr,
+    więc nic nie skacze z dnia na dzień ani co sekundę."""
+    width = lambda el, ts: max(text_w(clock_text(el, t, False), TXT) for t in ts)
+    for tf in (["00:00:00", "00:00"] if CLOCK["secs"] else ["00:00"]):
+        for dates in ("00.00.0000", "00.00"):
+            for days in (PL_DAYS, PL_DAYS_SHORT):
+                ws = [width("dzien", days), width("data", [dates]), width("czas", [tf])]
+                free = W - sum(ws)
+                if free >= 6:
+                    break
+            if free >= 6:
+                break
+        if free >= 6:
+            break
+    gap = max(3, free // 3)
+    x, out = (free - 2 * gap) // 2, []
+    for el, w in zip(("dzien", "data", "czas"), ws):
+        out.append(dict(_box(el, x, 0, max(3, w), H, "c"), txt=True))
+        x += w + gap
+    return sorted(out, key=lambda b: CLOCK_ELS.index(b["el"]))
+
+
 CLOCK_LAYOUTS = [("klasyczny", _layout_classic), ("odwrócony", _layout_mirror),
                  ("dzień | godzina | data", _layout_sides("dzien", "data")),
                  ("data | godzina | dzień", _layout_sides("data", "dzien")), ("sama godzina", _layout_alone),
-                 ("godzina + dzień", _layout_with("dzien")), ("godzina + data", _layout_with("data"))]
+                 ("godzina + dzień", _layout_with("dzien")), ("godzina + data", _layout_with("data")),
+                 ("w jednej linii", _layout_line)]
 CLOCK_ALONE = 4  # „sama godzina” – przy 60 kolumnach jedyny układ bez przełączania stron
 
 

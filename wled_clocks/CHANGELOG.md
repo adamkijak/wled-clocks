@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.38.0
+
+- Zegar: układ **w jednej linii** – dzień, data i godzina tą samą czcionką (7 wierszy, z polskimi znakami), czyli
+  tej samej wielkości: „Pon. 09.11 23:58:48”. Gdy brakuje miejsca, odpada rok, potem sekundy.
+
 ## 1.37.0
 
 - Zegar: zamiast własnego układu przeciąganego w panelu WWW i skalowanych napisów – gotowe układy ze stałym

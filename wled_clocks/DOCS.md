@@ -127,9 +127,11 @@ przeglądarka to pamięta. Na początku rozwinięte jest tylko „Na start”; k
 a wyszukiwarka przeszukuje wszystkie.
 
 Efekt **zegar** ma w ustawieniach efektu **układ**: klasyczny (godzina, obok dzień tygodnia nad datą),
-odwrócony, dzień | godzina | data, data | godzina | dzień, sama godzina, godzina + dzień albo godzina + data, oraz
-**sekundy** (z sekundami albo bez). We wszystkich układach napisy mają ten sam rozmiar co w klasycznym: godzina
-w wybranej czcionce, dzień i data małą czcionką w jej stylu. Gdy brakuje miejsca, napis się skraca (dzień do
+odwrócony, dzień | godzina | data, data | godzina | dzień, sama godzina, godzina + dzień, godzina + data albo w jednej
+linii, oraz **sekundy** (z sekundami albo bez). W układach poza „w jednej linii” napisy mają ten sam rozmiar co
+w klasycznym: godzina w wybranej czcionce, dzień i data małą czcionką w jej stylu. „W jednej linii” pisze dzień,
+datę i godzinę jedną czcionką z literami (7 wierszy), więc wszystkie są tej samej wielkości: przy 120 kolumnach
+„Pon. 09.11 23:58:48” (rok i pełna nazwa dnia się nie mieszczą; krótkie nazwy, jak „Środa”, są w całości). Gdy brakuje miejsca, napis się skraca (dzień do
 „PON.”, godzina bez sekund), a nie zmniejsza. Przy 60 kolumnach układy (poza „samą godziną”) pokazują dzień i datę
 na zmianę z godziną.
 
