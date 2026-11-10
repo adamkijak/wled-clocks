@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.40.0
+
+- Zegar: w układzie **godzina + data** data jest tą samą czcionką i wielkością co godzina (z rokiem, gdy się
+  mieści, inaczej DD.MM; na końcu godzina traci sekundy). Czcionki godziny mają kropkę.
+
 ## 1.39.0
 
 - Zegar: układy **poświata** (dzień i data cienkimi literami w stylu czcionki „cienka”, słaba poświata wokół

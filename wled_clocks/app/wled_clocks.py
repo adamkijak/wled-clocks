@@ -275,7 +275,7 @@ THIN = _rows({  # 5x10, kreska 1 px
     "7": "#####|....#|....#|...#.|...#.|..#..|..#..|.#...|.#...|.#...",
     "8": ".###.|#...#|#...#|#...#|.###.|#...#|#...#|#...#|#...#|.###.",
     "9": ".###.|#...#|#...#|#...#|#...#|.####|....#|....#|#...#|.###.",
-    ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..",
+    ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..", ".": ".|.|.|.|.|.|.|.|.|#",
 })
 SLIM = _rows({  # 4x10, kreska 1 px – wąska
     "0": ".##.|#..#|#..#|#..#|#..#|#..#|#..#|#..#|#..#|.##.",
@@ -288,9 +288,9 @@ SLIM = _rows({  # 4x10, kreska 1 px – wąska
     "7": "####|...#|...#|..#.|..#.|..#.|.#..|.#..|.#..|.#..",
     "8": ".##.|#..#|#..#|#..#|.##.|#..#|#..#|#..#|#..#|.##.",
     "9": ".##.|#..#|#..#|#..#|#..#|.###|...#|...#|#..#|.##.",
-    ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..",
+    ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..", ".": ".|.|.|.|.|.|.|.|.|#",
 })
-# litery w stylu THIN do dnia tygodnia (CLOCK_DAYS3) i kropka do daty – układy „poświata” i „klapki”
+# litery w stylu THIN do dnia tygodnia (CLOCK_DAYS3) – układy „poświata” i „klapki”
 THIN_TXT = dict(THIN, **_rows({
     "A": ".###.|#...#|#...#|#...#|#...#|#####|#...#|#...#|#...#|#...#",
     "B": "####.|#...#|#...#|#...#|####.|#...#|#...#|#...#|#...#|####.",
@@ -305,7 +305,6 @@ THIN_TXT = dict(THIN, **_rows({
     "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..|..#..|..#..|..#..",
     "W": "#...#|#...#|#...#|#...#|#...#|#...#|#.#.#|#.#.#|##.##|#...#",
     "Z": "#####|....#|...#.|...#.|..#..|..#..|.#...|.#...|#....|#####",
-    ".": ".|.|.|.|.|.|.|.|.|#",
 }))
 THIN7 = {k: [g[i] for i in (0, 1, 3, 4, 5, 8, 9)] for k, g in THIN_TXT.items()}  # te same znaki w 7 wierszach
 
@@ -316,9 +315,9 @@ def _thick(g):
 
 
 BOLD = {k: _thick(g) for k, g in BIG.items() if k in "0123456789 "}  # BIG pogrubiony: kreski pionowe 3 px
-BOLD[":"] = BIG[":"]
+BOLD[":"], BOLD["."] = BIG[":"], BIG["."]
 SQUARE = {k: [r.replace(".####.", "######") if i in (0, len(g) - 1) else r for i, r in enumerate(g)]
-          for k, g in BIG.items() if k in "0123456789: "}  # BIG z kwadratowymi rogami
+          for k, g in BIG.items() if k in "0123456789:. "}  # BIG z kwadratowymi rogami
 
 
 def _seg7(w, t, h=9, gaps=True):
@@ -7018,7 +7017,7 @@ def clock_text(el, t, small):
     return t.upper() if small else t.capitalize() if el == "dzien" else t
 
 
-def clock_candidates(el, now, txt=False):
+def clock_candidates(el, now, txt=False, big=False):
     """(napisy od najpełniejszego, czcionki (czcionka, czy małe litery z small_pl)) dla elementu zegara. Rozmiar
     zawsze ten sam: godzina w wybranej czcionce, dzień i data w małych czcionkach w jej stylu (CLOCK_SMALL) –
     gdy się nie mieszczą, krótszy napis (bez sekund, skrót dnia, data bez roku), nigdy mniejsza czy większa litera."""
@@ -7026,6 +7025,8 @@ def clock_candidates(el, now, txt=False):
     small, fdates = CLOCK_SMALL.get(name, ((SMALL, NARROW_TXT),) * 2)
     if txt:  # „w jednej linii”: wszystko czcionką z literami, więc godzina tej samej wielkości co dzień i data
         font, small, fdates = TXT, (), (TXT,)
+    if big:  # „godzina + data”: data tą samą czcionką i wielkością co godzina
+        fdates = (font,)
     if el == "czas":
         texts = [now.strftime("%H:%M:%S"), now.strftime("%H:%M")] if CLOCK["secs"] else [now.strftime("%H:%M")]
         return texts, [(font, False)]
@@ -7094,7 +7095,7 @@ def clock_box(f, now, b, c):
     w pionie na środek. Nic się nie mieści – element znika (lepsze niż ucięte litery)."""
     if b.get("style"):
         return clock_styled(f, now, b, c)
-    texts, fonts = clock_candidates(b["el"], now, b.get("txt"))
+    texts, fonts = clock_candidates(b["el"], now, b.get("txt"), b.get("big"))
     for t, (font, small) in ((t, ff) for t in texts for ff in fonts):
         t = clock_text(b["el"], t, small)
         # jedna czcionka w linii – wspólna wysokość z polskimi znakami, żeby napisy stały na jednej linii bazowej
@@ -7202,10 +7203,27 @@ def _layout_styled(style):
     return lay
 
 
+def _layout_big_date(now):
+    """Godzina i data obok siebie tą samą czcionką i wielkością. Najpełniej, jak się mieści z odstępami co
+    najmniej 4 diody: z sekundami i rokiem, potem bez roku, na końcu bez sekund."""
+    font = CLOCK_FONTS[CLOCK["font"]][1]
+    full, short = f"{now.day:02d}.{now.month:02d}.{now.year}", f"{now.day:02d}.{now.month:02d}"
+    times = ["%H:%M:%S", "%H:%M"] if CLOCK["secs"] else ["%H:%M"]
+    for fmt, d in [(fmt, d) for fmt in times for d in (full, short)]:
+        tw, dw = text_w(now.strftime(fmt), font), text_w(d, font)
+        free = W - tw - dw
+        if free >= 12:
+            break
+    gap = free // 3
+    x = (free - gap) // 2
+    return [_box("czas", x, 0, tw, H), dict(_box("data", x + tw + gap, 0, dw, H, "c"), big=True),
+            _box("dzien", 0, 0, W, 7, "c", False)]
+
+
 CLOCK_LAYOUTS = [("klasyczny", _layout_classic), ("odwrócony", _layout_mirror),
                  ("dzień | godzina | data", _layout_sides("dzien", "data")),
                  ("data | godzina | dzień", _layout_sides("data", "dzien")), ("sama godzina", _layout_alone),
-                 ("godzina + dzień", _layout_with("dzien")), ("godzina + data", _layout_with("data")),
+                 ("godzina + dzień", _layout_with("dzien")), ("godzina + data", _layout_big_date),
                  ("w jednej linii", _layout_line), ("poświata", _layout_styled("cienka")),
                  ("klapki", _layout_styled("klapki"))]
 CLOCK_GLOW = len(CLOCK_LAYOUTS) - 2  # „poświata”

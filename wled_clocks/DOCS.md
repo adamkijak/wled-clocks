@@ -128,8 +128,9 @@ a wyszukiwarka przeszukuje wszystkie.
 
 Efekt **zegar** ma w ustawieniach efektu **układ**: klasyczny (godzina, obok dzień tygodnia nad datą),
 odwrócony, dzień | godzina | data, data | godzina | dzień, sama godzina, godzina + dzień, godzina + data, w jednej linii,
-poświata albo klapki, oraz **sekundy** (z sekundami albo bez). W układach poza „w jednej linii” napisy mają ten sam rozmiar co
-w klasycznym: godzina w wybranej czcionce, dzień i data małą czcionką w jej stylu. „W jednej linii” pisze dzień,
+poświata albo klapki, oraz **sekundy** (z sekundami albo bez). W większości układów napisy mają ten sam rozmiar co
+w klasycznym: godzina w wybranej czcionce, dzień i data małą czcionką w jej stylu. W „godzina + data” data jest
+tą samą czcionką i wielkością co godzina – z rokiem, gdy się mieści (np. przy czcionce „cienka”), inaczej DD.MM. „W jednej linii” pisze dzień,
 datę i godzinę jedną czcionką z literami (7 wierszy), więc wszystkie są tej samej wielkości: przy 120 kolumnach
 „Pon. 09.11 23:58:48” (rok i pełna nazwa dnia się nie mieszczą; krótkie nazwy, jak „Środa”, są w całości).
 „Poświata” pisze obok godziny dzień (PON, WTO, ŚRO…) i datę cienkimi literami w stylu czcionki „cienka”, a wokół

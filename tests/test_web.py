@@ -1183,7 +1183,7 @@ class PlainClockTest(unittest.TestCase):
                                 f = wc.Frame()
                                 wc.clock_box(f, now, b, (255, 255, 255))
                                 self.assertTrue(lit(f), (fi, li, b["el"]))           # nic nie znika
-                                if not b.get("txt") and not b.get("style"):
+                                if not (b.get("txt") or b.get("style") or b.get("big")):
                                     heights.add((b["el"], rows(f)))
                         f = wc.Frame()
                         wc.CLOCKS["zegar"]().draw(f, now, 1.0, 0.05)
@@ -1216,6 +1216,19 @@ class PlainClockTest(unittest.TestCase):
                     wc.CLOCKS["zegar"]().draw(f, now.replace(day=day), 1.0, 0.05)
                     self.assertEqual(levels(f), {(255, 255, 255), wc.mul((255, 255, 255), wc.CLOCK_DIM)}, name)
                     self.assertTrue({y for y, row in enumerate(f.px) if any(row)} >= set(range(1, 11)))
+            # „godzina + data”: data tą samą czcionką i wielkością co godzina (te same wiersze), w każdej czcionce
+            wc.CLOCK["layout"] = names.index("godzina + data")
+            for fi in range(len(wc.CLOCK_FONTS)):
+                wc.CLOCK["font"] = fi
+                spans = {}
+                for b in wc.clock_layout(now):
+                    if b["on"]:
+                        f = wc.Frame()
+                        wc.clock_box(f, now, b, (255, 255, 255))
+                        spans[b["el"]] = (min(x for x, _ in lit(f)), max(x for x, _ in lit(f)), {y for _, y in lit(f)})
+                self.assertEqual(set(spans), {"czas", "data"})
+                self.assertEqual(spans["czas"][2], spans["data"][2], wc.CLOCK_FONTS[fi][0])
+                self.assertGreaterEqual(spans["data"][0] - spans["czas"][1], 4)
             wc.CLOCK.update(font=0, layout=0)
             e = wc.Engine(args(mode="zegar"), {})
             self.assertIn("układ", [st[0] for st in e.shown_settings()])
