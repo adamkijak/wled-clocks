@@ -290,6 +290,26 @@ SLIM = _rows({  # 4x10, kreska 1 px – wąska
     "9": ".##.|#..#|#..#|#..#|#..#|.###|...#|...#|#..#|.##.",
     ":": ".|.|.|#|.|.|#|.|.|.", " ": "..|..|..|..|..|..|..|..|..|..",
 })
+# litery w stylu THIN do dnia tygodnia (CLOCK_DAYS3) i kropka do daty – układy „poświata” i „klapki”
+THIN_TXT = dict(THIN, **_rows({
+    "A": ".###.|#...#|#...#|#...#|#...#|#####|#...#|#...#|#...#|#...#",
+    "B": "####.|#...#|#...#|#...#|####.|#...#|#...#|#...#|#...#|####.",
+    "C": ".###.|#...#|#....|#....|#....|#....|#....|#....|#...#|.###.",
+    "D": "####.|#...#|#...#|#...#|#...#|#...#|#...#|#...#|#...#|####.",
+    "I": "###|.#.|.#.|.#.|.#.|.#.|.#.|.#.|.#.|###",
+    "N": "#...#|##..#|##..#|#.#.#|#.#.#|#..##|#..##|#...#|#...#|#...#",
+    "O": ".###.|#...#|#...#|#...#|#...#|#...#|#...#|#...#|#...#|.###.",
+    "P": "####.|#...#|#...#|#...#|####.|#....|#....|#....|#....|#....",
+    "R": "####.|#...#|#...#|#...#|####.|#.#..|#..#.|#..#.|#...#|#...#",
+    "S": ".###.|#...#|#....|#....|.###.|....#|....#|....#|#...#|.###.",
+    "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..|..#..|..#..|..#..",
+    "W": "#...#|#...#|#...#|#...#|#...#|#...#|#.#.#|#.#.#|##.##|#...#",
+    "Z": "#####|....#|...#.|...#.|..#..|..#..|.#...|.#...|#....|#####",
+    ".": ".|.|.|.|.|.|.|.|.|#",
+}))
+THIN7 = {k: [g[i] for i in (0, 1, 3, 4, 5, 8, 9)] for k, g in THIN_TXT.items()}  # te same znaki w 7 wierszach
+
+
 def _thick(g):
     """Znak pogrubiony o 1 px w poziomie."""
     return ["".join("#" if "#" in (r + ".")[i:i + 1] + ("." + r)[i:i + 1] else "." for i in range(len(r) + 1)) for r in g]
@@ -7014,9 +7034,66 @@ def clock_candidates(el, now, txt=False):
     return [f"{now.day:02d}.{now.month:02d}.{now.year}", f"{now.day:02d}.{now.month:02d}"], [(ff, False) for ff in fdates]
 
 
+CLOCK_DAYS3 = ["PON", "WTO", "ŚRO", "CZW", "PIĄ", "SOB", "NDZ"]
+CLOCK_DIM = 0.2  # jasność poświaty i kafelków względem koloru zegara
+_THIN_PL = {"Ś": "S", "Ą": "A"}
+
+
+def thin_w(t, font=THIN_TXT):
+    return sum(len(font[_THIN_PL.get(ch, ch)][0]) for ch in t) + len(t) - 1
+
+
+def thin_px(t, x, y, font=THIN_TXT):
+    """Napis czcionką THIN_TXT/THIN7; kreska nad Ś w wierszu nad literą, ogonek Ą – pod nią."""
+    out, h = [], len(font["0"])
+    for ch in t:
+        g = font[_THIN_PL.get(ch, ch)]
+        gw = len(g[0])
+        out += [(x + i, y + j) for j, r in enumerate(g) for i, v in enumerate(r) if v == "#"]
+        if ch == "Ś":
+            out += [(x + gw // 2, y - 1), (x + gw // 2 + 1, y - 1)]
+        elif ch == "Ą":
+            out.append((x + gw - 1, y + h))
+        x += gw + 1
+    return out
+
+
+def tiles_w(t):
+    """Szerokość napisu na klapkach: znak na kafelku 7 px + 1 px przerwy, kropka 3 px."""
+    return sum(3 if ch == "." else 8 for ch in t) - (t[-1] != ".")
+
+
+def clock_styled(f, now, b, c):
+    """Dzień (CLOCK_DAYS3) albo data DD.MM cienkimi literami („cienka”) albo na przygaszonych kafelkach z kreską
+    pośrodku, jak zegar z klapkami („klapki”)."""
+    t = CLOCK_DAYS3[now.weekday()] if b["el"] == "dzien" else f"{now.day:02d}.{now.month:02d}"
+    y = b["y"] + (b["h"] - 10) // 2
+    if b["style"] == "cienka":
+        f.draw(thin_px(t, b["x"] + (b["w"] - thin_w(t)) // 2, y), c)
+        return
+    x, dim = b["x"] + (b["w"] - tiles_w(t)) // 2, mul(c, CLOCK_DIM)
+    for ch in t:
+        if ch == ".":
+            f.set(x + 1, y + 8, c)
+            x += 3
+            continue
+        f.draw([(x + i, y + j) for j in range(10) if j != 4 for i in range(7)], dim)
+        f.draw(thin_px(ch, x + 1, y + 1, THIN7), c)
+        x += 8
+
+
+def clock_glow(f, c):
+    """Poświata: zgaszone diody tuż obok zapalonych (góra, dół, boki) świecą słabo."""
+    lit = {(x, y) for y, row in enumerate(f.px) for x, v in enumerate(row) if v != (0, 0, 0)}
+    dim = mul(c, CLOCK_DIM)
+    f.draw({(x + dx, y + dy) for x, y in lit for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))} - lit, dim)
+
+
 def clock_box(f, now, b, c):
     """Element zegara w prostokącie b: pierwszy napis i czcionka, które się mieszczą; wyrównanie z b["align"],
     w pionie na środek. Nic się nie mieści – element znika (lepsze niż ucięte litery)."""
+    if b.get("style"):
+        return clock_styled(f, now, b, c)
     texts, fonts = clock_candidates(b["el"], now, b.get("txt"))
     for t, (font, small) in ((t, ff) for t in texts for ff in fonts):
         t = clock_text(b["el"], t, small)
@@ -7106,11 +7183,32 @@ def _layout_line(now):
     return sorted(out, key=lambda b: CLOCK_ELS.index(b["el"]))
 
 
+def _layout_styled(style):
+    """Godzina, obok dzień i data cienkimi literami („cienka”) albo na klapkach; szerokości dla najszerszego dnia,
+    więc nic nie skacze. Gdy się nie mieści z sekundami – godzina bez sekund."""
+    def lay(now):
+        font = CLOCK_FONTS[CLOCK["font"]][1]
+        width = thin_w if style == "cienka" else tiles_w
+        wd, wa, inner = max(map(width, CLOCK_DAYS3)), width("00.00"), 6 if style == "cienka" else 5
+        for fmt in ("%H:%M:%S", "%H:%M") if CLOCK["secs"] else ("%H:%M",):
+            tw = text_w(now.strftime(fmt), font)
+            free = W - tw - wd - wa - inner
+            if free >= 6:
+                break
+        gap = free // 3
+        x = (free - gap) // 2
+        return [_box("czas", x, 0, tw, H), dict(_box("dzien", x + tw + gap, 0, wd, H, "c"), style=style),
+                dict(_box("data", x + tw + gap + wd + inner, 0, wa, H, "c"), style=style)]
+    return lay
+
+
 CLOCK_LAYOUTS = [("klasyczny", _layout_classic), ("odwrócony", _layout_mirror),
                  ("dzień | godzina | data", _layout_sides("dzien", "data")),
                  ("data | godzina | dzień", _layout_sides("data", "dzien")), ("sama godzina", _layout_alone),
                  ("godzina + dzień", _layout_with("dzien")), ("godzina + data", _layout_with("data")),
-                 ("w jednej linii", _layout_line)]
+                 ("w jednej linii", _layout_line), ("poświata", _layout_styled("cienka")),
+                 ("klapki", _layout_styled("klapki"))]
+CLOCK_GLOW = len(CLOCK_LAYOUTS) - 2  # „poświata”
 CLOCK_ALONE = 4  # „sama godzina” – przy 60 kolumnach jedyny układ bez przełączania stron
 
 
@@ -7147,6 +7245,8 @@ class PlainClock(Clock):
         for b in clock_layout(now):  # wszystko jednym kolorem
             if b["on"]:
                 clock_box(f, now, b, c)
+        if CLOCK["layout"] == CLOCK_GLOW and not clock_pages():
+            clock_glow(f, c)
 
 
 # ---------------------------------------------------------------- test kolorów (kalibracja podglądu)

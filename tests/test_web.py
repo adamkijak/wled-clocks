@@ -1183,12 +1183,13 @@ class PlainClockTest(unittest.TestCase):
                                 f = wc.Frame()
                                 wc.clock_box(f, now, b, (255, 255, 255))
                                 self.assertTrue(lit(f), (fi, li, b["el"]))           # nic nie znika
-                                if not b.get("txt"):
+                                if not b.get("txt") and not b.get("style"):
                                     heights.add((b["el"], rows(f)))
                         f = wc.Frame()
                         wc.CLOCKS["zegar"]().draw(f, now, 1.0, 0.05)
-                        frames.add(frozenset(lit(f)))
-                self.assertEqual(len(frames), 2 * n, wc.CLOCK_FONTS[fi][0])     # każdy układ wygląda inaczej
+                        frames.add((secs, frozenset(lit(f))))
+                for secs in (True, False):                                      # każdy układ wygląda inaczej
+                    self.assertEqual(len({fr for s_, fr in frames if s_ == secs}), n, wc.CLOCK_FONTS[fi][0])
                 self.assertEqual(len(heights), 3, (wc.CLOCK_FONTS[fi][0], heights))  # jedna wysokość na element
             # „w jednej linii”: godzina, dzień i data tą samą czcionką, na jednej linii bazowej, bez nachodzenia
             wc.CLOCK.update(font=0, secs=True, layout=[n for n, _ in wc.CLOCK_LAYOUTS].index("w jednej linii"))
@@ -1205,6 +1206,17 @@ class PlainClockTest(unittest.TestCase):
                 order = sorted(spans.values(), key=lambda v: v[0])
                 self.assertTrue(all(a[1] + 3 <= b[0] for a, b in zip(order, order[1:])), spans)
                 self.assertEqual(len(order[-1][2]), 7)
+            # „poświata” i „klapki”: cienkie litery dnia, poświata wokół wszystkiego, kafelki przygaszone
+            names = [n_ for n_, _ in wc.CLOCK_LAYOUTS]
+            levels = lambda f: {c for row in f.px for c in row} - {(0, 0, 0)}
+            for name in ("poświata", "klapki"):
+                wc.CLOCK.update(font=3, secs=True, layout=names.index(name))
+                for day in range(9, 16):
+                    f = wc.Frame()
+                    wc.CLOCKS["zegar"]().draw(f, now.replace(day=day), 1.0, 0.05)
+                    self.assertEqual(levels(f), {(255, 255, 255), wc.mul((255, 255, 255), wc.CLOCK_DIM)}, name)
+                    self.assertTrue({y for y, row in enumerate(f.px) if any(row)} >= set(range(1, 11)))
+            wc.CLOCK.update(font=0, layout=0)
             e = wc.Engine(args(mode="zegar"), {})
             self.assertIn("układ", [st[0] for st in e.shown_settings()])
             wc.CLOCK["layout"] = 2

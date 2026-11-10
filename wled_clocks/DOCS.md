@@ -127,11 +127,14 @@ przeglądarka to pamięta. Na początku rozwinięte jest tylko „Na start”; k
 a wyszukiwarka przeszukuje wszystkie.
 
 Efekt **zegar** ma w ustawieniach efektu **układ**: klasyczny (godzina, obok dzień tygodnia nad datą),
-odwrócony, dzień | godzina | data, data | godzina | dzień, sama godzina, godzina + dzień, godzina + data albo w jednej
-linii, oraz **sekundy** (z sekundami albo bez). W układach poza „w jednej linii” napisy mają ten sam rozmiar co
+odwrócony, dzień | godzina | data, data | godzina | dzień, sama godzina, godzina + dzień, godzina + data, w jednej linii,
+poświata albo klapki, oraz **sekundy** (z sekundami albo bez). W układach poza „w jednej linii” napisy mają ten sam rozmiar co
 w klasycznym: godzina w wybranej czcionce, dzień i data małą czcionką w jej stylu. „W jednej linii” pisze dzień,
 datę i godzinę jedną czcionką z literami (7 wierszy), więc wszystkie są tej samej wielkości: przy 120 kolumnach
-„Pon. 09.11 23:58:48” (rok i pełna nazwa dnia się nie mieszczą; krótkie nazwy, jak „Środa”, są w całości). Gdy brakuje miejsca, napis się skraca (dzień do
+„Pon. 09.11 23:58:48” (rok i pełna nazwa dnia się nie mieszczą; krótkie nazwy, jak „Środa”, są w całości).
+„Poświata” pisze obok godziny dzień (PON, WTO, ŚRO…) i datę cienkimi literami w stylu czcionki „cienka”, a wokół
+każdej kreski – także cyfr godziny – świeci słaba poświata. „Klapki” rysują dzień i datę tymi literami na
+przygaszonych kafelkach z kreską pośrodku, jak zegar z klapkami. Oba najlepiej wyglądają z czcionką „cienka”. Gdy brakuje miejsca, napis się skraca (dzień do
 „PON.”, godzina bez sekund), a nie zmniejsza. Przy 60 kolumnach układy (poza „samą godziną”) pokazują dzień i datę
 na zmianę z godziną.
 

@@ -1,5 +1,10 @@
 # Zmiany
 
+## 1.39.0
+
+- Zegar: układy **poświata** (dzień i data cienkimi literami w stylu czcionki „cienka”, słaba poświata wokół
+  wszystkich kresek) i **klapki** (dzień i data na przygaszonych kafelkach z kreską pośrodku).
+
 ## 1.38.0
 
 - Zegar: układ **w jednej linii** – dzień, data i godzina tą samą czcionką (7 wierszy, z polskimi znakami), czyli
